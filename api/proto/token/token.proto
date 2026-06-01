@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package token;
+
+option go_package = "ego/api/gen/go/token";
+
+import "google/api/annotations.proto";
+
+service TokenService {
+  rpc GenerateToken(GenerateTokenRequest)
+    returns (GenerateTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/generate"
+      body: "*"
+    };
+  }
+
+  rpc ValidateToken(ValidateTokenRequest)
+    returns (ValidateTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/validate"
+      body: "*"
+    };
+  }
+}
+
+message GenerateTokenRequest {
+    string user_id = 1;
+}
+
+message GenerateTokenResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+message ValidateTokenRequest {
+    string token = 1;
+}
+
+message ValidateTokenResponse {
+    bool is_valid = 1;
+    string user_id = 2;
+}

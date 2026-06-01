@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package users;
+
+option go_package = "ego/api/gen/go/users";
+
+import "google/api/annotations.proto";
+
+service UserService {
+  rpc UpsertUser(UpsertUserRequest) returns (UpsertUserResponse) {
+    option (google.api.http) = {
+      post: "/v1/users/upsert"
+      body: "*"
+    };
+  }
+}
+
+message UpsertUserRequest {
+    string email = 1;
+    string name = 2;
+    string avatar = 3;
+}
+
+message UpsertUserResponse {
+    string id = 1;
+}
