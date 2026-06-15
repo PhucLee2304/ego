@@ -48,11 +48,12 @@ func (r *UserRepository) GetByID(ctx context.Context, userID string) (*model.Use
 func (r *UserRepository) UpdateMe(ctx context.Context, user *model.User) (*model.User, error) {
 	if err := r.db.WithContext(ctx).
 		Model(&model.User{}).
+		Clauses(clause.Returning{}).
 		Where("id = ?", user.ID).
 		Updates(map[string]any{
 			"name":   user.Name,
 			"avatar": user.Avatar,
-		}).Error; err != nil {
+		}).Scan(user).Error; err != nil {
 		return nil, err
 	}
 	return user, nil

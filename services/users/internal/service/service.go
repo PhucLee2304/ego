@@ -39,6 +39,7 @@ func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, error) {
 		Email:  user.Email,
 		Name:   user.Name,
 		Avatar: user.Avatar,
+		Role:   string(user.Role),
 	}, nil
 }
 
@@ -64,6 +65,7 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 		Email:  user.Email,
 		Name:   user.Name,
 		Avatar: user.Avatar,
+		Role:   string(user.Role),
 	}, nil
 }
 
@@ -80,6 +82,7 @@ func (s *service) GetList(ctx context.Context) ([]*dto.User, error) {
 			Email:  user.Email,
 			Name:   user.Name,
 			Avatar: user.Avatar,
+			Role:   string(user.Role),
 		}
 	}
 

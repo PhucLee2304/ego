@@ -5,6 +5,7 @@ type User struct {
 	Email  string  `json:"email"`
 	Name   string  `json:"name"`
 	Avatar *string `json:"avatar"`
+	Role   string  `json:"role"`
 }
 
 type UpdateUserBody struct {
