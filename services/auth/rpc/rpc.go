@@ -35,6 +35,7 @@ func (s *server) ValidateToken(ctx context.Context, req *token.ValidateTokenRequ
 		return nil, err
 	}
 	return &token.ValidateTokenResponse{
+		IsValid: true,
 		UserId: userId,
 	}, nil
 }
