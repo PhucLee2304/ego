@@ -1,0 +1,30 @@
+# Git
+.git/
+.gitignore
+
+# Database and Storage Data
+data/
+db/
+storage/
+services/storage/seed/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Go Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Temporary files
+tmp/
+temp/
+*.log

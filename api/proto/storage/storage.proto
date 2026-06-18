@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package storage;
+
+option go_package = "ego/api/gen/go/storage";
+
+import "google/api/annotations.proto";
+
+service StorageService {
+  rpc GeneratePresignedUploadURL(GeneratePresignedUploadURLRequest)
+    returns (GeneratePresignedUploadURLResponse) {
+    option (google.api.http) = {
+      post: "/v1/storage/presign/upload"
+      body: "*"
+    };
+  }
+
+  rpc GeneratePresignedDownloadURL(GeneratePresignedDownloadURLRequest)
+    returns (GeneratePresignedDownloadURLResponse) {
+    option (google.api.http) = {
+      post: "/v1/storage/presign/download"
+      body: "*"
+    };
+  }
+
+  rpc GetPublicURL(GetPublicURLRequest)
+    returns (GetPublicURLResponse) {
+    option (google.api.http) = {
+      post: "/v1/storage/url"
+      body: "*"
+    };
+  }
+}
+
+message GeneratePresignedUploadURLRequest {
+  repeated string folders = 1;
+  string file_name = 2;
+  string content_type = 3;
+}
+
+message GeneratePresignedUploadURLResponse {
+  string url = 1;
+}
+
+message GeneratePresignedDownloadURLRequest {
+  repeated string folders = 1;
+  string file_name = 2;
+}
+
+message GeneratePresignedDownloadURLResponse {
+  string url = 1;
+}
+
+message GetPublicURLRequest {
+  repeated string folders = 1;
+  string file_name = 2;
+}
+
+message GetPublicURLResponse {
+  string url = 1;
+}

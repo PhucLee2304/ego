@@ -32,9 +32,10 @@ import (
 // @description     This is the API for the Auth Service.
 // @host            localhost
 // @BasePath        /auth/api/v1
-// @securityDefinitions.apikey ApiKeyAuth
+// @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
+// @description Paste JWT token only. Swagger UI will add "Bearer" automatically.
 
 func main() {
 	logger.Setup(logger.LoggerConfig{Level: "debug", Pretty: true})
@@ -74,7 +75,18 @@ func main() {
 		w.Write([]byte(`{"status":"OK"}`))
 	})
 
-	mux.Handle("/docs/", httpSwagger.WrapHandler)
+	mux.Handle("/docs/", httpSwagger.Handler(
+		httpSwagger.PersistAuthorization(true),
+		httpSwagger.UIConfig(map[string]string{
+			"requestInterceptor": `(req) => {
+				const auth = req.headers.Authorization;
+				if (auth && !auth.toLowerCase().startsWith("bearer ")) {
+					req.headers.Authorization = "Bearer " + auth;
+				}
+				return req;
+			}`,
+		}),
+	))
 
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))

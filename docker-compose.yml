@@ -18,7 +18,8 @@ services:
       URLS: >
         [
           { "url": "/auth/docs/doc.json", "name": "Auth" },
-          { "url": "/users/docs/doc.json", "name": "Users" }
+          { "url": "/users/docs/doc.json", "name": "Users" },
+          { "url": "/storage/docs/doc.json", "name": "Storage" }
         ]
     networks:
       - ego-network
@@ -36,6 +37,8 @@ services:
       users:
         condition: service_healthy
       auth:
+        condition: service_healthy
+      storage:
         condition: service_healthy
     networks:
       - ego-network
@@ -82,6 +85,18 @@ services:
       - ./services/auth/.env
     volumes:
       - ./platform/credentials:/app/platform/credentials:ro
+
+  storage:
+    <<: *go-service
+    build:
+      context: .
+      dockerfile: services/storage/Dockerfile
+    container_name: storage
+    env_file:
+      - ./services/storage/.env
+    depends_on:
+      auth:
+        condition: service_healthy
 
 networks:
   ego-network:
