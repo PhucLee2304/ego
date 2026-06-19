@@ -2,15 +2,11 @@ package main
 
 import (
 	"context"
-	storageClient "ego/api/gen/go/storage"
 	tokenClient "ego/api/gen/go/token"
 	"ego/platform/jwt"
 	"ego/platform/logger"
-	storageConfig "ego/services/storage/config"
-	"ego/services/storage/minio"
-	storageRpc "ego/services/storage/rpc"
-	"fmt"
-	"net"
+	topicsConfig "ego/services/topics/config"
+	"ego/services/topics/database"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,11 +18,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// @title           Storage Service API
+// @title           Topics Service API
 // @version         1.0
-// @description     This is the API for the Storage Service.
+// @description     This is the API for the Topics Service.
 // @host            localhost
-// @BasePath        /storage/api/v1
+// @BasePath        /topics/api/v1
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
@@ -44,14 +40,18 @@ func main() {
 		}
 	}()
 
-	appConfig, err := storageConfig.LoadAppConfig()
+	appConfig, err := topicsConfig.LoadAppConfig()
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
 	}
 
-	minioClient, err := minio.NewS3Client(appConfig)
+	db, err := database.Connect(appConfig)
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to initialize storage client")
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to database")
+	}
+
+	if err := database.Migrate(db); err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
 	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -93,26 +93,10 @@ func main() {
 		Handler: logger.Middleware(mux),
 	}
 
-	logger.Log.Info().Str("STORAGE_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting storage server")
+	logger.Log.Info().Str("TOPICS_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting topics server")
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start storage server")
-		}
-	}()
-
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", appConfig.GRPCPort))
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start storage gRPC server")
-	}
-
-	rpcServer := storageRpc.New(minioClient)
-	grpcServer := grpc.NewServer()
-	storageClient.RegisterStorageServiceServer(grpcServer, rpcServer)
-
-	logger.Log.Info().Str("STORAGE_GRPC_PORT", appConfig.GRPCPort).Msg("[STARTUP] Starting storage gRPC server")
-	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to serve storage gRPC")
+			logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start topics server")
 		}
 	}()
 
@@ -120,13 +104,11 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Log.Info().Msg("[SHUTDOWN] Shutting down storage server")
-	grpcServer.GracefulStop()
-
+	logger.Log.Info().Msg("[SHUTDOWN] Shutting down topics server")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		logger.Log.Error().Err(err).Msg("[SHUTDOWN] Failed to shut down storage server")
+		logger.Log.Error().Err(err).Msg("[SHUTDOWN] Failed to shut down topics server")
 	}
 }

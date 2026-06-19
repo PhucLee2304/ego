@@ -38,5 +38,6 @@ api/gen/
 **/credentials/*
 **/docs/
 **/docs/*
-services/storage/seed
-services/storage/seed/**
+services/topics/seed
+services/topics/seed/**
+**/PLAN.**

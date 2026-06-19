@@ -19,7 +19,8 @@ services:
         [
           { "url": "/auth/docs/doc.json", "name": "Auth" },
           { "url": "/users/docs/doc.json", "name": "Users" },
-          { "url": "/storage/docs/doc.json", "name": "Storage" }
+          { "url": "/storage/docs/doc.json", "name": "Storage" },
+          { "url": "/topics/docs/doc.json", "name": "Topics" }
         ]
     networks:
       - ego-network
@@ -39,6 +40,8 @@ services:
       auth:
         condition: service_healthy
       storage:
+        condition: service_healthy
+      topics:
         condition: service_healthy
     networks:
       - ego-network
@@ -97,6 +100,59 @@ services:
     depends_on:
       auth:
         condition: service_healthy
+
+  topics:
+    <<: *go-service
+    build:
+      context: .
+      dockerfile: services/topics/Dockerfile
+      target: server
+    container_name: topics
+    env_file:
+      - ./services/topics/.env
+    depends_on:
+      topics-db:
+        condition: service_healthy
+
+  topics-seed:
+    build:
+      context: .
+      dockerfile: services/topics/Dockerfile
+      target: seed
+    container_name: topics-seed
+    profiles:
+      - seed
+    env_file:
+      - ./services/topics/.env
+    volumes:
+      - ./services/topics/seed:/app/services/topics/seed:ro
+    depends_on:
+      topics-db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    networks:
+      - ego-network
+
+  topics-db:
+    image: postgres:15.8-alpine
+    container_name: topics-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TOPICS_DB_USER}
+      POSTGRES_PASSWORD: ${TOPICS_DB_PASSWORD}
+      POSTGRES_DB: ${TOPICS_DB_NAME}
+    ports:
+      - "${TOPICS_DB_PORT}:5432"
+    volumes:
+      - ./data/topics-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${TOPICS_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 networks:
   ego-network:

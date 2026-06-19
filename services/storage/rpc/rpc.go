@@ -2,8 +2,6 @@ package rpc
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	storageClient "ego/api/gen/go/storage"
 	"ego/services/storage/minio"
@@ -44,10 +42,22 @@ func (s *server) GeneratePresignedDownloadURL(ctx context.Context, req *storageC
 
 func (s *server) GetPublicURL(ctx context.Context, req *storageClient.GetPublicURLRequest) (*storageClient.GetPublicURLResponse, error) {
 	folders := toBucketFolders(req.Folders)
-	objectKey := minio.BuildObjectKey(folders, req.FileName)
-	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.minioClient.Endpoint, "/"), s.minioClient.Bucket, objectKey)
+	url, err := s.minioClient.GetPublicURL(folders, req.FileName)
+	if err != nil {
+		return nil, err
+	}
 	return &storageClient.GetPublicURLResponse{
-		Url: url,
+		Url: *url,
+	}, nil
+}
+
+func (s *server) DeleteFolder(ctx context.Context, req *storageClient.DeleteFolderRequest) (*storageClient.DeleteFolderResponse, error) {
+	deletedCount, err := s.minioClient.DeleteFolder(ctx, req.Folder)
+	if err != nil {
+		return nil, err
+	}
+	return &storageClient.DeleteFolderResponse{
+		DeletedCount: deletedCount,
 	}, nil
 }
 
