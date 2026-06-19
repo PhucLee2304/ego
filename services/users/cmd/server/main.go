@@ -96,8 +96,8 @@ func main() {
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
-	userRepo := repository.NewUserRepository(db)
-	service := service.New(userRepo)
+	repo := repository.NewRepository(db)
+	service := service.New(repo)
 	handler := handler.New(service)
 
 	roleMiddware := jwt.NewRoleMiddleware(service.GetRole)
@@ -115,7 +115,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start users gRPC server")
 	}
 
-	rpcServer := usersRpc.New(userRepo)
+	rpcServer := usersRpc.New(repo)
 	grpcServer := grpc.NewServer()
 	usersClient.RegisterUserServiceServer(grpcServer, rpcServer)
 

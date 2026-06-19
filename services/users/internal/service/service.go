@@ -14,15 +14,15 @@ type Service interface {
 }
 
 type service struct {
-	userRepo *repository.UserRepository
+	repo *repository.Repository
 }
 
-func New(userRepo *repository.UserRepository) Service {
-	return &service{userRepo: userRepo}
+func New(repo *repository.Repository) Service {
+	return &service{repo: repo}
 }
 
 func (s *service) GetRole(ctx context.Context, userID string) (string, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
 		return "", err
 	}
@@ -30,7 +30,7 @@ func (s *service) GetRole(ctx context.Context, userID string) (string, error) {
 }
 
 func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, error) {
 }
 
 func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 		user.Avatar = body.Avatar
 	}
 
-	user, err = s.userRepo.UpdateMe(ctx, user)
+	user, err = s.repo.UpdateMe(ctx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 }
 
 func (s *service) GetList(ctx context.Context) ([]*dto.User, error) {
-	users, err := s.userRepo.GetList(ctx)
+	users, err := s.repo.GetList(ctx)
 	if err != nil {
 		return nil, err
 	}

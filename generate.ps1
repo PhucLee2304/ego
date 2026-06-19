@@ -11,11 +11,11 @@ if ($Command -eq "swag" -or $Command -eq "all") {
     Write-Host "Generating Swagger docs for all services..."
     $services = Get-ChildItem -Path "services" -Directory
     foreach ($svc in $services) {
-        $mainGoPath = Join-Path $svc.FullName "cmd\main.go"
+        $mainGoPath = Join-Path $svc.FullName "cmd\server\main.go"
         if (Test-Path $mainGoPath) {
             Write-Host "--> Generating swag for $($svc.Name)"
             Push-Location $svc.FullName
-            swag init -g cmd/main.go -o docs --parseDependency --parseInternal
+            swag init -g cmd/server/main.go -o docs --parseDependency --parseInternal
             Pop-Location
         }
     }
