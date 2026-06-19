@@ -1,8 +1,8 @@
 package database
 
 import (
-	"ego/services/users/config"
-	"ego/services/users/internal/model"
+	"ego/services/topics/config"
+	"ego/services/topics/internal/model"
 	"errors"
 	"log"
 
@@ -27,7 +27,10 @@ func Migrate(db *gorm.DB) error {
 	log.Println("Running database migrations...")
 
 	err := db.AutoMigrate(
-		&model.User{},
+		&model.Topic{},
+		&model.Section{},
+		&model.Lesson{},
+		&model.Transcript{},
 	)
 	if err != nil {
 		return err

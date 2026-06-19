@@ -12,12 +12,13 @@ import (
 )
 
 type Client struct {
-	Client        *s3.Client
-	PresignClient *s3.PresignClient
-	Bucket        string
-	Endpoint      string
-	Host          string
-	Expiry        time.Duration
+	Client         *s3.Client
+	PresignClient  *s3.PresignClient
+	Bucket         string
+	Endpoint       string
+	Host           string
+	PublicEndpoint string
+	Expiry         time.Duration
 }
 
 func NewS3Client(cfg *config.AppConfig) (*Client, error) {
@@ -49,11 +50,12 @@ func NewS3Client(cfg *config.AppConfig) (*Client, error) {
 	presignClient := s3.NewPresignClient(publicS3Client)
 
 	return &Client{
-		Client:        internalS3Client,
-		PresignClient: presignClient,
-		Bucket:        cfg.R2Bucket,
-		Endpoint:      cfg.R2Endpoint,
-		Host:          cfg.R2Host,
-		Expiry:        cfg.R2Expiry,
+		Client:         internalS3Client,
+		PresignClient:  presignClient,
+		Bucket:         cfg.R2Bucket,
+		Endpoint:       cfg.R2Endpoint,
+		Host:           cfg.R2Host,
+		PublicEndpoint: cfg.R2PublicEndpoint,
+		Expiry:         cfg.R2Expiry,
 	}, nil
 }
