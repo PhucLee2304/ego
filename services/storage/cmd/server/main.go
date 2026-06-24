@@ -9,6 +9,7 @@ import (
 	storageConfig "ego/services/storage/config"
 	"ego/services/storage/minio"
 	storageRpc "ego/services/storage/rpc"
+	"ego/platform/rpc"
 	"fmt"
 	"net"
 	"net/http"
@@ -54,7 +55,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to initialize storage client")
 	}
 
-	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
 	}

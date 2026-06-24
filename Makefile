@@ -13,9 +13,9 @@ else
 swag:
 	@echo "Generating Swagger docs for all services..."
 	@for svc in services/* ; do \
-		if [ -d "$$svc" ] && [ -f "$$svc/cmd/main.go" ]; then \
+		if [ -d "$$svc" ] && [ -f "$$svc/cmd/server/main.go" ]; then \
 			echo "--> Generating swag for $$svc"; \
-			(cd "$$svc" && swag init -g cmd/main.go -o docs --parseDependency --parseInternal) ; \
+			(cd "$$svc" && swag init -g cmd/server/main.go -o docs --parseDependency --parseInternal) ; \
 		fi \
 	done
 

@@ -11,12 +11,12 @@ import (
 
 type server struct {
 	usersClient.UnimplementedUserServiceServer
-	userRepo *repository.UserRepository
+	repo *repository.Repository
 }
 
-func New(userRepo *repository.UserRepository) usersClient.UserServiceServer {
+func New(repo *repository.Repository) usersClient.UserServiceServer {
 	return &server{
-		userRepo: userRepo,
+		repo: repo,
 	}
 }
 
@@ -27,7 +27,7 @@ func (s *server) UpsertUser(ctx context.Context, req *usersClient.UpsertUserRequ
 		Avatar: &req.Avatar,
 	}
 
-	user, err := s.userRepo.UpsertUser(ctx, userModel)
+	user, err := s.repo.UpsertUser(ctx, userModel)
 	if err != nil {
 		return nil, err
 	}

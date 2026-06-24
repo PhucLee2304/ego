@@ -9,6 +9,6 @@ type User struct {
 }
 
 type UpdateUserBody struct {
-	Name   *string `json:"name,omitempty" validate:"omitempty,min=1"`
-	Avatar *string `json:"avatar,omitempty" validate:"omitempty,min=1"`
+	Name   *string `json:"name,omitempty" validate:"omitempty,notblank,max=100"`
+	Avatar *string `json:"avatar,omitempty" validate:"omitempty,notblank,url"`
 }

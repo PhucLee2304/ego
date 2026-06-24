@@ -16,6 +16,7 @@ import (
 
 	storageClient "ego/api/gen/go/storage"
 	"ego/platform/logger"
+	"ego/platform/rpc"
 	"ego/services/topics/config"
 	"ego/services/topics/database"
 	"ego/services/topics/internal/model"
@@ -109,7 +110,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[SEED] Failed to migrate database")
 	}
 
-	conn, err := grpc.NewClient(appConfig.StorageServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(appConfig.StorageServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(20*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[SEED] Failed to connect to storage service")
 	}

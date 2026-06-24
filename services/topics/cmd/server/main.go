@@ -7,6 +7,10 @@ import (
 	"ego/platform/logger"
 	topicsConfig "ego/services/topics/config"
 	"ego/services/topics/database"
+	"ego/services/topics/internal/handler"
+	"ego/services/topics/internal/repository"
+	"ego/services/topics/internal/service"
+	"ego/platform/rpc"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +20,8 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	_ "ego/services/topics/docs"
 )
 
 // @title           Topics Service API
@@ -54,7 +60,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
-	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
 	}
@@ -87,6 +93,12 @@ func main() {
 
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
+
+	repo := repository.NewRepository(db)
+	service := service.New(repo)
+	handler := handler.New(service)
+
+	handler.RegisterRoutes(api, authMiddleware)
 
 	server := &http.Server{
 		Addr:    ":" + appConfig.Port,

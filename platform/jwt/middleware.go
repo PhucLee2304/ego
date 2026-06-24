@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"ego/api/gen/go/token"
+	"ego/platform/httpx"
 )
 
 type contextKey string
@@ -24,13 +25,13 @@ func (m *AuthMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "[JWT] Authorization header is required", http.StatusUnauthorized)
+			httpx.Error(w, http.StatusUnauthorized, "[JWT] Authorization header is required")
 			return
 		}
 
 		bearerToken := strings.Split(authHeader, " ")
 		if len(bearerToken) != 2 || strings.ToLower(bearerToken[0]) != "bearer" {
-			http.Error(w, "[JWT] Invalid authorization header format", http.StatusUnauthorized)
+			httpx.Error(w, http.StatusUnauthorized, "[JWT] Invalid authorization header format")
 			return
 		}
 
@@ -38,12 +39,20 @@ func (m *AuthMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 			Token: bearerToken[1],
 		})
 		if err != nil || !resp.IsValid {
-			http.Error(w, "[JWT] Invalid token", http.StatusUnauthorized)
+			httpx.Error(w, http.StatusUnauthorized, "[JWT] Invalid token")
 			return
 		}
 
 		ctx := context.WithValue(r.Context(), userIDKey, resp.UserId)
-		next(w, r.WithContext(ctx))
+		reqWithCtx := r.WithContext(ctx)
+
+		userID, ok := GetUserID(reqWithCtx.Context())
+		if !ok || userID == "" {
+			httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+			return
+		}
+
+		next(w, reqWithCtx)
 	}
 }
 
@@ -74,18 +83,18 @@ func (m *RoleMiddleware) RequireRole(roles ...string) func(http.HandlerFunc) htt
 		return func(w http.ResponseWriter, r *http.Request) {
 			userID, ok := GetUserID(r.Context())
 			if !ok || userID == "" {
-				http.Error(w, "[JWT] Unauthorized", http.StatusUnauthorized)
+				httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
 				return
 			}
 
 			role, err := m.roleResolver(r.Context(), userID)
 			if err != nil {
-				http.Error(w, "[JWT] Failed to resolve role", http.StatusInternalServerError)
+				httpx.Error(w, http.StatusInternalServerError, "[JWT] Failed to resolve role")
 				return
 			}
 
 			if _, ok := mp[role]; !ok {
-				http.Error(w, "[JWT] Forbidden: Access denied", http.StatusForbidden)
+				httpx.Error(w, http.StatusForbidden, "[JWT] Forbidden: Access denied")
 				return
 			}
 

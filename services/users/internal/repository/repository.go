@@ -9,19 +9,19 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type UserRepository struct {
+type Repository struct {
 	db *gorm.DB
 }
 
-func NewUserRepository(db *gorm.DB) *UserRepository {
-	return &UserRepository{db: db}
+func NewRepository(db *gorm.DB) *Repository {
+	return &Repository{db: db}
 }
 
-func (r *UserRepository) WithTx(tx *gorm.DB) *UserRepository {
-	return &UserRepository{db: tx}
+func (r *Repository) WithTx(tx *gorm.DB) *Repository {
+	return &Repository{db: tx}
 }
 
-func (r *UserRepository) UpsertUser(ctx context.Context, user *model.User) (*model.User, error) {
+func (r *Repository) UpsertUser(ctx context.Context, user *model.User) (*model.User, error) {
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "email"}},
 		DoNothing: true,
@@ -37,7 +37,7 @@ func (r *UserRepository) UpsertUser(ctx context.Context, user *model.User) (*mod
 	return dbUser, nil
 }
 
-func (r *UserRepository) GetByID(ctx context.Context, userID string) (*model.User, error) {
+func (r *Repository) GetByID(ctx context.Context, userID string) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error; err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (r *UserRepository) GetByID(ctx context.Context, userID string) (*model.Use
 	return &user, nil
 }
 
-func (r *UserRepository) UpdateMe(ctx context.Context, user *model.User) (*model.User, error) {
+func (r *Repository) UpdateMe(ctx context.Context, user *model.User) (*model.User, error) {
 	if err := r.db.WithContext(ctx).
 		Model(&model.User{}).
 		Clauses(clause.Returning{}).
@@ -59,10 +59,16 @@ func (r *UserRepository) UpdateMe(ctx context.Context, user *model.User) (*model
 	return user, nil
 }
 
-func (r *UserRepository) GetList(ctx context.Context) ([]*model.User, error) {
+func (r *Repository) GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error) {
 	var users []model.User
-	if err := r.db.WithContext(ctx).Find(&users).Error; err != nil {
-		return nil, err
+	var total int64
+
+	if err := r.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := r.db.WithContext(ctx).Limit(int(limit)).Offset(int(offset)).Find(&users).Error; err != nil {
+		return nil, 0, err
 	}
 
 	userPtrs := make([]*model.User, len(users))
@@ -70,5 +76,5 @@ func (r *UserRepository) GetList(ctx context.Context) ([]*model.User, error) {
 		userPtrs[i] = &users[i]
 	}
 
-	return userPtrs, nil
+	return userPtrs, total, nil
 }

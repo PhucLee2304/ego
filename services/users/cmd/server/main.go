@@ -12,6 +12,7 @@ import (
 	"ego/services/users/internal/repository"
 	"ego/services/users/internal/service"
 	usersRpc "ego/services/users/rpc"
+	"ego/platform/rpc"
 	"fmt"
 	"net"
 	"net/http"
@@ -64,7 +65,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
-	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
 	}
@@ -96,8 +97,8 @@ func main() {
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
-	userRepo := repository.NewUserRepository(db)
-	service := service.New(userRepo)
+	repo := repository.NewRepository(db)
+	service := service.New(repo)
 	handler := handler.New(service)
 
 	roleMiddware := jwt.NewRoleMiddleware(service.GetRole)
@@ -115,7 +116,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start users gRPC server")
 	}
 
-	rpcServer := usersRpc.New(userRepo)
+	rpcServer := usersRpc.New(repo)
 	grpcServer := grpc.NewServer()
 	usersClient.RegisterUserServiceServer(grpcServer, rpcServer)
 
