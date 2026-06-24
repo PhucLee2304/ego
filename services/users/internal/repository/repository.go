@@ -59,10 +59,16 @@ func (r *Repository) UpdateMe(ctx context.Context, user *model.User) (*model.Use
 	return user, nil
 }
 
-func (r *Repository) GetList(ctx context.Context) ([]*model.User, error) {
+func (r *Repository) GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error) {
 	var users []model.User
-	if err := r.db.WithContext(ctx).Find(&users).Error; err != nil {
-		return nil, err
+	var total int64
+
+	if err := r.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := r.db.WithContext(ctx).Limit(int(limit)).Offset(int(offset)).Find(&users).Error; err != nil {
+		return nil, 0, err
 	}
 
 	userPtrs := make([]*model.User, len(users))
@@ -70,5 +76,5 @@ func (r *Repository) GetList(ctx context.Context) ([]*model.User, error) {
 		userPtrs[i] = &users[i]
 	}
 
-	return userPtrs, nil
+	return userPtrs, total, nil
 }

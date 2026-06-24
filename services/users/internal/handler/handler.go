@@ -42,11 +42,7 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 // @Failure      500  {object}  httpx.ErrorResponse
 // @Router       /me [get]
 func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) {
-	userID, ok := jwt.GetUserID(r.Context())
-	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
-		return
-	}
+	userID, _ := jwt.GetUserID(r.Context())
 
 	user, err := h.service.GetMe(r.Context(), userID)
 	if err != nil {
@@ -71,11 +67,7 @@ func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  httpx.ErrorResponse
 // @Router       /me [patch]
 func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
-	userID, ok := jwt.GetUserID(r.Context())
-	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
-		return
-	}
+	userID, _ := jwt.GetUserID(r.Context())
 
 	var body dto.UpdateUserBody
 	if err := httpx.DecodeJSON(r, &body); err != nil {
@@ -104,23 +96,30 @@ func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Success      200  {array}  dto.User
+// @Param        page     query    int  false "Page number"
+// @Param        pageSize query    int  false "Page size"
+// @Success      200  {object}  httpx.PaginatedResponse[dto.User]
 // @Failure      400  {object}  httpx.ErrorResponse
 // @Failure      401  {object}  httpx.ErrorResponse
 // @Failure      500  {object}  httpx.ErrorResponse
 // @Router       /users [get]
 func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
-	_, ok := jwt.GetUserID(r.Context())
-	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+	var query httpx.PaginationQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
 		return
 	}
+	query.Normalize()
 
-	users, err := h.service.GetList(r.Context())
+	users, pageCounts, err := h.service.GetList(r.Context(), query)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, users)
+	httpx.JSON(w, http.StatusOK, httpx.PaginatedResponse[*dto.User]{
+		Data:       users,
+		Page:       int(query.Page),
+		PageCounts: pageCounts,
+	})
 }
