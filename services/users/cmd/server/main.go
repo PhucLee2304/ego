@@ -12,6 +12,7 @@ import (
 	"ego/services/users/internal/repository"
 	"ego/services/users/internal/service"
 	usersRpc "ego/services/users/rpc"
+	"ego/platform/rpc"
 	"fmt"
 	"net"
 	"net/http"
@@ -64,7 +65,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
-	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
 	}

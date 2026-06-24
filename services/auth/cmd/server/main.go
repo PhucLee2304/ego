@@ -12,6 +12,7 @@ import (
 	authHandler "ego/services/auth/internal/handler"
 	authService "ego/services/auth/internal/service"
 	authRpc "ego/services/auth/rpc"
+	"ego/platform/rpc"
 	"fmt"
 	"net"
 	"net/http"
@@ -93,7 +94,7 @@ func main() {
 
 	jwtManager := jwt.NewManager(jwtConfig)
 
-	usersConn, err := grpc.NewClient(appConfig.UsersServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	usersConn, err := grpc.NewClient(appConfig.UsersServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	logger.Log.Info().Str("USERS_SERVICE_ADDR", appConfig.UsersServiceAddr).Msg("[CONFIG] Connecting to users service")
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to users service")
@@ -101,7 +102,7 @@ func main() {
 	defer usersConn.Close()
 	usersClient := usersClient.NewUserServiceClient(usersConn)
 
-	tokenConn, err := grpc.NewClient("localhost:"+appConfig.GRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	tokenConn, err := grpc.NewClient("localhost:"+appConfig.GRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to token service")
 	}
