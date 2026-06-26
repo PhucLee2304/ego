@@ -45,18 +45,17 @@ func (r *Repository) GetByID(ctx context.Context, userID string) (*model.User, e
 	return &user, nil
 }
 
-func (r *Repository) UpdateMe(ctx context.Context, user *model.User) (*model.User, error) {
+func (r *Repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {
+	var user model.User
 	if err := r.db.WithContext(ctx).
 		Model(&model.User{}).
 		Clauses(clause.Returning{}).
-		Where("id = ?", user.ID).
-		Updates(map[string]any{
-			"name":   user.Name,
-			"avatar": user.Avatar,
-		}).Scan(user).Error; err != nil {
+		Where("id = ?", userID).
+		Updates(updates).
+		Scan(&user).Error; err != nil {
 		return nil, err
 	}
-	return user, nil
+	return &user, nil
 }
 
 func (r *Repository) GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error) {

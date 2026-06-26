@@ -10,6 +10,7 @@ const (
 	FolderTopics      BucketFolder = "topics"
 	FolderLessons     BucketFolder = "lessons"
 	FolderTranscripts BucketFolder = "transcripts"
+	FolderAvatars     BucketFolder = "avatars"
 )
 
 func BuildObjectKey(folders []BucketFolder, fileName string) string {

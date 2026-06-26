@@ -7,12 +7,12 @@ type User struct {
 	Email  string `gorm:"not null;unique"`
 	Name   string `gorm:"not null"`
 	Avatar *string
-	Role   RoleName `gorm:"not null;default:client"`
+	Role   RoleName `gorm:"not null;default:CLIENT"`
 }
 
 type RoleName string
 
 const (
-	RoleClient RoleName = "client"
-	RoleAdmin  RoleName = "admin"
+	RoleClient RoleName = "CLIENT"
+	RoleAdmin  RoleName = "ADMIN"
 )

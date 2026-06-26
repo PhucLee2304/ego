@@ -1,4 +1,4 @@
-.PHONY: swag protoc
+.PHONY: swag protoc build
 
 ifeq ($(OS),Windows_NT)
 
@@ -33,3 +33,10 @@ protoc:
 	done
 
 endif
+
+build:
+	docker compose stop $(filter-out $@,$(MAKECMDGOALS))
+	docker compose up -d --build $(filter-out $@,$(MAKECMDGOALS))
+
+%:
+	@:

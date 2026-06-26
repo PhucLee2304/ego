@@ -17,7 +17,8 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr string
+	AuthServiceAddr    string
+	StorageServiceAddr string
 }
 
 func LoadAppConfig() (*AppConfig, error) {
@@ -32,7 +33,8 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "23042004"),
 		DBName:     getEnv("DB_NAME", "usersdb"),
 
-		AuthServiceAddr: getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		AuthServiceAddr:    getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		StorageServiceAddr: getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
