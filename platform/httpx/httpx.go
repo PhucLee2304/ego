@@ -34,8 +34,8 @@ type PaginatedResponse[T any] struct {
 }
 
 type PaginationQuery struct {
-	Page     int32 `schema:"page"`
-	PageSize int32 `schema:"pageSize"`
+	Page     int32 `schema:"page" default:"1"`
+	PageSize int32 `schema:"pageSize" default:"10"`
 }
 
 func (q *PaginationQuery) Normalize() {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	storageClient "ego/api/gen/go/storage"
 	"ego/platform/httpx"
 	"ego/services/users/internal/dto"
 	"ego/services/users/internal/repository"
@@ -15,11 +16,12 @@ type Service interface {
 }
 
 type service struct {
-	repo *repository.Repository
+	repo          *repository.Repository
+	storageClient storageClient.StorageServiceClient
 }
 
-func New(repo *repository.Repository) Service {
-	return &service{repo: repo}
+func New(repo *repository.Repository, storageClient storageClient.StorageServiceClient) Service {
+	return &service{repo: repo, storageClient: storageClient}
 }
 
 func (s *service) GetRole(ctx context.Context, userID string) (string, error) {
@@ -45,19 +47,22 @@ func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, error) {
 }
 
 func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, error) {
-	user, err := s.repo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
+	updates := map[string]any{}
 	if body.Name != nil {
-		user.Name = *body.Name
+		updates["name"] = *body.Name
 	}
 	if body.Avatar != nil {
-		user.Avatar = body.Avatar
+		resp, err := s.storageClient.GetPublicURL(ctx, &storageClient.GetPublicURLRequest{
+			Folders:  []string{"avatars"},
+			FileName: *body.Avatar,
+		})
+		if err != nil {
+			return nil, err
+		}
+		updates["avatar"] = resp.Url
 	}
 
-	user, err = s.repo.UpdateMe(ctx, user)
+	user, err := s.repo.UpdateMe(ctx, userID, updates)
 	if err != nil {
 		return nil, err
 	}

@@ -6,10 +6,12 @@ import (
 	tokenClient "ego/api/gen/go/token"
 	"ego/platform/jwt"
 	"ego/platform/logger"
+	"ego/platform/rpc"
 	storageConfig "ego/services/storage/config"
+	"ego/services/storage/internal/handler"
+	"ego/services/storage/internal/service"
 	"ego/services/storage/minio"
 	storageRpc "ego/services/storage/rpc"
-	"ego/platform/rpc"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +23,8 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	_ "ego/services/storage/docs"
 )
 
 // @title           Storage Service API
@@ -45,6 +49,7 @@ func main() {
 		}
 	}()
 
+	ctx := context.Background()
 	appConfig, err := storageConfig.LoadAppConfig()
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
@@ -63,7 +68,6 @@ func main() {
 
 	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
 	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
-	_ = authMiddleware
 
 	mux := http.NewServeMux()
 
@@ -88,6 +92,10 @@ func main() {
 
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
+
+	service := service.New(minioClient)
+	handler := handler.New(service)
+	handler.RegisterRoutes(api, authMiddleware)
 
 	server := &http.Server{
 		Addr:    ":" + appConfig.Port,

@@ -2,17 +2,18 @@ package main
 
 import (
 	"context"
+	storageClient "ego/api/gen/go/storage"
 	tokenClient "ego/api/gen/go/token"
 	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
 	"ego/platform/logger"
+	"ego/platform/rpc"
 	usersConfig "ego/services/users/config"
 	"ego/services/users/database"
 	"ego/services/users/internal/handler"
 	"ego/services/users/internal/repository"
 	"ego/services/users/internal/service"
 	usersRpc "ego/services/users/rpc"
-	"ego/platform/rpc"
 	"fmt"
 	"net"
 	"net/http"
@@ -73,6 +74,13 @@ func main() {
 	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
 	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
 
+	storageConn, err := grpc.NewClient(appConfig.StorageServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to storage service")
+	}
+	defer storageConn.Close()
+	storageServiceClient := storageClient.NewStorageServiceClient(storageConn)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +106,7 @@ func main() {
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
 	repo := repository.NewRepository(db)
-	service := service.New(repo)
+	service := service.New(repo, storageServiceClient)
 	handler := handler.New(service)
 
 	roleMiddware := jwt.NewRoleMiddleware(service.GetRole)
