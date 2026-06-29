@@ -40,4 +40,6 @@ api/gen/
 **/docs/*
 services/topics/seed
 services/topics/seed/**
+services/exams/seed
+services/exams/seed/**
 **/PLAN.**

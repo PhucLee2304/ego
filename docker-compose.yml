@@ -20,7 +20,8 @@ services:
           { "url": "/auth/docs/doc.json", "name": "Auth" },
           { "url": "/users/docs/doc.json", "name": "Users" },
           { "url": "/storage/docs/doc.json", "name": "Storage" },
-          { "url": "/topics/docs/doc.json", "name": "Topics" }
+          { "url": "/topics/docs/doc.json", "name": "Topics" },
+          { "url": "/exams/docs/doc.json", "name": "Exams" }
         ]
     networks:
       - ego-network
@@ -42,6 +43,8 @@ services:
       storage:
         condition: service_healthy
       topics:
+        condition: service_healthy
+      exams:
         condition: service_healthy
     networks:
       - ego-network
@@ -150,6 +153,63 @@ services:
       - ego-network
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${TOPICS_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  exams:
+    <<: *go-service
+    container_name: exams
+    build:
+      context: .
+      dockerfile: services/exams/Dockerfile
+      target: server
+    env_file:
+      - ./services/exams/.env
+    depends_on:
+      exams-db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+
+  exams-seed:
+    build:
+      context: .
+      dockerfile: services/exams/Dockerfile
+      target: seed
+    container_name: exams-seed
+    profiles:
+      - seed
+    env_file:
+      - ./services/exams/.env
+    volumes:
+      - ./services/exams/seed:/app/services/exams/seed:ro
+    depends_on:
+      exams-db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+    networks:
+      - ego-network
+
+  exams-db:
+    image: postgres:15.8-alpine
+    container_name: exams-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${EXAMS_DB_USER}
+      POSTGRES_PASSWORD: ${EXAMS_DB_PASSWORD}
+      POSTGRES_DB: ${EXAMS_DB_NAME}
+    ports:
+      - "${EXAMS_DB_PORT}:5432"
+    volumes:
+      - ./data/exams-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${EXAMS_DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5
