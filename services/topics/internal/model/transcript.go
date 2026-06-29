@@ -9,6 +9,6 @@ type Transcript struct {
 	TimeStart float64 `gorm:"not null"`
 	TimeEnd   float64 `gorm:"not null"`
 	Url       string
-	LessonID  uint   `gorm:"not null"`
+	LessonID  uint   `gorm:"not null;index"`
 	Lesson    Lesson `gorm:"foreignKey:LessonID;references:ID"`
 }
