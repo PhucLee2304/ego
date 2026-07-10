@@ -96,10 +96,10 @@ func main() {
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
 	repo := repository.NewRepository(db)
-	svc := service.New(repo)
-	hdl := handler.New(svc)
+	service := service.New(repo)
+	handler := handler.New(service)
 
-	hdl.RegisterRoutes(api, authMiddleware)
+	handler.RegisterRoutes(api, authMiddleware)
 
 	logger.Log.Info().Str("EXAMS_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting exams server")
 	go func() {

@@ -21,9 +21,8 @@ func New(svc service.Service) Handler {
 	return &handler{service: svc}
 }
 
-func (h *handler) RegisterRoutes(mux *http.ServeMux, authMw *jwt.AuthMiddleware) {
-	// Public routes or auth routes
-	mux.HandleFunc("GET /exams", h.GetList)
+func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
+	mux.HandleFunc("GET /exams", mw.Handle(h.GetList))
 }
 
 // GetList godoc
@@ -34,16 +33,18 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, authMw *jwt.AuthMiddleware)
 // @Produce      json
 // @Param        page      query     int  false  "Page number" default(1)
 // @Param        pageSize  query     int  false  "Page size"   default(10)
+// @Param        type      query     string  false  "Exam type" Enums(THPT, TOEIC) default(THPT)
 // @Success      200  {object}  httpx.PaginatedResponse[dto.Exam]
 // @Failure      400  {object}  httpx.ErrorResponse
 // @Failure      500  {object}  httpx.ErrorResponse
 // @Router       /exams [get]
 func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
-	var query httpx.PaginationQuery
+	var query dto.GetExamsQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
 		return
 	}
+	query.Normalize()
 
 	exams, pageCounts, err := h.service.GetList(r.Context(), query)
 	if err != nil {
