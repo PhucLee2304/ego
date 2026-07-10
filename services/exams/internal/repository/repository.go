@@ -4,6 +4,7 @@ import (
 	"context"
 	"ego/services/exams/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -32,4 +33,20 @@ func (r *Repository) GetList(ctx context.Context, examType model.ExamType, limit
 	}
 
 	return exams, total, nil
+}
+
+func (r *Repository) GetByID(ctx context.Context, id uint) (*model.Exam, error) {
+	var exam model.Exam
+	if err := r.db.WithContext(ctx).
+		Preload("Sections", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		First(&exam, id).Error; err != nil {
+		return nil, err
+	}
+
+	return &exam, nil
 }
