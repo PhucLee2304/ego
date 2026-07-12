@@ -9,6 +9,7 @@ import (
 type Service interface {
 	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, error)
 	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, error)
+	GetQuestions(ctx context.Context, id uint, query dto.GetExamQuestionsQuery) (*dto.GetExamQuestionsResponse, error)
 }
 
 type service struct {
@@ -45,4 +46,17 @@ func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, e
 	}
 
 	return dto.ToGetExamResponse(exam), nil
+}
+
+func (s *service) GetQuestions(ctx context.Context, id uint, query dto.GetExamQuestionsQuery) (*dto.GetExamQuestionsResponse, error) {
+	exam, err := s.repo.GetQuestionsByExamID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := dto.ValidateGetExamQuestionsQueryForExam(exam.Type, query); err != nil {
+		return nil, err
+	}
+
+	return dto.ToGetExamQuestionsResponse(exam, query), nil
 }
