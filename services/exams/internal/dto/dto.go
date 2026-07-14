@@ -30,6 +30,28 @@ type GetExamQuestionsQuery struct {
 	Part    model.PartCode    `schema:"part"`
 }
 
+type CreateExamAttemptRequest struct {
+	Mode     model.AttemptMode      `json:"mode"`
+	Section  *model.SectionCode     `json:"section,omitempty"`
+	Part     *model.PartCode        `json:"part,omitempty"`
+	Duration *model.AttemptDuration `json:"duration,omitempty"`
+}
+
+type CreateExamAttemptResponse struct {
+	ID             uint       `json:"id"`
+	ExamID         uint       `json:"examId"`
+	Mode           string     `json:"mode"`
+	Status         string     `json:"status"`
+	Section        *string    `json:"section,omitempty"`
+	Part           *string    `json:"part,omitempty"`
+	Duration       *int       `json:"duration,omitempty"`
+	StartedAt      time.Time  `json:"startedAt"`
+	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
+	TotalQuestions int        `json:"totalQuestions"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+}
+
 type ExamSectionSummary struct {
 	ID            uint   `json:"id"`
 	Code          string `json:"code"`
@@ -286,6 +308,20 @@ func (q *GetExamQuestionsQuery) Normalize() {
 	q.Part = model.PartCode(strings.TrimSpace(string(q.Part)))
 }
 
+func (r *CreateExamAttemptRequest) Normalize() {
+	r.Mode = model.AttemptMode(strings.ToUpper(strings.TrimSpace(string(r.Mode))))
+
+	if r.Section != nil {
+		value := model.SectionCode(strings.ToUpper(strings.TrimSpace(string(*r.Section))))
+		r.Section = &value
+	}
+
+	if r.Part != nil {
+		value := model.PartCode(strings.TrimSpace(string(*r.Part)))
+		r.Part = &value
+	}
+}
+
 func (q GetExamQuestionsQuery) Validate() error {
 	if q.Section != "" {
 		switch q.Section {
@@ -310,6 +346,36 @@ func (q GetExamQuestionsQuery) Validate() error {
 	return nil
 }
 
+func (r CreateExamAttemptRequest) Validate() error {
+	switch r.Mode {
+	case model.AttemptModePractice, model.AttemptModeTest:
+	default:
+		return errors.New("[ERROR] Invalid mode")
+	}
+
+	if r.Section != nil {
+		switch *r.Section {
+		case model.SectionCodeFull, model.SectionCodeListening, model.SectionCodeReading:
+		default:
+			return errors.New("[ERROR] Invalid section")
+		}
+	}
+
+	if r.Part != nil {
+		switch *r.Part {
+		case model.Part1, model.Part2, model.Part3, model.Part4, model.Part5, model.Part6, model.Part7:
+		default:
+			return errors.New("[ERROR] Invalid part")
+		}
+	}
+
+	if r.Section != nil && r.Part != nil {
+		return errors.New("[ERROR] section and part cannot be used together")
+	}
+
+	return nil
+}
+
 func ValidateGetExamQuestionsQueryForExam(examType model.ExamType, query GetExamQuestionsQuery) error {
 	if query.Part != "" && examType != model.ExamTypeTOEIC {
 		return errors.New("[ERROR] part filter is only supported for TOEIC exams")
@@ -321,6 +387,39 @@ func ValidateGetExamQuestionsQueryForExam(examType model.ExamType, query GetExam
 
 	if examType == model.ExamTypeTOEIC && query.Section == model.SectionCodeFull {
 		return errors.New("[ERROR] TOEIC exams do not support FULL section")
+	}
+
+	return nil
+}
+
+func ValidateCreateExamAttemptRequestForExam(examType model.ExamType, req CreateExamAttemptRequest) error {
+	if req.Mode == model.AttemptModeTest {
+		if req.Section != nil {
+			return errors.New("[ERROR] TEST mode does not support section")
+		}
+		if req.Part != nil {
+			return errors.New("[ERROR] TEST mode does not support part")
+		}
+		if req.Duration != nil {
+			return errors.New("[ERROR] TEST mode does not accept duration")
+		}
+		return nil
+	}
+
+	if req.Part != nil && examType != model.ExamTypeTOEIC {
+		return errors.New("[ERROR] part is only supported for TOEIC exams")
+	}
+
+	if examType == model.ExamTypeTHPT && req.Section != nil && *req.Section != model.SectionCodeFull {
+		return errors.New("[ERROR] THPT exams only support FULL section")
+	}
+
+	if examType == model.ExamTypeTOEIC && req.Section != nil && *req.Section == model.SectionCodeFull {
+		return errors.New("[ERROR] TOEIC exams do not support FULL section")
+	}
+
+	if !model.IsAllowedPracticeDuration(durationToInt(req.Duration)) {
+		return errors.New("[ERROR] Invalid duration")
 	}
 
 	return nil
@@ -364,4 +463,42 @@ func toExamQuestion(question model.Question) *ExamQuestion {
 		Order:       question.Order,
 		Options:     options,
 	}
+}
+
+func ToCreateExamAttemptResponse(attempt *model.Attempt) *CreateExamAttemptResponse {
+	var section *string
+	if attempt.SectionCode != nil {
+		value := string(*attempt.SectionCode)
+		section = &value
+	}
+
+	var part *string
+	if attempt.PartCode != nil {
+		value := string(*attempt.PartCode)
+		part = &value
+	}
+
+	return &CreateExamAttemptResponse{
+		ID:             attempt.ID,
+		ExamID:         attempt.ExamID,
+		Mode:           string(attempt.Mode),
+		Status:         string(attempt.Status),
+		Section:        section,
+		Part:           part,
+		Duration:       attempt.Duration,
+		StartedAt:      attempt.StartedAt,
+		ExpiresAt:      attempt.ExpiresAt,
+		TotalQuestions: attempt.TotalQuestions,
+		CreatedAt:      attempt.CreatedAt,
+		UpdatedAt:      attempt.UpdatedAt,
+	}
+}
+
+func durationToInt(duration *model.AttemptDuration) *int {
+	if duration == nil {
+		return nil
+	}
+
+	value := int(*duration)
+	return &value
 }

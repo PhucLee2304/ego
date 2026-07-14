@@ -18,6 +18,7 @@ type Handler interface {
 	GetList(w http.ResponseWriter, r *http.Request)
 	GetByID(w http.ResponseWriter, r *http.Request)
 	GetQuestions(w http.ResponseWriter, r *http.Request)
+	CreateAttempt(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -32,6 +33,7 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 	mux.HandleFunc("GET /exams", mw.Handle(h.GetList))
 	mux.HandleFunc("GET /exams/{id}", mw.Handle(h.GetByID))
 	mux.HandleFunc("GET /exams/{id}/questions", mw.Handle(h.GetQuestions))
+	mux.HandleFunc("POST /exams/{id}/attempts", mw.Handle(h.CreateAttempt))
 }
 
 // GetList godoc
@@ -149,4 +151,66 @@ func (h *handler) GetQuestions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.JSON(w, http.StatusOK, resp)
+}
+
+// CreateAttempt godoc
+// @Summary      Create exam attempt
+// @Description  Create a new practice or test attempt for an exam
+// @Tags         Exams
+// @Accept       json
+// @Produce      json
+// @Param        id    path      int                       true  "Exam ID"
+// @Param        body  body      dto.CreateExamAttemptRequest  true  "Attempt payload"
+// @Success      201  {object}  dto.CreateExamAttemptResponse
+// @Failure      400  {object}  httpx.ErrorResponse
+// @Failure      401  {object}  httpx.ErrorResponse
+// @Failure      404  {object}  httpx.ErrorResponse
+// @Failure      409  {object}  httpx.ErrorResponse
+// @Failure      500  {object}  httpx.ErrorResponse
+// @Router       /exams/{id}/attempts [post]
+func (h *handler) CreateAttempt(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid exam ID")
+		return
+	}
+
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+
+	var body dto.CreateExamAttemptRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	body.Normalize()
+
+	if err := body.Validate(); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	resp, err := h.service.CreateAttempt(r.Context(), userID, uint(id), body)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Exam not found")
+			return
+		case strings.HasPrefix(err.Error(), "[CONFLICT]"):
+			httpx.Error(w, http.StatusConflict, err.Error())
+			return
+		case strings.HasPrefix(err.Error(), "[ERROR]"):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		default:
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	httpx.JSON(w, http.StatusCreated, resp)
 }

@@ -40,6 +40,10 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
+	if err := db.Exec(model.CreateAttemptActiveUserUniqueIndexSQL).Error; err != nil {
+		return err
+	}
+
 	log.Println("Database migrations completed")
 	return nil
 }
