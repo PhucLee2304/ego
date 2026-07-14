@@ -4,6 +4,7 @@ import (
 	"context"
 	"ego/platform/config"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -90,5 +91,10 @@ func (m *manager) Validate(ctx context.Context, tokenString string) (string, err
 		return "", ErrInvalidToken
 	}
 
-	return claims.UserID, nil
+	userID := strings.TrimSpace(claims.UserID)
+	if userID == "" {
+		return "", ErrInvalidToken
+	}
+
+	return userID, nil
 }

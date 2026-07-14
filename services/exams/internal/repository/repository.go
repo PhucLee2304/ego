@@ -4,6 +4,7 @@ import (
 	"context"
 	"ego/services/exams/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -14,15 +15,17 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) GetList(ctx context.Context, limit, offset int32) ([]*model.Exam, int64, error) {
+func (r *Repository) GetList(ctx context.Context, examType model.ExamType, limit, offset int32) ([]*model.Exam, int64, error) {
 	var exams []*model.Exam
 	var total int64
+	query := r.db.WithContext(ctx).Model(&model.Exam{}).Where("type = ?", examType)
 
-	if err := r.db.WithContext(ctx).Model(&model.Exam{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := r.db.WithContext(ctx).
+	if err := query.
+		Order("id ASC").
 		Limit(int(limit)).
 		Offset(int(offset)).
 		Find(&exams).Error; err != nil {
@@ -30,4 +33,48 @@ func (r *Repository) GetList(ctx context.Context, limit, offset int32) ([]*model
 	}
 
 	return exams, total, nil
+}
+
+func (r *Repository) GetByID(ctx context.Context, id uint) (*model.Exam, error) {
+	var exam model.Exam
+	if err := r.db.WithContext(ctx).
+		Preload("Sections", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		First(&exam, id).Error; err != nil {
+		return nil, err
+	}
+
+	return &exam, nil
+}
+
+func (r *Repository) GetQuestionsByExamID(ctx context.Context, id uint) (*model.Exam, error) {
+	var exam model.Exam
+	if err := r.db.WithContext(ctx).
+		Preload("Sections", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups.Questions.Options", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions.Options", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		First(&exam, id).Error; err != nil {
+		return nil, err
+	}
+
+	return &exam, nil
 }

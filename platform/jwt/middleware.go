@@ -46,8 +46,7 @@ func (m *AuthMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), userIDKey, resp.UserId)
 		reqWithCtx := r.WithContext(ctx)
 
-		userID, ok := GetUserID(reqWithCtx.Context())
-		if !ok || userID == "" {
+		if _, ok := GetUserID(reqWithCtx.Context()); !ok {
 			httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
 			return
 		}
@@ -58,7 +57,16 @@ func (m *AuthMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 
 func GetUserID(ctx context.Context) (string, bool) {
 	userID, ok := ctx.Value(userIDKey).(string)
-	return userID, ok
+	if !ok {
+		return "", false
+	}
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", false
+	}
+
+	return userID, true
 }
 
 type RoleResolver func(ctx context.Context, userID string) (string, error)
@@ -82,7 +90,7 @@ func (m *RoleMiddleware) RequireRole(roles ...string) func(http.HandlerFunc) htt
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			userID, ok := GetUserID(r.Context())
-			if !ok || userID == "" {
+			if !ok {
 				httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
 				return
 			}

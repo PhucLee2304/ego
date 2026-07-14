@@ -2,14 +2,14 @@ package service
 
 import (
 	"context"
-	"ego/platform/httpx"
 	"ego/services/exams/internal/dto"
-	"ego/services/exams/internal/model"
 	"ego/services/exams/internal/repository"
 )
 
 type Service interface {
-	GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.Exam, int, error)
+	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, error)
+	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, error)
+	GetQuestions(ctx context.Context, id uint, query dto.GetExamQuestionsQuery) (*dto.GetExamQuestionsResponse, error)
 }
 
 type service struct {
@@ -20,28 +20,15 @@ func New(repo *repository.Repository) Service {
 	return &service{repo: repo}
 }
 
-func mapToDTO(exam *model.Exam) *dto.Exam {
-	return &dto.Exam{
-		ID:          exam.ID,
-		Title:       exam.Title,
-		Description: exam.Description,
-		IsPublic:    exam.IsPublic,
-		Type:        string(exam.Type),
-		Year:        exam.Year,
-		CreatedAt:   exam.CreatedAt,
-		UpdatedAt:   exam.UpdatedAt,
-	}
-}
-
-func (s *service) GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.Exam, int, error) {
-	exams, total, err := s.repo.GetList(ctx, query.Limit(), query.Offset())
+func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, error) {
+	exams, total, err := s.repo.GetList(ctx, query.Type, query.Limit(), query.Offset())
 	if err != nil {
 		return nil, 0, err
 	}
 
-	examDTOs := make([]*dto.Exam, len(exams))
+	examDTOs := make([]*dto.GetExamsResponse, len(exams))
 	for i, exam := range exams {
-		examDTOs[i] = mapToDTO(exam)
+		examDTOs[i] = dto.ToGetExamsResponse(exam)
 	}
 
 	pageCounts := int((total + int64(query.PageSize) - 1) / int64(query.PageSize))
@@ -50,4 +37,26 @@ func (s *service) GetList(ctx context.Context, query httpx.PaginationQuery) ([]*
 	}
 
 	return examDTOs, pageCounts, nil
+}
+
+func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, error) {
+	exam, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return dto.ToGetExamResponse(exam), nil
+}
+
+func (s *service) GetQuestions(ctx context.Context, id uint, query dto.GetExamQuestionsQuery) (*dto.GetExamQuestionsResponse, error) {
+	exam, err := s.repo.GetQuestionsByExamID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := dto.ValidateGetExamQuestionsQueryForExam(exam.Type, query); err != nil {
+		return nil, err
+	}
+
+	return dto.ToGetExamQuestionsResponse(exam, query), nil
 }

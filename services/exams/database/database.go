@@ -32,6 +32,9 @@ func Migrate(db *gorm.DB) error {
 		&model.Group{},
 		&model.Question{},
 		&model.Option{},
+		&model.Attempt{},
+		&model.AttemptAnswer{},
+		&model.History{},
 	)
 	if err != nil {
 		return err
