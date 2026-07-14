@@ -6,11 +6,13 @@ import (
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
+	platformsocket "ego/platform/socket"
 	examsConfig "ego/services/exams/config"
 	"ego/services/exams/database"
 	"ego/services/exams/internal/handler"
 	"ego/services/exams/internal/repository"
 	"ego/services/exams/internal/service"
+	examssocket "ego/services/exams/internal/socket"
 	"fmt"
 	"net"
 	"net/http"
@@ -98,8 +100,11 @@ func main() {
 	repo := repository.NewRepository(db)
 	service := service.New(repo)
 	handler := handler.New(service)
+	socketServer := platformsocket.NewServer(tokenServiceClient)
 
 	handler.RegisterRoutes(api, authMiddleware)
+	examssocket.RegisterHandlers(socketServer)
+	api.Handle("/ws/exams", socketServer)
 
 	logger.Log.Info().Str("EXAMS_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting exams server")
 	go func() {
