@@ -92,10 +92,5 @@ func (s *service) GetList(ctx context.Context, query httpx.PaginationQuery) ([]*
 		}
 	}
 
-	pageCounts := int((total + int64(query.PageSize) - 1) / int64(query.PageSize))
-	if pageCounts == 0 {
-		pageCounts = 1
-	}
-
-	return userDTOs, pageCounts, nil
+	return userDTOs, httpx.ToPageCounts(total, query.PageSize), nil
 }

@@ -54,16 +54,7 @@ func (c *Client) Send(payload any) {
 }
 
 func (c *Client) SendAck(requestID string, payload any) {
-	if payload == nil {
-		c.Send(Ack{
-			Type:      MessageTypeAck,
-			RequestID: requestID,
-			Success:   true,
-		})
-		return
-	}
-
-	c.Send(AckWithPayload{
+	c.Send(Ack{
 		Type:      MessageTypeAck,
 		RequestID: requestID,
 		Success:   true,
