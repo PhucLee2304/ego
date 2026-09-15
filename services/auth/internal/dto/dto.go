@@ -1,7 +1,7 @@
 package dto
 
 type RefreshBody struct {
-	RefreshToken string `json:"refreshToken" validate:"required"`
+	RefreshToken string `json:"refreshToken" validate:"required,notblank"`
 }
 
 type RefreshResponse struct {
@@ -10,8 +10,8 @@ type RefreshResponse struct {
 }
 
 type LoginBody struct {
-	IdToken string  `json:"idToken" validate:"required"`
-	Name    *string `json:"name,omitempty" validate:"omitempty,min=1"`
+	IdToken string  `json:"idToken" validate:"required,notblank"`
+	Name    *string `json:"name,omitempty" validate:"omitempty,notblank"`
 }
 
 type LoginResponse struct {

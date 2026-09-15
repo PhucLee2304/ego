@@ -12,7 +12,7 @@ Package này xử lý các phần hạ tầng của kết nối:
 - format response chung dạng `ack` / `error`
 
 Các service vẫn tự xử lý nghiệp vụ của mình. Ví dụ, service `exams` có thể đăng ký handler
-`attempt.answer.updated` để validate attempt và upsert answer.
+`ATTEMPT_ANSWER_UPDATED` để validate attempt và upsert answer.
 
 ## Route
 
@@ -29,12 +29,12 @@ Client gửi lên server:
 
 ```json
 {
-  "type": "attempt.answer.updated",
+  "type": "ATTEMPT_ANSWER_UPDATED",
   "requestId": "client-generated-id",
   "payload": {
     "attemptId": 12,
     "questionId": 123,
-    "selectedOptionId": 456
+    "optionId": 456
   }
 }
 ```
@@ -43,7 +43,7 @@ Server trả về khi xử lý thành công:
 
 ```json
 {
-  "type": "ack",
+  "type": "ACK",
   "requestId": "client-generated-id",
   "success": true
 }
@@ -53,10 +53,10 @@ Server trả về khi xử lý lỗi:
 
 ```json
 {
-  "type": "error",
+  "type": "ERROR",
   "requestId": "client-generated-id",
   "success": false,
-  "code": "attempt_not_active",
+  "code": "ATTEMPT_NOT_ACTIVE",
   "message": "attempt is not active"
 }
 ```

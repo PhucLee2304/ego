@@ -6,7 +6,6 @@ import (
 	_ "ego/services/topics/internal/dto"
 	"ego/services/topics/internal/service"
 	"net/http"
-	"strconv"
 )
 
 type Handler interface {
@@ -65,14 +64,13 @@ func (h *handler) GetTopics(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  httpx.ErrorResponse
 // @Router       /topics/{id} [get]
 func (h *handler) GetSectionsByTopic(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
+	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid topic ID")
 		return
 	}
 
-	sections, err := h.service.GetSectionsByTopic(r.Context(), uint(id))
+	sections, err := h.service.GetSectionsByTopic(r.Context(), id)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -94,14 +92,13 @@ func (h *handler) GetSectionsByTopic(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  httpx.ErrorResponse
 // @Router       /sections/{id}/lessons [get]
 func (h *handler) GetLessonsBySection(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
+	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid section ID")
 		return
 	}
 
-	lessons, err := h.service.GetLessonsBySection(r.Context(), uint(id))
+	lessons, err := h.service.GetLessonsBySection(r.Context(), id)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -124,18 +121,17 @@ func (h *handler) GetLessonsBySection(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  httpx.ErrorResponse
 // @Router       /lessons/{id} [get]
 func (h *handler) GetLessonByID(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
+	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid lesson ID")
 		return
 	}
 
-	lessonResp, err := h.service.GetLessonByID(r.Context(), uint(id))
+	resp, err := h.service.GetLessonByID(r.Context(), id)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, lessonResp)
+	httpx.JSON(w, http.StatusOK, resp)
 }

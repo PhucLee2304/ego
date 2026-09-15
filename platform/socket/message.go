@@ -10,23 +10,17 @@ type Message struct {
 
 type Ack struct {
 	Type      MessageType `json:"type"`
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-}
-
-type AckWithPayload struct {
-	Type      MessageType `json:"type"`
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-	Payload   any    `json:"payload,omitempty"`
+	RequestID string      `json:"requestId"`
+	Success   bool        `json:"success"`
+	Payload   any         `json:"payload,omitempty"`
 }
 
 type Error struct {
 	Type      MessageType `json:"type"`
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-	Code      string `json:"code"`
-	Message   string `json:"message"`
+	RequestID string      `json:"requestId"`
+	Success   bool        `json:"success"`
+	Code      string      `json:"code"`
+	Message   string      `json:"message"`
 }
 
 type HandlerError struct {

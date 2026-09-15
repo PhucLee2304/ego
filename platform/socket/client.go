@@ -54,16 +54,7 @@ func (c *Client) Send(payload any) {
 }
 
 func (c *Client) SendAck(requestID string, payload any) {
-	if payload == nil {
-		c.Send(Ack{
-			Type:      MessageTypeAck,
-			RequestID: requestID,
-			Success:   true,
-		})
-		return
-	}
-
-	c.Send(AckWithPayload{
+	c.Send(Ack{
 		Type:      MessageTypeAck,
 		RequestID: requestID,
 		Success:   true,
@@ -121,6 +112,12 @@ func (c *Client) readPump(parent context.Context) {
 
 		var message Message
 		if err := json.Unmarshal(data, &message); err != nil {
+			logger.Log.Warn().
+				Err(err).
+				Str("userID", c.userID).
+				Str("status", string(MessageTypeError)).
+				Str("code", string(ErrorCodeInvalidJSON)).
+				Msg("[SOCKET] Message completed")
 			c.SendError("", ErrorCodeInvalidJSON, "invalid JSON message")
 			continue
 		}

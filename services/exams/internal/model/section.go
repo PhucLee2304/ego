@@ -23,3 +23,14 @@ const (
 	SectionCodeListening SectionCode = "LISTENING"
 	SectionCodeReading   SectionCode = "READING"
 )
+
+func SectionCodeByPart(part PartCode) (SectionCode, bool) {
+	switch part {
+	case Part1, Part2, Part3, Part4:
+		return SectionCodeListening, true
+	case Part5, Part6, Part7:
+		return SectionCodeReading, true
+	default:
+		return "", false
+	}
+}

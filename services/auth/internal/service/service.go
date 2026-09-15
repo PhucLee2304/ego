@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
 	usersClient "ego/api/gen/go/users"
 	"ego/platform/firebase"
@@ -55,8 +56,8 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 	if firebaseUser.Name != nil {
 		name = *firebaseUser.Name
 	}
-	if body.Name != nil && *body.Name != "" {
-		name = *body.Name
+	if body.Name != nil {
+		name = strings.TrimSpace(*body.Name)
 	}
 
 	avatar := ""

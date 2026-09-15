@@ -2,25 +2,19 @@ package httpx
 
 import (
 	"ego/platform/logger"
+	"ego/platform/validatorx"
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"strings"
+	"strconv"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/gorilla/schema"
 )
 
 var (
 	decoder      = schema.NewDecoder()
 	queryEncoder = schema.NewEncoder()
-	validate     = func() *validator.Validate {
-		v := validator.New()
-		_ = v.RegisterValidation("notblank", func(fl validator.FieldLevel) bool {
-			return strings.TrimSpace(fl.Field().String()) != ""
-		})
-		return v
-	}()
+	validate     = validatorx.New()
 )
 
 type ErrorResponse struct {
@@ -57,6 +51,22 @@ func (q *PaginationQuery) Offset() int32 {
 	return (q.Page - 1) * q.PageSize
 }
 
+func ToPageCounts(total int64, pageSize int32) int {
+	pageCounts := int((total + int64(pageSize) - 1) / int64(pageSize))
+	if pageCounts == 0 {
+		return 1
+	}
+	return pageCounts
+}
+
+func ToPaginatedResponse[T any](data []T, query PaginationQuery, pageCounts int) PaginatedResponse[T] {
+	return PaginatedResponse[T]{
+		Data:       data,
+		Page:       int(query.Page),
+		PageCounts: pageCounts,
+	}
+}
+
 func Error(w http.ResponseWriter, code int, message string) {
 	if code >= http.StatusInternalServerError {
 		logger.Log.Error().Int("code", code).Msg("Internal server error")
@@ -77,6 +87,14 @@ func DecodeQuery(r *http.Request, v any) error {
 		return err
 	}
 	return validate.Struct(v)
+}
+
+func ParsePathID(r *http.Request, name string) (uint, error) {
+	id, err := strconv.ParseUint(r.PathValue(name), 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return uint(id), nil
 }
 
 func EncodeQuery(v any) (url.Values, error) {

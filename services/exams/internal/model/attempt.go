@@ -3,17 +3,18 @@ package model
 import (
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 type Attempt struct {
 	gorm.Model
-	Mode           AttemptMode   `gorm:"type:text;not null;index"`
-	Status         AttemptStatus `gorm:"type:text;not null;index"`
-	SectionCode    *SectionCode  `gorm:"type:text;index"`
-	PartCode       *PartCode     `gorm:"type:text;index"`
-	StartedAt      time.Time     `gorm:"not null"`
-	ExpiresAt      *time.Time    `gorm:"index"`
+	Mode           AttemptMode                   `gorm:"type:text;not null;index"`
+	Status         AttemptStatus                 `gorm:"type:text;not null;index"`
+	SectionCode    *SectionCode                  `gorm:"type:text;index"`
+	PartCodes      datatypes.JSONSlice[PartCode] `gorm:"type:jsonb"`
+	StartedAt      time.Time                     `gorm:"not null"`
+	ExpiresAt      *time.Time                    `gorm:"index"`
 	SubmittedAt    *time.Time
 	Duration       *int
 	TotalQuestions int `gorm:"not null;default:0"`

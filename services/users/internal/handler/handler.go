@@ -117,9 +117,5 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.PaginatedResponse[*dto.User]{
-		Data:       users,
-		Page:       int(query.Page),
-		PageCounts: pageCounts,
-	})
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(users, query, pageCounts))
 }

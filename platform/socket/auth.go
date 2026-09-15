@@ -40,5 +40,7 @@ func TokenFromRequest(r *http.Request) string {
 		}
 	}
 
-	return ""
+	// Browser WebSocket APIs cannot set an Authorization header during the
+	// handshake, so web clients use this fallback over WSS.
+	return strings.TrimSpace(r.URL.Query().Get("access_token"))
 }
