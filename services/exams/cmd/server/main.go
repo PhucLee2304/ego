@@ -13,6 +13,7 @@ import (
 	"ego/services/exams/internal/repository"
 	"ego/services/exams/internal/service"
 	examssocket "ego/services/exams/internal/socket"
+	"ego/services/exams/workers"
 	"fmt"
 	"net"
 	"net/http"
@@ -50,7 +51,9 @@ func main() {
 		}
 	}()
 
-	_ = context.Background()
+	appCtx, stopApp := context.WithCancel(context.Background())
+	defer stopApp()
+
 	appConfig, err := examsConfig.LoadAppConfig()
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
@@ -103,8 +106,10 @@ func main() {
 	socketServer := platformsocket.NewServer(tokenServiceClient)
 
 	handler.RegisterRoutes(api, authMiddleware)
-	examssocket.RegisterHandlers(socketServer)
+	examssocket.RegisterHandlers(socketServer, service)
 	api.Handle("/ws/exams", socketServer)
+
+	workers.StartAutoSubmitExpiredAttempts(appCtx, service, 5*time.Second, 100)
 
 	logger.Log.Info().Str("EXAMS_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting exams server")
 	go func() {
@@ -132,6 +137,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	logger.Log.Info().Msg("[SHUTDOWN] Shutting down exams server")
+	stopApp()
 	grpcServer.GracefulStop()
 	_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

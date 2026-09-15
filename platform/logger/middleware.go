@@ -1,8 +1,11 @@
 package logger
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"time"
 )
@@ -41,6 +44,25 @@ type responseRecorder struct {
 	http.ResponseWriter
 	statusCode int
 	body       bytes.Buffer
+}
+
+func (r *responseRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+	r.statusCode = http.StatusSwitchingProtocols
+	return hijacker.Hijack()
+}
+
+func (r *responseRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func (r *responseRecorder) WriteHeader(statusCode int) {

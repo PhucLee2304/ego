@@ -20,12 +20,12 @@ type HandlerFunc func(ctx context.Context, client *Client, message Message) (any
 
 type Server struct {
 	tokenServiceClient tokenClient.TokenServiceClient
-	upgrader      websocket.Upgrader
-	writeWait     time.Duration
-	pongWait      time.Duration
-	pingInterval  time.Duration
-	readLimit     int64
-	sendBuffer    int
+	upgrader           websocket.Upgrader
+	writeWait          time.Duration
+	pongWait           time.Duration
+	pingInterval       time.Duration
+	readLimit          int64
+	sendBuffer         int
 
 	mu       sync.RWMutex
 	handlers map[MessageType]HandlerFunc
@@ -77,7 +77,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	logger.Log.Info().Str("userID", userID).Msg("[SOCKET] Client connected")
 	go client.writePump()
-	go client.readPump(r.Context())
+	client.readPump(r.Context())
 }
 
 func (s *Server) BroadcastToUser(userID string, payload any) {
@@ -116,22 +116,51 @@ func (s *Server) unregister(client *Client) {
 }
 
 func (s *Server) dispatch(ctx context.Context, client *Client, message Message) {
+	startedAt := time.Now()
 	if message.Type == "" {
+		logger.Log.Warn().
+			Str("userID", client.UserID()).
+			Str("requestID", message.RequestID).
+			Str("status", string(MessageTypeError)).
+			Str("code", string(ErrorCodeInvalidMessage)).
+			Dur("duration", time.Since(startedAt)).
+			Msg("[SOCKET] Message completed")
 		client.SendError(message.RequestID, ErrorCodeInvalidMessage, "message type is required")
 		return
 	}
 
 	message.RequestID = strings.TrimSpace(message.RequestID)
 	if message.RequestID == "" {
+		logger.Log.Warn().
+			Str("userID", client.UserID()).
+			Str("type", string(message.Type)).
+			Str("status", string(MessageTypeError)).
+			Str("code", string(ErrorCodeInvalidMessage)).
+			Dur("duration", time.Since(startedAt)).
+			Msg("[SOCKET] Message completed")
 		client.SendError("", ErrorCodeInvalidMessage, "requestId is required")
 		return
 	}
+
+	logger.Log.Info().
+		Str("userID", client.UserID()).
+		Str("requestID", message.RequestID).
+		Str("type", string(message.Type)).
+		Msg("[SOCKET] Incoming message")
 
 	s.mu.RLock()
 	handler := s.handlers[message.Type]
 	s.mu.RUnlock()
 
 	if handler == nil {
+		logger.Log.Warn().
+			Str("userID", client.UserID()).
+			Str("requestID", message.RequestID).
+			Str("type", string(message.Type)).
+			Str("status", string(MessageTypeError)).
+			Str("code", string(ErrorCodeUnknownMessageType)).
+			Dur("duration", time.Since(startedAt)).
+			Msg("[SOCKET] Message completed")
 		client.SendError(message.RequestID, ErrorCodeUnknownMessageType, "unknown message type")
 		return
 	}
@@ -140,15 +169,39 @@ func (s *Server) dispatch(ctx context.Context, client *Client, message Message) 
 	if err != nil {
 		var handlerErr *HandlerError
 		if errors.As(err, &handlerErr) {
+			logger.Log.Warn().
+				Err(err).
+				Str("userID", client.UserID()).
+				Str("requestID", message.RequestID).
+				Str("type", string(message.Type)).
+				Str("status", string(MessageTypeError)).
+				Str("code", string(handlerErr.Code)).
+				Dur("duration", time.Since(startedAt)).
+				Msg("[SOCKET] Message completed")
 			client.SendError(message.RequestID, handlerErr.Code, handlerErr.Message)
 			return
 		}
 
-		logger.Log.Error().Err(err).Str("type", string(message.Type)).Msgf("[SOCKET] Handler failed: %v", err)
+		logger.Log.Error().
+			Err(err).
+			Str("userID", client.UserID()).
+			Str("requestID", message.RequestID).
+			Str("type", string(message.Type)).
+			Str("status", string(MessageTypeError)).
+			Str("code", string(ErrorCodeInternalError)).
+			Dur("duration", time.Since(startedAt)).
+			Msg("[SOCKET] Message completed")
 		client.SendError(message.RequestID, ErrorCodeInternalError, fmt.Sprintf("failed to process message: %v", err))
 		return
 	}
 
+	logger.Log.Info().
+		Str("userID", client.UserID()).
+		Str("requestID", message.RequestID).
+		Str("type", string(message.Type)).
+		Str("status", string(MessageTypeAck)).
+		Dur("duration", time.Since(startedAt)).
+		Msg("[SOCKET] Message completed")
 	client.SendAck(message.RequestID, payload)
 }
 
