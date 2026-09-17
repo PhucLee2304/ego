@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	classroomsClient "ego/api/gen/go/classrooms"
 	platformdb "ego/platform/db"
 	"ego/platform/httpx"
+	"ego/platform/logger"
 	"ego/platform/valuex"
 	"ego/services/exams/internal/dto"
 	"ego/services/exams/internal/model"
 	"ego/services/exams/internal/repository"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -28,27 +31,51 @@ type Service interface {
 	CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error)
 	GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error)
 	AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int, error)
+	ProcessOutboxEvents(ctx context.Context, limit int) (int, error)
+	GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, error)
+	ReconcileClassroomAssignmentSubmissions(ctx context.Context, limit int) (int, error)
 }
 
 type service struct {
-	repo *repository.Repository
+	repo             *repository.Repository
+	classroomsClient classroomsClient.ClassroomServiceClient
 }
 
-func New(repo *repository.Repository) Service {
-	return &service{repo: repo}
+func New(repo *repository.Repository, classroomsClient classroomsClient.ClassroomServiceClient) Service {
+	return &service{
+		repo:             repo,
+		classroomsClient: classroomsClient,
+	}
 }
 
 var (
-	ErrAttemptNotActive           = errors.New("[ERROR] Attempt is not active")
-	ErrAttemptExpired             = errors.New("[ERROR] Attempt has expired")
-	ErrAttemptAlreadySubmitted    = errors.New("[CONFLICT] Attempt has already been submitted")
-	ErrAttemptCancelled           = errors.New("[CONFLICT] Attempt has been cancelled")
-	ErrQuestionNotBelongToAttempt = errors.New("[ERROR] Question does not belong to attempt")
-	ErrOptionNotBelongToQuestion  = errors.New("[ERROR] Option does not belong to question")
-	ErrAttemptHistoryNotFound     = errors.New("[ERROR] Attempt history not found")
+	ErrAttemptNotActive            = errors.New("[ERROR] Attempt is not active")
+	ErrAttemptExpired              = errors.New("[ERROR] Attempt has expired")
+	ErrAttemptAlreadySubmitted     = errors.New("[CONFLICT] Attempt has already been submitted")
+	ErrAttemptCancelled            = errors.New("[CONFLICT] Attempt has been cancelled")
+	ErrAssignmentAttemptCancel     = errors.New("[ERROR] Classroom assignment attempts cannot be cancelled; submit the attempt instead")
+	ErrQuestionNotBelongToAttempt  = errors.New("[ERROR] Question does not belong to attempt")
+	ErrOptionNotBelongToQuestion   = errors.New("[ERROR] Option does not belong to question")
+	ErrAttemptHistoryNotFound      = errors.New("[ERROR] Attempt history not found")
+	ErrContextAttemptAlreadyExists = errors.New("[CONFLICT] Attempt already exists for this context")
 )
 
 const maxAutoSubmitWorkers = 10
+const outboxVisibilityTimeout = time.Minute
+const maxOutboxAttempts = 10
+
+type classroomAssignmentAttemptCreatedPayload struct {
+	StudentID    string `json:"studentId"`
+	AssignmentID uint   `json:"assignmentId"`
+	AttemptID    uint   `json:"attemptId"`
+}
+
+type classroomAssignmentAttemptSubmittedPayload struct {
+	StudentID    string  `json:"studentId"`
+	AssignmentID uint    `json:"assignmentId"`
+	AttemptID    uint    `json:"attemptId"`
+	Score        float64 `json:"score"`
+}
 
 func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, error) {
 	exams, total, err := s.repo.GetListExam(ctx, query.Type, query.Limit(), query.Offset())
@@ -74,6 +101,17 @@ func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, e
 }
 
 func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, error) {
+	if req.ContextType == model.AttemptContextTypeClassroomAssignment {
+		_, err := s.classroomsClient.ValidateAssignmentAttempt(ctx, &classroomsClient.ValidateAssignmentAttemptRequest{
+			UserId:       userID,
+			AssignmentId: uint64(*req.ContextID),
+			ExamId:       uint64(examID),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	activeAttempt, activeErr := s.repo.GetActiveAttemptByUserID(ctx, userID)
 	if activeErr == nil && activeAttempt.ExpiresAt != nil && !time.Now().Before(*activeAttempt.ExpiresAt) {
 		if _, err := s.submitAttempt(ctx, userID, activeAttempt.ID, nil); err != nil &&
@@ -170,10 +208,31 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			Score:          nil,
 			ExamID:         exam.ID,
 			UserID:         userID,
+			ContextType:    req.ContextType,
+			ContextID:      req.ContextID,
 		}
 
 		if err := repo.CreateAttempt(ctx, attempt); err != nil {
 			return err
+		}
+		if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil {
+			payload, err := json.Marshal(classroomAssignmentAttemptCreatedPayload{
+				StudentID:    userID,
+				AssignmentID: *attempt.ContextID,
+				AttemptID:    attempt.ID,
+			})
+			if err != nil {
+				return err
+			}
+			if err := repo.CreateOutboxEvent(ctx, &model.OutboxEvent{
+				Type:          model.OutboxEventTypeClassroomAssignmentAttemptCreated,
+				AggregateID:   valuex.UintStringPtr(attempt.ID),
+				Status:        model.OutboxEventStatusPending,
+				Payload:       payload,
+				NextAttemptAt: time.Now(),
+			}); err != nil {
+				return err
+			}
 		}
 		attempt.Exam = *exam
 		attempt.Answers = []model.AttemptAnswer{}
@@ -183,6 +242,9 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 	if err != nil {
 		if platformdb.IsUniqueViolation(err, model.AttemptActiveUserUniqueIndex) {
 			return nil, errors.New("[CONFLICT] Active attempt already exists")
+		}
+		if platformdb.IsUniqueViolation(err, model.AttemptClassroomAssignmentUniqueIndex) {
+			return nil, ErrContextAttemptAlreadyExists
 		}
 		return nil, err
 	}
@@ -326,9 +388,17 @@ func (s *service) SubmitAttempt(ctx context.Context, userID string, attemptID ui
 }
 
 func (s *service) CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error) {
+	attempt, err := s.repo.GetAttemptForLifecycle(ctx, attemptID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if attempt.ContextType == model.AttemptContextTypeClassroomAssignment {
+		return nil, ErrAssignmentAttemptCancel
+	}
+
 	var response *dto.AttemptResponse
-	err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		attempt, err := repo.GetAttemptForLifecycle(ctx, attemptID, userID)
+	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		attempt, err = repo.GetAttemptForLifecycle(ctx, attemptID, userID)
 		if err != nil {
 			return err
 		}
@@ -581,6 +651,7 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		if err != nil {
 			return err
 		}
+		score = valuex.RoundFloat(score, 2)
 
 		attempt.Status = model.AttemptStatusSubmitted
 		attempt.SubmittedAt = &now
@@ -606,6 +677,27 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 			return err
 		}
 		attempt.History = history
+		if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil && attempt.Score != nil {
+			payload, err := json.Marshal(classroomAssignmentAttemptSubmittedPayload{
+				StudentID:    userID,
+				AssignmentID: *attempt.ContextID,
+				AttemptID:    attempt.ID,
+				Score:        *attempt.Score,
+			})
+			if err != nil {
+				return err
+			}
+
+			if err := repo.CreateOutboxEvent(ctx, &model.OutboxEvent{
+				Type:          model.OutboxEventTypeClassroomAssignmentAttemptSubmitted,
+				AggregateID:   valuex.UintStringPtr(attempt.ID),
+				Status:        model.OutboxEventStatusPending,
+				Payload:       payload,
+				NextAttemptAt: time.Now(),
+			}); err != nil {
+				return err
+			}
+		}
 		response = dto.ToAttemptHistoryResponse(attempt)
 		return nil
 	})
@@ -616,6 +708,186 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 	return response, nil
 }
 
+func (s *service) ProcessOutboxEvents(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+
+	// Lấy một batch nhỏ trước, sau đó publish ngoài DB transaction.
+	var processed atomic.Int64
+	events, err := s.repo.ClaimPendingOutboxEvents(ctx, time.Now(), limit, outboxVisibilityTimeout)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, event := range events {
+		// Publish event nội bộ sang Classrooms.
+		var publishErr error
+		switch event.Type {
+		case model.OutboxEventTypeClassroomAssignmentAttemptCreated:
+			var payload classroomAssignmentAttemptCreatedPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				publishErr = err
+				break
+			}
+			_, publishErr = s.classroomsClient.CreateAssignmentSubmission(ctx, &classroomsClient.CreateAssignmentSubmissionRequest{
+				StudentId:    payload.StudentID,
+				AssignmentId: uint64(payload.AssignmentID),
+				AttemptId:    uint64(payload.AttemptID),
+			})
+		case model.OutboxEventTypeClassroomAssignmentAttemptSubmitted:
+			var payload classroomAssignmentAttemptSubmittedPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				publishErr = err
+				break
+			}
+			_, publishErr = s.classroomsClient.UpdateAssignmentSubmissionResult(ctx, &classroomsClient.UpdateAssignmentSubmissionResultRequest{
+				StudentId:    payload.StudentID,
+				AssignmentId: uint64(payload.AssignmentID),
+				AttemptId:    uint64(payload.AttemptID),
+				Score:        payload.Score,
+			})
+		default:
+			publishErr = errors.New("[ERROR] Unknown outbox event type")
+		}
+
+		// Nếu publish lỗi, giữ event để retry với backoff. Quá số lần tối đa thì dừng retry.
+		if publishErr != nil {
+			attempts := event.Attempts + 1
+			permanent := attempts >= maxOutboxAttempts
+			retryDelay := 5 * time.Second
+			if permanent {
+				retryDelay = 0
+			} else if attempts >= 6 {
+				retryDelay = 5 * time.Minute
+			} else if attempts > 1 {
+				retryDelay = time.Duration(attempts*attempts) * 5 * time.Second
+			}
+
+			nextAttemptAt := time.Now().Add(retryDelay)
+			if markErr := s.repo.MarkOutboxEventFailed(ctx, event, attempts, nextAttemptAt, publishErr.Error(), permanent); markErr != nil {
+				logger.Log.Error().
+					Err(markErr).
+					Uint("event_id", event.ID).
+					Str("event_type", string(event.Type)).
+					Int("attempts", attempts).
+					Str("publish_error", publishErr.Error()).
+					Msg("[OUTBOX] Failed to mark event for retry")
+				return int(processed.Load()), errors.Join(publishErr, markErr)
+			}
+			logEvent := logger.Log.Error().
+				Err(publishErr).
+				Uint("event_id", event.ID).
+				Str("event_type", string(event.Type)).
+				Int("attempts", attempts)
+			if permanent {
+				logEvent.Msg("[OUTBOX] Event reached max retry attempts")
+			} else {
+				logEvent.Time("next_attempt_at", nextAttemptAt).Msg("[OUTBOX] Failed to publish event")
+			}
+			continue
+		}
+
+		// Nếu publish thành công, đánh dấu processed để không claim lại.
+		if err := s.repo.MarkOutboxEventProcessed(ctx, event, time.Now()); err != nil {
+			logger.Log.Error().
+				Err(err).
+				Uint("event_id", event.ID).
+				Str("event_type", string(event.Type)).
+				Msg("[OUTBOX] Failed to mark event processed")
+			return int(processed.Load()), err
+		}
+		logger.Log.Info().
+			Uint("event_id", event.ID).
+			Str("event_type", string(event.Type)).
+			Msg("[OUTBOX] Event published")
+		processed.Add(1)
+	}
+
+	return int(processed.Load()), nil
+}
+
+func (s *service) GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, error) {
+	events, total, err := s.repo.GetPendingOutboxEvents(ctx, query)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	responses := make([]*dto.OutboxEventResponse, len(events))
+	for i, event := range events {
+		responses[i] = dto.ToOutboxEventResponse(event)
+	}
+
+	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+}
+
+func (s *service) ReconcileClassroomAssignmentSubmissions(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+
+	attempts, err := s.repo.GetSubmittedClassroomAssignmentAttemptsForReconcile(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+
+	pendingEvents := make([]*model.OutboxEvent, 0, len(attempts))
+	for _, attempt := range attempts {
+		// Bỏ qua các attempt không có contextID hoặc score để tránh tạo event lỗi.
+		if attempt.ContextID == nil || attempt.Score == nil {
+			continue
+		}
+
+		syncStatus, err := s.classroomsClient.GetAssignmentSubmissionSyncStatus(ctx, &classroomsClient.GetAssignmentSubmissionSyncStatusRequest{
+			StudentId:    attempt.UserID,
+			AssignmentId: uint64(*attempt.ContextID),
+			AttemptId:    uint64(attempt.ID),
+			Score:        *attempt.Score,
+		})
+		if err != nil {
+			return len(pendingEvents), err
+		}
+		if syncStatus.Synced {
+			continue
+		}
+
+		payload, err := json.Marshal(classroomAssignmentAttemptSubmittedPayload{
+			StudentID:    attempt.UserID,
+			AssignmentID: *attempt.ContextID,
+			AttemptID:    attempt.ID,
+			Score:        *attempt.Score,
+		})
+		if err != nil {
+			return len(pendingEvents), err
+		}
+
+		pendingEvents = append(pendingEvents, &model.OutboxEvent{
+			Type:          model.OutboxEventTypeClassroomAssignmentAttemptSubmitted,
+			AggregateID:   valuex.UintStringPtr(attempt.ID),
+			Status:        model.OutboxEventStatusPending,
+			Payload:       payload,
+			NextAttemptAt: time.Now(),
+		})
+	}
+
+	if len(pendingEvents) == 0 {
+		return 0, nil
+	}
+
+	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		for _, event := range pendingEvents {
+			if err := repo.CreateOutboxEvent(ctx, event); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return len(pendingEvents), nil
+}
 func partInSet(part model.PartCode, parts map[model.PartCode]struct{}) bool {
 	_, ok := parts[part]
 	return ok

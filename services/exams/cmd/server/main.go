@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	classroomsClient "ego/api/gen/go/classrooms"
 	tokenClient "ego/api/gen/go/token"
+	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -76,6 +78,13 @@ func main() {
 	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
 	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
 
+	usersConn, err := grpc.NewClient(appConfig.UsersServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to users service")
+	}
+	defer usersConn.Close()
+	usersServiceClient := usersClient.NewUserServiceClient(usersConn)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -100,16 +109,33 @@ func main() {
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
+	classroomsConn, err := grpc.NewClient(appConfig.ClassroomsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to classrooms service")
+	}
+	defer classroomsConn.Close()
+	classroomsServiceClient := classroomsClient.NewClassroomServiceClient(classroomsConn)
+
 	repo := repository.NewRepository(db)
-	service := service.New(repo)
+	service := service.New(repo, classroomsServiceClient)
 	handler := handler.New(service)
 	socketServer := platformsocket.NewServer(tokenServiceClient)
 
-	handler.RegisterRoutes(api, authMiddleware)
+	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
+		resp, err := usersServiceClient.GetUserRole(ctx, &usersClient.GetUserRoleRequest{Id: userID})
+		if err != nil {
+			return "", err
+		}
+		return resp.Role, nil
+	})
+
+	handler.RegisterRoutes(api, authMiddleware, roleMiddleware)
 	examssocket.RegisterHandlers(socketServer, service)
 	api.Handle("/ws/exams", socketServer)
 
 	workers.StartAutoSubmitExpiredAttempts(appCtx, service, 5*time.Second, 100)
+	workers.StartOutboxPublisher(appCtx, service, 2*time.Second, 100)
+	workers.StartClassroomAssignmentSubmissionReconciler(appCtx, service, time.Minute, 100)
 
 	logger.Log.Info().Str("EXAMS_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting exams server")
 	go func() {

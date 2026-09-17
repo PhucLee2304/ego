@@ -1,8 +1,8 @@
 package database
 
 import (
-	"ego/services/exams/config"
-	"ego/services/exams/internal/model"
+	"ego/services/classrooms/config"
+	"ego/services/classrooms/internal/model"
 	"errors"
 	"log"
 
@@ -27,27 +27,15 @@ func Migrate(db *gorm.DB) error {
 	log.Println("Running database migrations...")
 
 	err := db.AutoMigrate(
-		&model.Exam{},
-		&model.Section{},
-		&model.Group{},
-		&model.Question{},
-		&model.Option{},
-		&model.Attempt{},
-		&model.AttemptAnswer{},
-		&model.History{},
-		&model.OutboxEvent{},
+		&model.Classroom{},
+		&model.Member{},
+		&model.Event{},
+		&model.Assignment{},
+		&model.AssignmentSubmission{},
+		&model.Room{},
+		&model.RoomParticipant{},
 	)
 	if err != nil {
-		return err
-	}
-
-	if err := db.Exec(model.CreateAttemptActiveUserUniqueIndexSQL).Error; err != nil {
-		return err
-	}
-	if err := db.Exec(model.CreateAttemptClassroomAssignmentUniqueIndexSQL).Error; err != nil {
-		return err
-	}
-	if err := db.Exec(model.CreateOutboxEventTypeAggregateUniqueIndexSQL).Error; err != nil {
 		return err
 	}
 

@@ -21,7 +21,8 @@ services:
           { "url": "/users/docs/doc.json", "name": "Users" },
           { "url": "/storage/docs/doc.json", "name": "Storage" },
           { "url": "/topics/docs/doc.json", "name": "Topics" },
-          { "url": "/exams/docs/doc.json", "name": "Exams" }
+          { "url": "/exams/docs/doc.json", "name": "Exams" },
+          { "url": "/classrooms/docs/doc.json", "name": "Classrooms" }
         ]
     networks:
       - ego-network
@@ -45,6 +46,8 @@ services:
       topics:
         condition: service_healthy
       exams:
+        condition: service_healthy
+      classrooms:
         condition: service_healthy
     networks:
       - ego-network
@@ -171,6 +174,8 @@ services:
         condition: service_healthy
       auth:
         condition: service_healthy
+      users:
+        condition: service_healthy
 
   exams-seed:
     build:
@@ -210,6 +215,43 @@ services:
       - ego-network
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${EXAMS_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  classrooms:
+    <<: *go-service
+    container_name: classrooms
+    build:
+      context: .
+      dockerfile: services/classrooms/Dockerfile
+      target: server
+    env_file:
+      - ./services/classrooms/.env
+    depends_on:
+      classrooms-db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      exams:
+        condition: service_healthy
+
+  classrooms-db:
+    image: postgres:15.8-alpine
+    container_name: classrooms-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CLASSROOMS_DB_USER}
+      POSTGRES_PASSWORD: ${CLASSROOMS_DB_PASSWORD}
+      POSTGRES_DB: ${CLASSROOMS_DB_NAME}
+    ports:
+      - "${CLASSROOMS_DB_PORT}:5432"
+    volumes:
+      - ./data/classrooms-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${CLASSROOMS_DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5

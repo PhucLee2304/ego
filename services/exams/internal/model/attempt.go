@@ -19,12 +19,15 @@ type Attempt struct {
 	Duration       *int
 	TotalQuestions int `gorm:"not null;default:0"`
 	CorrectAnswers *int
-	Score          *float64
+	Score          *float64 `gorm:"type:numeric(5,2)"`
 
 	ExamID uint `gorm:"not null;index"`
 	Exam   Exam `gorm:"foreignKey:ExamID;references:ID"`
 
 	UserID string `gorm:"type:text;not null;index"`
+
+	ContextType AttemptContextType `gorm:"type:text;not null;default:STANDALONE;index"`
+	ContextID   *uint              `gorm:"index"`
 
 	Answers []AttemptAnswer `gorm:"foreignKey:AttemptID;references:ID"`
 	History *History        `gorm:"foreignKey:AttemptID;references:ID"`
@@ -43,4 +46,14 @@ const (
 	AttemptStatusInProgress AttemptStatus = "ACTIVE"
 	AttemptStatusSubmitted  AttemptStatus = "SUBMITTED"
 	AttemptStatusCancelled  AttemptStatus = "CANCELLED"
+)
+
+type AttemptContextType string
+
+const (
+	// STANDALONE means the attempt is created directly from Exams, not from another module.
+	AttemptContextTypeStandalone AttemptContextType = "STANDALONE"
+
+	// CLASSROOM_ASSIGNMENT means the attempt belongs to a classroom assignment; ContextID is the assignment ID.
+	AttemptContextTypeClassroomAssignment AttemptContextType = "CLASSROOM_ASSIGNMENT"
 )

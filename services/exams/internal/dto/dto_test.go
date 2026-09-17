@@ -52,6 +52,67 @@ func TestSubmitAttemptRequestValidate(t *testing.T) {
 	}
 }
 
+func TestCreateExamAttemptRequestValidateContext(t *testing.T) {
+	contextID := uint(100)
+
+	tests := []struct {
+		name    string
+		request CreateExamAttemptRequest
+		wantErr bool
+	}{
+		{
+			name: "direct test attempt",
+			request: CreateExamAttemptRequest{
+				Mode:        model.AttemptModeTest,
+				ContextType: model.AttemptContextTypeStandalone,
+			},
+		},
+		{
+			name: "standalone with context id",
+			request: CreateExamAttemptRequest{
+				Mode:        model.AttemptModeTest,
+				ContextType: model.AttemptContextTypeStandalone,
+				ContextID:   &contextID,
+			},
+			wantErr: true,
+		},
+		{
+			name: "classroom assignment test attempt",
+			request: CreateExamAttemptRequest{
+				Mode:        model.AttemptModeTest,
+				ContextType: model.AttemptContextTypeClassroomAssignment,
+				ContextID:   &contextID,
+			},
+		},
+		{
+			name: "classroom assignment requires context id",
+			request: CreateExamAttemptRequest{
+				Mode:        model.AttemptModeTest,
+				ContextType: model.AttemptContextTypeClassroomAssignment,
+			},
+			wantErr: true,
+		},
+		{
+			name: "classroom assignment must be test",
+			request: CreateExamAttemptRequest{
+				Mode:        model.AttemptModePractice,
+				ContextType: model.AttemptContextTypeClassroomAssignment,
+				ContextID:   &contextID,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.request.Validate()
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestAttemptQuestionResponseVisibility(t *testing.T) {
 	correctOptionID := uint(11)
 	isCorrect := true

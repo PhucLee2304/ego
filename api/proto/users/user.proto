@@ -13,6 +13,8 @@ service UserService {
       body: "*"
     };
   }
+
+  rpc GetUserRole(GetUserRoleRequest) returns (GetUserRoleResponse);
 }
 
 message UpsertUserRequest {
@@ -23,4 +25,12 @@ message UpsertUserRequest {
 
 message UpsertUserResponse {
     string id = 1;
+}
+
+message GetUserRoleRequest {
+    string id = 1;
+}
+
+message GetUserRoleResponse {
+    string role = 1;
 }

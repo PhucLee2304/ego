@@ -36,3 +36,14 @@ func (s *server) UpsertUser(ctx context.Context, req *usersClient.UpsertUserRequ
 		Id: strconv.Itoa(int(user.ID)),
 	}, nil
 }
+
+func (s *server) GetUserRole(ctx context.Context, req *usersClient.GetUserRoleRequest) (*usersClient.GetUserRoleResponse, error) {
+	user, err := s.repo.GetByID(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &usersClient.GetUserRoleResponse{
+		Role: string(user.Role),
+	}, nil
+}

@@ -18,36 +18,28 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	UsersServiceAddr      string
-	AuthServiceAddr       string
-	StorageServiceAddr    string
-	ClassroomsServiceAddr string
+	AuthServiceAddr string
+	ExamsServiceURL string
 
-	SeedDir           string
-	SeedUploadWorkers int
-	SeedUploadRetries int
+	MaxStudentsPerClass int
 }
 
 func LoadAppConfig() (*AppConfig, error) {
 	config := &AppConfig{
 		Port:     getEnv("APP_PORT", "8080"),
 		Mode:     getEnv("APP_MODE", "development"),
-		GRPCPort: getEnv("GRPC_PORT", "50056"),
+		GRPCPort: getEnv("GRPC_PORT", "50057"),
 
-		DBHost:     getEnv("DB_HOST", "exams-db"),
+		DBHost:     getEnv("DB_HOST", "classrooms-db"),
 		DBPort:     getEnv("DB_PORT", "5432"),
 		DBUser:     getEnv("DB_USER", "postgres"),
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
-		DBName:     getEnv("DB_NAME", "examsdb"),
+		DBName:     getEnv("DB_NAME", "classroomsdb"),
 
-		UsersServiceAddr:      getEnv("USERS_SERVICE_ADDR", "users:50052"),
-		AuthServiceAddr:       getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		StorageServiceAddr:    getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
-		ClassroomsServiceAddr: getEnv("CLASSROOMS_SERVICE_ADDR", "classrooms:50057"),
+		AuthServiceAddr: getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		ExamsServiceURL: getEnv("EXAMS_SERVICE_URL", "exams:50056"),
 
-		SeedDir:           getEnv("SEED_DIR", "services/exams/seed"),
-		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
-		SeedUploadRetries: getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
+		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",

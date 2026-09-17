@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	platformdb "ego/platform/db"
+	"ego/services/exams/internal/dto"
 	"ego/services/exams/internal/model"
 	"time"
 
@@ -288,4 +289,141 @@ func (r *Repository) UpsertHistory(ctx context.Context, history *model.History) 
 			"deleted_at",
 		}),
 	}).Create(history).Error
+}
+
+func (r *Repository) CreateOutboxEvent(ctx context.Context, event *model.OutboxEvent) error {
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).Create(event).Error
+}
+
+func (r *Repository) ClaimPendingOutboxEvents(ctx context.Context, now time.Time, limit int, visibilityTimeout time.Duration) ([]*model.OutboxEvent, error) {
+	var events []*model.OutboxEvent
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("processed_at IS NULL AND status IN ? AND next_attempt_at <= ?", []model.OutboxEventStatus{
+				model.OutboxEventStatusPending,
+				model.OutboxEventStatusProcessing,
+				model.OutboxEventStatusFailed,
+			}, now).
+			Order("next_attempt_at ASC, id ASC").
+			Limit(limit).
+			Find(&events).Error; err != nil {
+			return err
+		}
+
+		if len(events) == 0 {
+			return nil
+		}
+
+		ids := make([]uint, 0, len(events))
+		for _, event := range events {
+			ids = append(ids, event.ID)
+		}
+
+		return tx.Model(&model.OutboxEvent{}).
+			Where("id IN ?", ids).
+			Updates(map[string]any{
+				"status":          model.OutboxEventStatusProcessing,
+				"next_attempt_at": now.Add(visibilityTimeout),
+			}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return events, nil
+}
+
+func (r *Repository) MarkOutboxEventProcessed(ctx context.Context, event *model.OutboxEvent, processedAt time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(event).
+		Updates(map[string]any{
+			"processed_at": processedAt,
+			"status":       model.OutboxEventStatusProcessed,
+			"last_error":   nil,
+			"updated_at":   processedAt,
+		}).Error
+}
+
+func (r *Repository) MarkOutboxEventFailed(ctx context.Context, event *model.OutboxEvent, attempts int, nextAttemptAt time.Time, lastError string, permanent bool) error {
+	status := model.OutboxEventStatusFailed
+	if permanent {
+		status = model.OutboxEventStatusFailedPermanent
+	}
+
+	return r.db.WithContext(ctx).
+		Model(event).
+		Updates(map[string]any{
+			"attempts":        attempts,
+			"status":          status,
+			"next_attempt_at": nextAttemptAt,
+			"last_error":      lastError,
+			"updated_at":      time.Now(),
+		}).Error
+}
+
+func (r *Repository) GetPendingOutboxEvents(ctx context.Context, filter dto.GetPendingOutboxEventsQuery) ([]*model.OutboxEvent, int64, error) {
+	var events []*model.OutboxEvent
+	var total int64
+	query := r.db.WithContext(ctx).
+		Model(&model.OutboxEvent{}).
+		Where("processed_at IS NULL AND status <> ?", model.OutboxEventStatusProcessed)
+	if filter.Type != "" {
+		query = query.Where("type = ?", filter.Type)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.MinAttempts > 0 {
+		query = query.Where("attempts >= ?", filter.MinAttempts)
+	}
+	if filter.HasError != nil {
+		if *filter.HasError {
+			query = query.Where("last_error IS NOT NULL AND last_error <> ''")
+		} else {
+			query = query.Where("last_error IS NULL OR last_error = ''")
+		}
+	}
+	if filter.CreatedFrom != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedTo)
+	}
+	if filter.NextAttemptFrom != nil {
+		query = query.Where("next_attempt_at >= ?", *filter.NextAttemptFrom)
+	}
+	if filter.NextAttemptTo != nil {
+		query = query.Where("next_attempt_at <= ?", *filter.NextAttemptTo)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := query.
+		Order("attempts DESC, next_attempt_at ASC, id ASC").
+		Limit(int(filter.Limit())).
+		Offset(int(filter.Offset())).
+		Find(&events).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return events, total, nil
+}
+
+func (r *Repository) GetSubmittedClassroomAssignmentAttemptsForReconcile(ctx context.Context, limit int) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	if err := r.db.WithContext(ctx).
+		Where("status = ? AND context_type = ? AND context_id IS NOT NULL AND score IS NOT NULL",
+			model.AttemptStatusSubmitted,
+			model.AttemptContextTypeClassroomAssignment,
+		).
+		Order("submitted_at DESC, id DESC").
+		Limit(limit).
+		Find(&attempts).Error; err != nil {
+		return nil, err
+	}
+
+	return attempts, nil
 }

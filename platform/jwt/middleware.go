@@ -84,7 +84,7 @@ func NewRoleMiddleware(roleResolver RoleResolver) *RoleMiddleware {
 func (m *RoleMiddleware) RequireRole(roles ...string) func(http.HandlerFunc) http.HandlerFunc {
 	mp := make(map[string]struct{}, len(roles))
 	for _, role := range roles {
-		mp[role] = struct{}{}
+		mp[strings.ToLower(strings.TrimSpace(role))] = struct{}{}
 	}
 
 	return func(next http.HandlerFunc) http.HandlerFunc {
@@ -101,6 +101,7 @@ func (m *RoleMiddleware) RequireRole(roles ...string) func(http.HandlerFunc) htt
 				return
 			}
 
+			role = strings.ToLower(strings.TrimSpace(role))
 			if _, ok := mp[role]; !ok {
 				httpx.Error(w, http.StatusForbidden, "[JWT] Forbidden: Access denied")
 				return

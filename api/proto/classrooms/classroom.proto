@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package classrooms;
+
+option go_package = "ego/api/gen/go/classrooms";
+
+import "google/api/annotations.proto";
+
+service ClassroomService {
+  rpc ValidateAssignmentAttempt(ValidateAssignmentAttemptRequest)
+      returns (ValidateAssignmentAttemptResponse) {
+    option (google.api.http) = {
+      post: "/v1/internal/assignments/{assignment_id}/attempt/validate"
+      body: "*"
+    };
+  }
+
+  rpc CreateAssignmentSubmission(CreateAssignmentSubmissionRequest)
+      returns (AssignmentSubmissionResponse) {
+    option (google.api.http) = {
+      post: "/v1/internal/assignments/{assignment_id}/submissions"
+      body: "*"
+    };
+  }
+
+  rpc UpdateAssignmentSubmissionResult(UpdateAssignmentSubmissionResultRequest)
+      returns (AssignmentSubmissionResponse) {
+    option (google.api.http) = {
+      patch: "/v1/internal/assignments/{assignment_id}/submissions/{attempt_id}/result"
+      body: "*"
+    };
+  }
+
+  rpc GetAssignmentSubmissionSyncStatus(GetAssignmentSubmissionSyncStatusRequest)
+      returns (GetAssignmentSubmissionSyncStatusResponse);
+}
+
+message ValidateAssignmentAttemptRequest {
+  string user_id = 1;
+  uint64 assignment_id = 2;
+  uint64 exam_id = 3;
+}
+
+message ValidateAssignmentAttemptResponse {
+  uint64 assignment_id = 1;
+  uint64 classroom_id = 2;
+  uint64 exam_id = 3;
+}
+
+message CreateAssignmentSubmissionRequest {
+  string student_id = 1;
+  uint64 assignment_id = 2;
+  uint64 attempt_id = 3;
+}
+
+message UpdateAssignmentSubmissionResultRequest {
+  string student_id = 1;
+  uint64 assignment_id = 2;
+  uint64 attempt_id = 3;
+  double score = 4;
+}
+
+message AssignmentSubmissionResponse {
+  uint64 assignment_id = 1;
+  string student_id = 2;
+  uint64 attempt_id = 3;
+  optional double score = 4;
+}
+
+message GetAssignmentSubmissionSyncStatusRequest {
+  string student_id = 1;
+  uint64 assignment_id = 2;
+  uint64 attempt_id = 3;
+  double score = 4;
+}
+
+message GetAssignmentSubmissionSyncStatusResponse {
+  bool exists = 1;
+  bool attempt_matched = 2;
+  bool score_matched = 3;
+  bool synced = 4;
+}

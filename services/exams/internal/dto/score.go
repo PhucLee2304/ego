@@ -3,8 +3,8 @@ package dto
 import (
 	"errors"
 	"fmt"
-	"math"
 
+	"ego/platform/valuex"
 	"ego/services/exams/internal/model"
 )
 
@@ -63,7 +63,7 @@ func calculateLinearScore(correctAnswers, totalQuestions int, maxScore float64) 
 		correctAnswers = totalQuestions
 	}
 
-	return math.Round((float64(correctAnswers)/float64(totalQuestions))*maxScore*100) / 100
+	return valuex.RoundFloat((float64(correctAnswers)/float64(totalQuestions))*maxScore, 2)
 }
 
 func calculateTOEICScore(listeningCorrect, readingCorrect int) int {
