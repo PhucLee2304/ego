@@ -45,6 +45,17 @@ func (r *Repository) GetByID(ctx context.Context, userID string) (*model.User, e
 	return &user, nil
 }
 
+func (r *Repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.User, error) {
+	var users []*model.User
+	if len(userIDs) == 0 {
+		return users, nil
+	}
+	if err := r.db.WithContext(ctx).Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 func (r *Repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).

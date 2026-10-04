@@ -15,6 +15,7 @@ service UserService {
   }
 
   rpc GetUserRole(GetUserRoleRequest) returns (GetUserRoleResponse);
+  rpc GetUsersInfo(GetUsersInfoRequest) returns (GetUsersInfoResponse);
 }
 
 message UpsertUserRequest {
@@ -33,4 +34,19 @@ message GetUserRoleRequest {
 
 message GetUserRoleResponse {
     string role = 1;
+}
+
+message GetUsersInfoRequest {
+    repeated string ids = 1;
+}
+
+message UserInfo {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string avatar = 4;
+}
+
+message GetUsersInfoResponse {
+    repeated UserInfo users = 1;
 }

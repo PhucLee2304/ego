@@ -1,7 +1,6 @@
 package rpc
 
 import (
-	"ego/services/classrooms/internal/service"
 	"errors"
 	"testing"
 
@@ -23,17 +22,17 @@ func TestToStatusError(t *testing.T) {
 		},
 		{
 			name: "student not approved",
-			err:  service.ErrStudentNotApproved,
+			err:  errStudentNotApproved,
 			code: codes.PermissionDenied,
 		},
 		{
 			name: "exam mismatch",
-			err:  service.ErrAssignmentExamMismatch,
+			err:  errAssignmentExamMismatch,
 			code: codes.InvalidArgument,
 		},
 		{
 			name: "assignment closed",
-			err:  service.ErrAssignmentClosed,
+			err:  errAssignmentClosed,
 			code: codes.FailedPrecondition,
 		},
 		{

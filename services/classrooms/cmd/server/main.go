@@ -4,6 +4,7 @@ import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
 	tokenClient "ego/api/gen/go/token"
+	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -18,12 +19,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	_ "ego/services/classrooms/docs"
 )
 
 // @title           Classrooms Service API
@@ -44,7 +48,7 @@ func main() {
 
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Log.Fatal().Msg("[CRITICAL] Application panicked")
+			logger.Log.Fatal().Str("panic", fmt.Sprint(r)).Bytes("stack", debug.Stack()).Msg("[CRITICAL] Application panicked")
 		}
 	}()
 
@@ -71,6 +75,20 @@ func main() {
 	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
 	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
 
+	usersConn, err := grpc.NewClient(appConfig.UsersServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to users service")
+	}
+	defer usersConn.Close()
+	usersServiceClient := usersClient.NewUserServiceClient(usersConn)
+	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
+		resp, err := usersServiceClient.GetUserRole(ctx, &usersClient.GetUserRoleRequest{Id: userID})
+		if err != nil {
+			return "", err
+		}
+		return resp.Role, nil
+	})
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -96,10 +114,10 @@ func main() {
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
 	repo := repository.NewRepository(db)
-	service := service.New(repo)
-	handler := handler.New()
+	service := service.New(repo, appConfig, usersServiceClient)
+	handler := handler.New(service)
 
-	handler.RegisterRoutes(api, authMiddleware)
+	handler.RegisterRoutes(api, authMiddleware, roleMiddleware)
 
 	server := &http.Server{
 		Addr:    ":" + appConfig.Port,
@@ -118,7 +136,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start classrooms gRPC server")
 	}
 
-	rpcServer := classroomsRpc.New(service)
+	rpcServer := classroomsRpc.New(repo)
 	grpcServer := grpc.NewServer()
 	classroomsClient.RegisterClassroomServiceServer(grpcServer, rpcServer)
 

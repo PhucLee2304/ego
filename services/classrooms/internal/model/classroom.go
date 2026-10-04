@@ -9,9 +9,8 @@ type Classroom struct {
 	Description *string `gorm:"type:text"`
 	Avatar      *string `gorm:"type:text"`
 
-	TeacherID   string `gorm:"type:text;not null;index"`
-	Active      bool   `gorm:"not null;default:true;index"`
-	MaxStudents int    `gorm:"not null;default:50"`
+	TeacherID string `gorm:"type:text;not null;index"`
+	Active    bool   `gorm:"not null;default:true;index"`
 
 	Members     []Member     `gorm:"foreignKey:ClassroomID;references:ID"`
 	Events      []Event      `gorm:"foreignKey:ClassroomID;references:ID"`

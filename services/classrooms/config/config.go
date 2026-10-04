@@ -18,8 +18,9 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr string
-	ExamsServiceURL string
+	AuthServiceAddr  string
+	UsersServiceAddr string
+	ExamsServiceURL  string
 
 	MaxStudentsPerClass int
 }
@@ -36,8 +37,9 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "classroomsdb"),
 
-		AuthServiceAddr: getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		ExamsServiceURL: getEnv("EXAMS_SERVICE_URL", "exams:50056"),
+		AuthServiceAddr:  getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		UsersServiceAddr: getEnv("USERS_SERVICE_ADDR", "users:50052"),
+		ExamsServiceURL:  getEnv("EXAMS_SERVICE_URL", "exams:50056"),
 
 		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
 	}

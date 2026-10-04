@@ -47,3 +47,28 @@ func (s *server) GetUserRole(ctx context.Context, req *usersClient.GetUserRoleRe
 		Role: string(user.Role),
 	}, nil
 }
+
+func (s *server) GetUsersInfo(ctx context.Context, req *usersClient.GetUsersInfoRequest) (*usersClient.GetUsersInfoResponse, error) {
+	users, err := s.repo.GetByIDs(ctx, req.Ids)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &usersClient.GetUsersInfoResponse{
+		Users: make([]*usersClient.UserInfo, len(users)),
+	}
+	for i, user := range users {
+		avatar := ""
+		if user.Avatar != nil {
+			avatar = *user.Avatar
+		}
+		res.Users[i] = &usersClient.UserInfo{
+			Id:     strconv.Itoa(int(user.ID)),
+			Email:  user.Email,
+			Name:   user.Name,
+			Avatar: avatar,
+		}
+	}
+
+	return res, nil
+}

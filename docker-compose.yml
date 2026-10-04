@@ -233,6 +233,8 @@ services:
         condition: service_healthy
       auth:
         condition: service_healthy
+      users:
+        condition: service_healthy
       exams:
         condition: service_healthy
 
