@@ -6,12 +6,15 @@ import (
 	"testing"
 	"time"
 
+	classroomsClient "ego/api/gen/go/classrooms"
 	"ego/services/classrooms/config"
 	"ego/services/classrooms/database"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
 	"ego/services/classrooms/internal/service"
+	classroomsSocket "ego/services/classrooms/internal/socket"
+	classroomsRpc "ego/services/classrooms/rpc"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -51,8 +54,35 @@ func TestAssignmentScheduleAndExamUniqueness(t *testing.T) {
 	}
 
 	repo := repository.NewRepository(db)
-	svc := service.New(repo, &config.AppConfig{}, nil, nil)
 	ctx := context.Background()
+	var publishedUserID string
+	var publishedEvents []any
+	rpcServer := classroomsRpc.New(repo, func(userID string, payload any) {
+		publishedUserID = userID
+		publishedEvents = append(publishedEvents, payload)
+	})
+	createdSubmission, err := rpcServer.CreateAssignmentSubmission(ctx, &classroomsClient.CreateAssignmentSubmissionRequest{
+		AssignmentId: uint64(assignment.ID), StudentId: "student", AttemptId: 101, AllowInactive: true,
+	})
+	if err != nil || createdSubmission.AttemptId != 101 || publishedUserID != classroom.TeacherID || len(publishedEvents) != 1 {
+		t.Fatalf("create submission realtime event: response=%#v teacher=%q events=%d err=%v", createdSubmission, publishedUserID, len(publishedEvents), err)
+	}
+	createdEvent, ok := publishedEvents[0].(classroomsSocket.GradebookUpdatedEvent)
+	if !ok || createdEvent.Payload.Status != string(model.SubmissionStatusInProgress) || createdEvent.Payload.AssignmentID != assignment.ID {
+		t.Fatalf("unexpected created gradebook event: %#v", publishedEvents[0])
+	}
+	updatedSubmission, err := rpcServer.UpdateAssignmentSubmissionResult(ctx, &classroomsClient.UpdateAssignmentSubmissionResultRequest{
+		AssignmentId: uint64(assignment.ID), StudentId: "student", AttemptId: 101, Score: 8.5,
+	})
+	if err != nil || updatedSubmission.Score == nil || *updatedSubmission.Score != 8.5 || len(publishedEvents) != 2 {
+		t.Fatalf("update submission realtime event: response=%#v events=%d err=%v", updatedSubmission, len(publishedEvents), err)
+	}
+	updatedEvent, ok := publishedEvents[1].(classroomsSocket.GradebookUpdatedEvent)
+	if !ok || updatedEvent.Payload.Status != string(model.SubmissionStatusSubmitted) || updatedEvent.Payload.Score == nil || *updatedEvent.Payload.Score != 8.5 {
+		t.Fatalf("unexpected submitted gradebook event: %#v", publishedEvents[1])
+	}
+
+	svc := service.New(repo, &config.AppConfig{}, nil, nil)
 	endsAt := opensAt.Add(time.Hour)
 	created, err := svc.CreateSchedule(ctx, classroom.TeacherID, classroom.ID, dto.CreateScheduleRequest{Title: "Live class", StartsAt: opensAt, EndsAt: endsAt})
 	if err != nil || created.ID == 0 {

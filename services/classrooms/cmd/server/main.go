@@ -9,6 +9,7 @@ import (
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
+	platformsocket "ego/platform/socket"
 	classroomsConfig "ego/services/classrooms/config"
 	"ego/services/classrooms/database"
 	"ego/services/classrooms/internal/handler"
@@ -124,8 +125,10 @@ func main() {
 	repo := repository.NewRepository(db)
 	service := service.New(repo, appConfig, usersServiceClient, examsServiceClient)
 	handler := handler.New(service)
+	socketServer := platformsocket.NewServer(tokenServiceClient)
 
 	handler.RegisterRoutes(api, authMiddleware, roleMiddleware)
+	api.Handle("/ws/classrooms", socketServer)
 
 	server := &http.Server{
 		Addr:    ":" + appConfig.Port,
@@ -144,7 +147,7 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start classrooms gRPC server")
 	}
 
-	rpcServer := classroomsRpc.New(repo)
+	rpcServer := classroomsRpc.New(repo, socketServer.BroadcastToUser)
 	grpcServer := grpc.NewServer()
 	classroomsClient.RegisterClassroomServiceServer(grpcServer, rpcServer)
 
