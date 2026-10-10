@@ -77,9 +77,9 @@ func TestCreateExamAttemptRequestValidateContext(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "classroom assignment test attempt",
+			name: "classroom assignment attempt",
 			request: CreateExamAttemptRequest{
-				Mode:        model.AttemptModeTest,
+				Mode:        model.AttemptModeAssignment,
 				ContextType: model.AttemptContextTypeClassroomAssignment,
 				ContextID:   &contextID,
 			},
@@ -87,15 +87,15 @@ func TestCreateExamAttemptRequestValidateContext(t *testing.T) {
 		{
 			name: "classroom assignment requires context id",
 			request: CreateExamAttemptRequest{
-				Mode:        model.AttemptModeTest,
+				Mode:        model.AttemptModeAssignment,
 				ContextType: model.AttemptContextTypeClassroomAssignment,
 			},
 			wantErr: true,
 		},
 		{
-			name: "classroom assignment must be test",
+			name: "classroom assignment must omit client mode",
 			request: CreateExamAttemptRequest{
-				Mode:        model.AttemptModePractice,
+				Mode:        model.AttemptModeTest,
 				ContextType: model.AttemptContextTypeClassroomAssignment,
 				ContextID:   &contextID,
 			},

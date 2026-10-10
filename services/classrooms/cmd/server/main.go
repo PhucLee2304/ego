@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
+	examsClient "ego/api/gen/go/exams"
 	tokenClient "ego/api/gen/go/token"
 	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
@@ -89,6 +90,13 @@ func main() {
 		return resp.Role, nil
 	})
 
+	examsConn, err := grpc.NewClient(appConfig.ExamsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to exams service")
+	}
+	defer examsConn.Close()
+	examsServiceClient := examsClient.NewExamServiceClient(examsConn)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +122,7 @@ func main() {
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
 	repo := repository.NewRepository(db)
-	service := service.New(repo, appConfig, usersServiceClient)
+	service := service.New(repo, appConfig, usersServiceClient, examsServiceClient)
 	handler := handler.New(service)
 
 	handler.RegisterRoutes(api, authMiddleware, roleMiddleware)

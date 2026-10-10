@@ -309,6 +309,8 @@ func (h *handler) SubmitAttempt(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusConflict, err.Error())
 		case errors.Is(err, service.ErrQuestionNotBelongToAttempt), errors.Is(err, service.ErrOptionNotBelongToQuestion):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrAttemptExpired):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
 		default:
 			httpx.Error(w, http.StatusInternalServerError, err.Error())
 		}

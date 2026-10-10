@@ -36,6 +36,11 @@ func TestToStatusError(t *testing.T) {
 			code: codes.FailedPrecondition,
 		},
 		{
+			name: "assignment inactive",
+			err:  errAssignmentNotActive,
+			code: codes.FailedPrecondition,
+		},
+		{
 			name: "unknown",
 			err:  errors.New("boom"),
 			code: codes.Internal,

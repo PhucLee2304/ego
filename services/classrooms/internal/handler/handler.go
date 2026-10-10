@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"ego/platform/httpx"
 	"ego/platform/jwt"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/service"
+
+	"gorm.io/gorm"
 )
 
 type Handler interface {
@@ -23,6 +26,17 @@ type Handler interface {
 	ApproveMember(w http.ResponseWriter, r *http.Request)
 	RejectMember(w http.ResponseWriter, r *http.Request)
 	RemoveMember(w http.ResponseWriter, r *http.Request)
+	CreateAssignments(w http.ResponseWriter, r *http.Request)
+	AssignExistingExam(w http.ResponseWriter, r *http.Request)
+	UpdateAssignmentSchedule(w http.ResponseWriter, r *http.Request)
+	GetAssignments(w http.ResponseWriter, r *http.Request)
+	GetAssignment(w http.ResponseWriter, r *http.Request)
+	SetAssignmentActive(w http.ResponseWriter, r *http.Request)
+	GetGradebook(w http.ResponseWriter, r *http.Request)
+	GetEditableAssignment(w http.ResponseWriter, r *http.Request)
+	UpdateAssignmentContent(w http.ResponseWriter, r *http.Request)
+	ResetAssignmentAttempt(w http.ResponseWriter, r *http.Request)
+	ReconcileAssignmentSubmissions(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -37,7 +51,7 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms", mw.Handle(h.CreateClassroom))
 	mux.HandleFunc("GET /classrooms", mw.Handle(rm.RequireRole("admin")(h.GetClassrooms)))
 	mux.HandleFunc("GET /classrooms/me", mw.Handle(h.GetMyClassrooms))
-	mux.HandleFunc("GET /classrooms/code/{code}", mw.Handle(h.GetClassroomByCode))
+	mux.HandleFunc("GET /classrooms/code", mw.Handle(h.GetClassroomByCode))
 	mux.HandleFunc("GET /classrooms/{id}", mw.Handle(h.GetClassroom))
 	mux.HandleFunc("PATCH /classrooms/{id}", mw.Handle(h.UpdateClassroom))
 	mux.HandleFunc("POST /classrooms/{id}/archive", mw.Handle(h.ArchiveClassroom))
@@ -46,6 +60,85 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms/{id}/members/{userId}/approve", mw.Handle(h.ApproveMember))
 	mux.HandleFunc("POST /classrooms/{id}/members/{userId}/reject", mw.Handle(h.RejectMember))
 	mux.HandleFunc("DELETE /classrooms/{id}/members/{userId}", mw.Handle(h.RemoveMember))
+	mux.HandleFunc("POST /classrooms/assignments", mw.Handle(h.CreateAssignments))
+	mux.HandleFunc("GET /classrooms/{id}/assignments", mw.Handle(h.GetAssignments))
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}", mw.Handle(h.GetAssignment))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/classrooms", mw.Handle(h.AssignExistingExam))
+	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}/schedule", mw.Handle(h.UpdateAssignmentSchedule))
+	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}/active", mw.Handle(h.SetAssignmentActive))
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/gradebook", mw.Handle(h.GetGradebook))
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/edit", mw.Handle(h.GetEditableAssignment))
+	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}", mw.Handle(h.UpdateAssignmentContent))
+	mux.HandleFunc("DELETE /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt", mw.Handle(h.ResetAssignmentAttempt))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/gradebook/reconcile", mw.Handle(h.ReconcileAssignmentSubmissions))
+}
+
+func (h *handler) ReconcileAssignmentSubmissions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	count, err := h.service.ReconcileAssignmentSubmissions(r.Context(), userID, classroomID, assignmentID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusAccepted, map[string]int{"enqueuedCount": count})
+}
+
+func (h *handler) ResetAssignmentAttempt(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	studentID := r.PathValue("studentId")
+	if studentID == "" {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid student ID")
+		return
+	}
+	if err := h.service.ResetAssignmentAttempt(r.Context(), userID, classroomID, assignmentID, studentID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // CreateClassroom godoc
@@ -180,12 +273,15 @@ func (h *handler) GetClassroom(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.GetClassroom(r.Context(), userID, id)
 	if err != nil {
-		switch err {
-		case service.ErrClassroomForbidden:
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
-		default:
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
@@ -198,27 +294,31 @@ func (h *handler) GetClassroom(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        code path string true "Classroom code"
+// @Param        code query string true "Classroom code"
 // @Success      200 {object} dto.ClassroomByCodeResponse
 // @Failure      400 {object} httpx.ErrorResponse
 // @Failure      401 {object} httpx.ErrorResponse
 // @Failure      404 {object} httpx.ErrorResponse
 // @Failure      500 {object} httpx.ErrorResponse
-// @Router       /classrooms/code/{code} [get]
+// @Router       /classrooms/code [get]
 func (h *handler) GetClassroomByCode(w http.ResponseWriter, r *http.Request) {
-	code := r.PathValue("code")
-	if code == "" {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom code")
+	var query dto.GetClassroomByCodeQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
 		return
 	}
 
-	resp, err := h.service.GetClassroomByCode(r.Context(), code)
+	resp, err := h.service.GetClassroomByCode(r.Context(), query.Code)
 	if err != nil {
-		if err == service.ErrClassroomNotActive {
+		switch {
+		case errors.Is(err, service.ErrClassroomNotActive):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
-		httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
@@ -259,14 +359,18 @@ func (h *handler) UpdateClassroom(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.service.UpdateClassroom(r.Context(), userID, id, body)
 	if err != nil {
-		switch err {
-		case service.ErrClassroomForbidden:
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
-		case service.ErrClassroomNotActive:
+			return
+		case errors.Is(err, service.ErrClassroomNotActive):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
-		default:
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
@@ -301,11 +405,15 @@ func (h *handler) ArchiveClassroom(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.ArchiveClassroom(r.Context(), userID, id)
 	if err != nil {
-		if err == service.ErrClassroomForbidden {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
 			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
-		httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
@@ -339,12 +447,15 @@ func (h *handler) RequestJoinClassroom(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.service.RequestJoinClassroom(r.Context(), userID, body)
 	if err != nil {
-		switch err {
-		case service.ErrClassroomCapacityFull, service.ErrTeacherCannotJoinClass, service.ErrClassroomNotActive:
+		switch {
+		case errors.Is(err, service.ErrClassroomCapacityFull), errors.Is(err, service.ErrTeacherCannotJoinClass), errors.Is(err, service.ErrClassroomNotActive):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
-		default:
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, resp)
@@ -379,11 +490,15 @@ func (h *handler) GetJoinRequests(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.GetJoinRequests(r.Context(), userID, id)
 	if err != nil {
-		if err == service.ErrClassroomForbidden {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
 			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
-		httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
@@ -424,14 +539,18 @@ func (h *handler) ApproveMember(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.ApproveMember(r.Context(), userID, id, memberID)
 	if err != nil {
-		switch err {
-		case service.ErrClassroomForbidden:
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
-		case service.ErrClassroomNotActive:
+			return
+		case errors.Is(err, service.ErrClassroomNotActive):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
-		default:
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
@@ -472,14 +591,18 @@ func (h *handler) RejectMember(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.RejectMember(r.Context(), userID, id, memberID)
 	if err != nil {
-		switch err {
-		case service.ErrClassroomForbidden:
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
-		case service.ErrClassroomNotActive:
+			return
+		case errors.Is(err, service.ErrClassroomNotActive):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
-		default:
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
@@ -518,12 +641,432 @@ func (h *handler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.service.RemoveMember(r.Context(), userID, id, memberID); err != nil {
-		if err == service.ErrClassroomForbidden {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
 			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
 		}
-		httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// CreateAssignments godoc
+// @Summary      Create classroom assignments
+// @Description  Create a private exam and assign it to multiple classrooms owned by the current teacher.
+// @Tags         Classrooms
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        request body dto.CreateAssignmentsRequest true "Create assignments request"
+// @Success      201 {object} dto.CreatedAssignmentsResponse
+// @Failure      400 {object} httpx.ErrorResponse
+// @Failure      401 {object} httpx.ErrorResponse
+// @Failure      403 {object} httpx.ErrorResponse
+// @Failure      404 {object} httpx.ErrorResponse
+// @Failure      500 {object} httpx.ErrorResponse
+// @Router       /classrooms/assignments [post]
+func (h *handler) CreateAssignments(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+
+	var body dto.CreateAssignmentsRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+
+	resp, err := h.service.CreateAssignments(r.Context(), userID, body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrClassroomNotActive),
+			errors.Is(err, service.ErrAssignmentInvalidTime),
+			errors.Is(err, service.ErrAssignmentDuration):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, resp)
+}
+
+func (h *handler) GetEditableAssignment(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	response, err := h.service.GetEditableAssignment(r.Context(), userID, classroomID, assignmentID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *handler) UpdateAssignmentContent(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	var body dto.UpdateAssignmentContentRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	response, err := h.service.UpdateAssignmentContent(r.Context(), userID, classroomID, assignmentID, body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAssignmentContentConfirmation):
+			httpx.Error(w, http.StatusConflict, err.Error())
+			return
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+// GetAssignments godoc
+// @Summary      Get classroom assignments
+// @Description  Get assignments when the current user is the teacher or an approved student.
+// @Tags         Classrooms
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        page query int false "Page number"
+// @Param        pageSize query int false "Page size"
+// @Success      200 {object} httpx.PaginatedResponse[dto.AssignmentResponse]
+// @Failure      400 {object} httpx.ErrorResponse
+// @Failure      401 {object} httpx.ErrorResponse
+// @Failure      403 {object} httpx.ErrorResponse
+// @Failure      404 {object} httpx.ErrorResponse
+// @Failure      500 {object} httpx.ErrorResponse
+// @Router       /classrooms/{id}/assignments [get]
+func (h *handler) GetAssignments(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	id, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+
+	var query dto.AssignmentsQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
+		return
+	}
+	query.Normalize()
+
+	resp, pageCounts, err := h.service.GetAssignments(r.Context(), userID, id, query)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, pageCounts))
+}
+
+// GetAssignment godoc
+// @Summary      Get classroom assignment
+// @Description  Get an assignment when the current user is the teacher or an approved student.
+// @Tags         Classrooms
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        assignmentId path int true "Assignment ID"
+// @Success      200 {object} dto.AssignmentResponse
+// @Failure      400 {object} httpx.ErrorResponse
+// @Failure      401 {object} httpx.ErrorResponse
+// @Failure      403 {object} httpx.ErrorResponse
+// @Failure      404 {object} httpx.ErrorResponse
+// @Failure      500 {object} httpx.ErrorResponse
+// @Router       /classrooms/{id}/assignments/{assignmentId} [get]
+func (h *handler) GetAssignment(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	id, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+
+	resp, err := h.service.GetAssignment(r.Context(), userID, id, assignmentID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resp)
+}
+
+// SetAssignmentActive godoc
+// @Summary      Activate or deactivate an assignment
+// @Description  Update assignment availability. Only the classroom teacher can perform this action.
+// @Tags         Classrooms
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        assignmentId path int true "Assignment ID"
+// @Param        request body dto.SetAssignmentActiveRequest true "Assignment active state"
+// @Success      200 {object} dto.AssignmentResponse
+// @Failure      400 {object} httpx.ErrorResponse
+// @Failure      401 {object} httpx.ErrorResponse
+// @Failure      403 {object} httpx.ErrorResponse
+// @Failure      404 {object} httpx.ErrorResponse
+// @Router       /classrooms/{id}/assignments/{assignmentId}/active [patch]
+func (h *handler) SetAssignmentActive(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	var body dto.SetAssignmentActiveRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+
+	resp, err := h.service.SetAssignmentActive(r.Context(), userID, classroomID, assignmentID, *body.Active)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrClassroomNotActive), errors.Is(err, service.ErrAssignmentExpired):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resp)
+}
+
+func (h *handler) AssignExistingExam(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	var body dto.AssignExistingExamRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	resp, err := h.service.AssignExistingExam(r.Context(), userID, classroomID, assignmentID, body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrClassroomNotActive),
+			errors.Is(err, service.ErrAssignmentInvalidTime),
+			errors.Is(err, service.ErrAssignmentDuration):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, service.ErrAssignmentAlreadyExists):
+			httpx.Error(w, http.StatusConflict, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, resp)
+}
+
+func (h *handler) UpdateAssignmentSchedule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	var body dto.UpdateAssignmentScheduleRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	resp, err := h.service.UpdateAssignmentSchedule(r.Context(), userID, classroomID, assignmentID, body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrAssignmentScheduleConfirmation):
+			httpx.Error(w, http.StatusConflict, err.Error())
+			return
+		case errors.Is(err, service.ErrAssignmentInvalidTime), errors.Is(err, service.ErrAssignmentDuration):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resp)
+}
+
+// GetGradebook godoc
+// @Summary      Get assignment gradebook
+// @Description  Get submissions and scores for one classroom assignment. Only the owner teacher can view gradebook.
+// @Tags         Classrooms
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        assignmentId path int true "Assignment ID"
+// @Success      200 {object} dto.AssignmentResponse
+// @Failure      400 {object} httpx.ErrorResponse
+// @Failure      401 {object} httpx.ErrorResponse
+// @Failure      403 {object} httpx.ErrorResponse
+// @Failure      404 {object} httpx.ErrorResponse
+// @Failure      500 {object} httpx.ErrorResponse
+// @Router       /classrooms/{id}/assignments/{assignmentId}/gradebook [get]
+func (h *handler) GetGradebook(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	id, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+
+	resp, err := h.service.GetGradebook(r.Context(), userID, id, assignmentID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resp)
 }

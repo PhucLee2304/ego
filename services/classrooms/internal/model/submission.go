@@ -19,13 +19,20 @@ type AssignmentSubmission struct {
 type SubmissionStatus string
 
 const (
+	SubmissionStatusNotStarted SubmissionStatus = "NOT_STARTED"
 	SubmissionStatusInProgress SubmissionStatus = "IN_PROGRESS"
 	SubmissionStatusSubmitted  SubmissionStatus = "SUBMITTED"
 	SubmissionStatusLate       SubmissionStatus = "LATE"
 )
 
-func (s AssignmentSubmission) Status(now time.Time, dueAt time.Time) SubmissionStatus {
-	if s.Score != nil {
+func Status(submission *AssignmentSubmission, now time.Time, dueAt time.Time) SubmissionStatus {
+	if submission == nil {
+		if now.After(dueAt) {
+			return SubmissionStatusLate
+		}
+		return SubmissionStatusNotStarted
+	}
+	if submission.Score != nil {
 		return SubmissionStatusSubmitted
 	}
 	if now.After(dueAt) {

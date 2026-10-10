@@ -45,12 +45,15 @@ message ValidateAssignmentAttemptResponse {
   uint64 assignment_id = 1;
   uint64 classroom_id = 2;
   uint64 exam_id = 3;
+  int32 duration_minutes = 4;
+  int64 due_at_unix = 5;
 }
 
 message CreateAssignmentSubmissionRequest {
   string student_id = 1;
   uint64 assignment_id = 2;
   uint64 attempt_id = 3;
+  bool allow_inactive = 4;
 }
 
 message UpdateAssignmentSubmissionResultRequest {

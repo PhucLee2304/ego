@@ -31,6 +31,7 @@ var (
 	errAssignmentClosed       = errors.New("[ERROR] Assignment is closed")
 	errStudentNotApproved     = errors.New("[FORBIDDEN] Student is not approved in classroom")
 	errClassroomNotActive     = errors.New("[ERROR] Classroom is not active")
+	errAssignmentNotActive    = errors.New("[ERROR] Assignment is not active")
 	errInvalidSubmissionScore = errors.New("[ERROR] Invalid submission score")
 )
 
@@ -45,6 +46,9 @@ func (s *server) ValidateAssignmentAttempt(ctx context.Context, req *classrooms.
 	}
 	if !assignment.Classroom.Active {
 		return nil, toStatusError(errClassroomNotActive)
+	}
+	if !assignment.Active {
+		return nil, toStatusError(errAssignmentNotActive)
 	}
 
 	isApproved, err := s.repo.IsStudentApprovedInClassroom(ctx, assignment.ClassroomID, req.UserId)
@@ -64,35 +68,40 @@ func (s *server) ValidateAssignmentAttempt(ctx context.Context, req *classrooms.
 	}
 
 	return &classrooms.ValidateAssignmentAttemptResponse{
-		AssignmentId: uint64(assignment.ID),
-		ClassroomId:  uint64(assignment.ClassroomID),
-		ExamId:       uint64(assignment.ExamID),
+		AssignmentId:    uint64(assignment.ID),
+		ClassroomId:     uint64(assignment.ClassroomID),
+		ExamId:          uint64(assignment.ExamID),
+		DurationMinutes: int32(assignment.Duration),
+		DueAtUnix:       assignment.DueAt.Unix(),
 	}, nil
 }
 
 func (s *server) CreateAssignmentSubmission(ctx context.Context, req *classrooms.CreateAssignmentSubmissionRequest) (*classrooms.AssignmentSubmissionResponse, error) {
-	assignment, err := s.repo.GetAssignmentForAttemptValidation(ctx, uint(req.AssignmentId))
+	var submission *model.AssignmentSubmission
+	err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		assignment, err := repo.GetAssignmentForAttemptValidationForUpdate(ctx, uint(req.AssignmentId))
+		if err != nil {
+			return err
+		}
+		if !req.AllowInactive && !assignment.Classroom.Active {
+			return errClassroomNotActive
+		}
+		if !req.AllowInactive && !assignment.Active {
+			return errAssignmentNotActive
+		}
+		if !req.AllowInactive {
+			isApproved, err := repo.IsStudentApprovedInClassroom(ctx, assignment.ClassroomID, req.StudentId)
+			if err != nil {
+				return err
+			}
+			if !isApproved {
+				return errStudentNotApproved
+			}
+		}
+		submission = &model.AssignmentSubmission{AssignmentID: assignment.ID, StudentID: req.StudentId, AttemptID: uint(req.AttemptId)}
+		return repo.UpsertAssignmentSubmission(ctx, submission)
+	})
 	if err != nil {
-		return nil, toStatusError(err)
-	}
-	if !assignment.Classroom.Active {
-		return nil, toStatusError(errClassroomNotActive)
-	}
-
-	isApproved, err := s.repo.IsStudentApprovedInClassroom(ctx, assignment.ClassroomID, req.StudentId)
-	if err != nil {
-		return nil, toStatusError(err)
-	}
-	if !isApproved {
-		return nil, toStatusError(errStudentNotApproved)
-	}
-
-	submission := &model.AssignmentSubmission{
-		AssignmentID: uint(req.AssignmentId),
-		StudentID:    req.StudentId,
-		AttemptID:    uint(req.AttemptId),
-	}
-	if err := s.repo.UpsertAssignmentSubmission(ctx, submission); err != nil {
 		return nil, toStatusError(err)
 	}
 
@@ -166,7 +175,7 @@ func toStatusError(err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, errAssignmentNotOpen),
 		errors.Is(err, errAssignmentClosed),
-		errors.Is(err, errClassroomNotActive):
+		errors.Is(err, errClassroomNotActive), errors.Is(err, errAssignmentNotActive):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	default:
 		return status.Error(codes.Internal, err.Error())

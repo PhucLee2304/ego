@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -147,7 +148,7 @@ func (r *Repository) GetJoinRequests(ctx context.Context, classroomID uint) ([]*
 		Model(&model.Member{}).
 		Where("classroom_id = ? AND approved IS NULL", classroomID).
 		Preload("Classroom").
-		Order("created_at DESC, id DESC").
+		Order("updated_at DESC, id DESC").
 		Find(&members).Error; err != nil {
 		return nil, err
 	}
@@ -156,6 +157,117 @@ func (r *Repository) GetJoinRequests(ctx context.Context, classroomID uint) ([]*
 
 func (r *Repository) DeleteMember(ctx context.Context, member *model.Member) error {
 	return r.db.WithContext(ctx).Delete(member).Error
+}
+
+func (r *Repository) CreateAssignments(ctx context.Context, assignments []*model.Assignment) error {
+	if len(assignments) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Create(&assignments).Error
+}
+
+func (r *Repository) GetAssignmentsByExamID(ctx context.Context, examID uint) ([]*model.Assignment, error) {
+	var assignments []*model.Assignment
+	if err := r.db.WithContext(ctx).
+		Preload("Classroom").
+		Preload("Submissions").
+		Where("exam_id = ?", examID).
+		Order("id ASC").
+		Find(&assignments).Error; err != nil {
+		return nil, err
+	}
+	return assignments, nil
+}
+
+func (r *Repository) AssignmentExistsByClassroomAndExam(ctx context.Context, classroomID uint, examID uint) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&model.Assignment{}).
+		Where("classroom_id = ? AND exam_id = ?", classroomID, examID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *Repository) GetAssignmentsByClassroom(ctx context.Context, classroomID uint, pagination httpx.PaginationQuery) ([]*model.Assignment, int64, error) {
+	var assignments []*model.Assignment
+	var total int64
+	db := r.db.WithContext(ctx).Model(&model.Assignment{}).Where("classroom_id = ?", classroomID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := db.
+		Preload("Submissions").
+		Order("opens_at DESC, id DESC").
+		Limit(int(pagination.Limit())).
+		Offset(int(pagination.Offset())).
+		Find(&assignments).Error; err != nil {
+		return nil, 0, err
+	}
+	return assignments, total, nil
+}
+
+func (r *Repository) GetAssignmentByClassroom(ctx context.Context, classroomID uint, assignmentID uint) (*model.Assignment, error) {
+	var assignment model.Assignment
+	if err := r.db.WithContext(ctx).
+		Preload("Submissions").
+		Where("classroom_id = ? AND id = ?", classroomID, assignmentID).
+		First(&assignment).Error; err != nil {
+		return nil, err
+	}
+	return &assignment, nil
+}
+
+func (r *Repository) GetAssignmentByClassroomForUpdate(ctx context.Context, classroomID uint, assignmentID uint) (*model.Assignment, error) {
+	var assignment model.Assignment
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Submissions").
+		Where("classroom_id = ? AND id = ?", classroomID, assignmentID).
+		First(&assignment).Error; err != nil {
+		return nil, err
+	}
+	return &assignment, nil
+}
+
+func (r *Repository) GetAssignmentForAttemptValidationForUpdate(ctx context.Context, id uint) (*model.Assignment, error) {
+	var assignment model.Assignment
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Classroom").Where("id = ?", id).First(&assignment).Error; err != nil {
+		return nil, err
+	}
+	return &assignment, nil
+}
+
+func (r *Repository) UpdateAssignment(ctx context.Context, assignment *model.Assignment) error {
+	return r.db.WithContext(ctx).Save(assignment).Error
+}
+
+func (r *Repository) UpdateAssignmentsContentAndActive(ctx context.Context, examID uint, title string, description *string, active bool) error {
+	return r.db.WithContext(ctx).Model(&model.Assignment{}).Where("exam_id = ?", examID).Updates(map[string]any{
+		"title": title, "description": description, "active": active,
+	}).Error
+}
+
+func (r *Repository) RestoreAssignmentActiveStates(ctx context.Context, states map[uint]bool) error {
+	for id, active := range states {
+		if err := r.db.WithContext(ctx).Model(&model.Assignment{}).Where("id = ?", id).Update("active", active).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) GetApprovedMembersByClassroom(ctx context.Context, classroomID uint) ([]*model.Member, error) {
+	var members []*model.Member
+	if err := r.db.WithContext(ctx).
+		Where("classroom_id = ? AND approved = ?", classroomID, true).
+		Order("joined_at ASC, id ASC").
+		Find(&members).Error; err != nil {
+		return nil, err
+	}
+	return members, nil
 }
 
 func (r *Repository) GetAssignmentForAttemptValidation(ctx context.Context, id uint) (*model.Assignment, error) {
@@ -211,4 +323,10 @@ func (r *Repository) GetAssignmentSubmissionByAssignmentAndStudent(ctx context.C
 	}
 
 	return &submission, nil
+}
+
+func (r *Repository) DeleteAssignmentSubmission(ctx context.Context, assignmentID uint, studentID string) error {
+	return r.db.WithContext(ctx).
+		Where("assignment_id = ? AND student_id = ?", assignmentID, studentID).
+		Delete(&model.AssignmentSubmission{}).Error
 }

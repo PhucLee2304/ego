@@ -3,8 +3,10 @@ package repository
 import (
 	"context"
 	platformdb "ego/platform/db"
+	"ego/platform/valuex"
 	"ego/services/exams/internal/dto"
 	"ego/services/exams/internal/model"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -28,7 +30,7 @@ func (r *Repository) Transaction(ctx context.Context, fn func(repo *Repository) 
 func (r *Repository) GetListExam(ctx context.Context, examType model.ExamType, limit, offset int32) ([]*model.Exam, int64, error) {
 	var exams []*model.Exam
 	var total int64
-	query := r.db.WithContext(ctx).Model(&model.Exam{}).Where("type = ?", examType)
+	query := r.db.WithContext(ctx).Model(&model.Exam{}).Where("type = ? AND is_public = ?", examType, true)
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -47,18 +49,142 @@ func (r *Repository) GetListExam(ctx context.Context, examType model.ExamType, l
 
 func (r *Repository) GetExamByID(ctx context.Context, id uint) (*model.Exam, error) {
 	var exam model.Exam
+	// Public exam routes intentionally exclude private classroom exams. Private
+	// content is exposed only through an authorized classroom attempt.
 	if err := r.db.WithContext(ctx).
 		Preload("Sections", func(db *gorm.DB) *gorm.DB {
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
-		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
+		Preload("Sections.Groups", func(db *gorm.DB) *gorm.DB {
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
-		First(&exam, id).Error; err != nil {
+		Preload("Sections.Groups.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("group_id IS NULL").Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Where("id = ? AND is_public = ?", id, true).
+		First(&exam).Error; err != nil {
 		return nil, err
 	}
 
 	return &exam, nil
+}
+
+func (r *Repository) CreateExam(ctx context.Context, exam *model.Exam) error {
+	return r.db.WithContext(ctx).Create(exam).Error
+}
+
+func (r *Repository) GetPrivateAssignmentExam(ctx context.Context, id uint) (*model.Exam, error) {
+	exam, err := r.GetQuestionsByExamID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if exam.IsPublic || exam.Type != model.ExamTypeAssignment {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return exam, nil
+}
+
+func (r *Repository) ReplacePrivateExamQuestions(ctx context.Context, exam *model.Exam, questions []model.Question) error {
+	if len(exam.Sections) != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	section := &exam.Sections[0]
+	questionIDs := r.db.WithContext(ctx).Model(&model.Question{}).Select("id").Where("section_id = ?", section.ID)
+	if err := r.db.WithContext(ctx).Where("question_id IN (?)", questionIDs).Delete(&model.Option{}).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Where("section_id = ?", section.ID).Delete(&model.Question{}).Error; err != nil {
+		return err
+	}
+	for i := range questions {
+		questions[i].SectionID = section.ID
+	}
+	if err := r.db.WithContext(ctx).Create(&questions).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Model(exam).Updates(map[string]any{
+		"title": exam.Title, "description": exam.Description,
+	}).Error
+}
+
+func (r *Repository) UpdateQuestionScoring(ctx context.Context, questionID uint, excluded bool, correctOptionID uint) error {
+	if err := r.db.WithContext(ctx).Model(&model.Question{}).Where("id = ?", questionID).Update("excluded_from_score", excluded).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Model(&model.Option{}).Where("question_id = ? AND id <> ?", questionID, correctOptionID).Update("is_correct", false).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Model(&model.Option{}).Where("question_id = ? AND id = ?", questionID, correctOptionID).Update("is_correct", true).Error
+}
+
+func (r *Repository) GetSubmittedAttemptsByExamID(ctx context.Context, examID uint) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	if err := r.db.WithContext(ctx).
+		Preload("Answers").Preload("History").
+		Preload("Exam.Sections").
+		Preload("Exam.Sections.Questions", "group_id IS NULL").
+		Preload("Exam.Sections.Questions.Options").
+		Where("exam_id = ? AND status = ?", examID, model.AttemptStatusSubmitted).
+		Find(&attempts).Error; err != nil {
+		return nil, err
+	}
+	return attempts, nil
+}
+
+func (r *Repository) CreateExamAudit(ctx context.Context, audit *model.ExamAudit) error {
+	return r.db.WithContext(ctx).Create(audit).Error
+}
+
+func (r *Repository) ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error {
+	var attempt model.Attempt
+	if err := r.db.WithContext(ctx).Where("context_type = ? AND context_id = ? AND user_id = ?", model.AttemptContextTypeClassroomAssignment, assignmentID, studentID).First(&attempt).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if err := r.db.WithContext(ctx).Where("attempt_id = ?", attempt.ID).Delete(&model.AttemptAnswer{}).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Where("attempt_id = ?", attempt.ID).Delete(&model.History{}).Error; err != nil {
+		return err
+	}
+	aggregateID := valuex.UintStringPtr(attempt.ID)
+	if err := r.db.WithContext(ctx).Where("aggregate_id = ?", aggregateID).Delete(&model.OutboxEvent{}).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Delete(&attempt).Error
+}
+
+func (r *Repository) DeletePrivateExam(ctx context.Context, id uint) error {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&model.Exam{}).
+		Where("id = ? AND is_public = ? AND type = ?", id, false, model.ExamTypeAssignment).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
+	sectionIDs := r.db.WithContext(ctx).Unscoped().Model(&model.Section{}).Select("id").Where("exam_id = ?", id)
+	questionIDs := r.db.WithContext(ctx).Unscoped().Model(&model.Question{}).Select("id").Where("section_id IN (?)", sectionIDs)
+	if err := r.db.WithContext(ctx).Unscoped().Where("question_id IN (?)", questionIDs).Delete(&model.Option{}).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Unscoped().Where("section_id IN (?)", sectionIDs).Delete(&model.Question{}).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Unscoped().Where("section_id IN (?)", sectionIDs).Delete(&model.Group{}).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Unscoped().Where("exam_id = ?", id).Delete(&model.Section{}).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Unscoped().Where("id = ?", id).Delete(&model.Exam{}).Error
 }
 
 func (r *Repository) GetQuestionsByExamID(ctx context.Context, id uint) (*model.Exam, error) {
@@ -77,7 +203,7 @@ func (r *Repository) GetQuestionsByExamID(ctx context.Context, id uint) (*model.
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
 		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
-			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+			return db.Where("group_id IS NULL").Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
 		Preload("Sections.Questions.Options", func(db *gorm.DB) *gorm.DB {
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
@@ -145,7 +271,7 @@ func (r *Repository) GetAttemptQuestionsByIDAndUserID(ctx context.Context, id ui
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
 		Preload("Exam.Sections.Questions", func(db *gorm.DB) *gorm.DB {
-			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+			return db.Where("group_id IS NULL").Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
 		Preload("Exam.Sections.Questions.Options", func(db *gorm.DB) *gorm.DB {
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
@@ -162,6 +288,8 @@ func (r *Repository) GetAttemptForAnswerUpdate(ctx context.Context, id uint, use
 	var attempt model.Attempt
 	if err := r.db.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Exam.Sections.Groups.Questions.Options").
+		Preload("Exam.Sections.Questions", "group_id IS NULL").
 		Preload("Exam.Sections.Questions.Options").
 		Where("id = ? AND user_id = ?", id, userID).
 		First(&attempt).Error; err != nil {
@@ -190,7 +318,7 @@ func (r *Repository) GetAttemptForLifecycle(ctx context.Context, id uint, userID
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
 		Preload("Exam.Sections.Questions", func(db *gorm.DB) *gorm.DB {
-			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+			return db.Where("group_id IS NULL").Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
 		}).
 		Preload("Exam.Sections.Questions.Options", func(db *gorm.DB) *gorm.DB {
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
@@ -215,6 +343,50 @@ func (r *Repository) GetAttemptHistoryByIDAndUserID(ctx context.Context, id uint
 	return &history, nil
 }
 
+func (r *Repository) GetActiveAttemptsByAssignmentID(ctx context.Context, assignmentID uint) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	if err := r.db.WithContext(ctx).
+		Where("context_type = ? AND context_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentID, model.AttemptStatusInProgress).
+		Order("id ASC").
+		Find(&attempts).Error; err != nil {
+		return nil, err
+	}
+	return attempts, nil
+}
+
+func (r *Repository) ExpireActiveAssignmentAttempts(ctx context.Context, assignmentID uint, now time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.Attempt{}).
+		Where("context_type = ? AND context_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentID, model.AttemptStatusInProgress).
+		Update("expires_at", now).Error
+}
+
+func (r *Repository) CountAssignmentAttempts(ctx context.Context, assignmentID uint) (int64, int64, error) {
+	var total, active int64
+	baseConditions := "context_type = ? AND context_id = ?"
+	if err := r.db.WithContext(ctx).Model(&model.Attempt{}).
+		Where(baseConditions, model.AttemptContextTypeClassroomAssignment, assignmentID).
+		Count(&total).Error; err != nil {
+		return 0, 0, err
+	}
+	if err := r.db.WithContext(ctx).Model(&model.Attempt{}).
+		Where(baseConditions, model.AttemptContextTypeClassroomAssignment, assignmentID).
+		Where("status = ?", model.AttemptStatusInProgress).
+		Count(&active).Error; err != nil {
+		return 0, 0, err
+	}
+	return active, total, nil
+}
+
+func (r *Repository) UpdateActiveAssignmentAttemptSchedule(ctx context.Context, assignmentID uint, duration int, dueAt time.Time) (int64, error) {
+	result := r.db.WithContext(ctx).Model(&model.Attempt{}).
+		Where("context_type = ? AND context_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentID, model.AttemptStatusInProgress).
+		Updates(map[string]any{
+			"duration":   duration,
+			"expires_at": gorm.Expr("LEAST(started_at + (? * interval '1 minute'), ?)", duration, dueAt),
+		})
+	return result.RowsAffected, result.Error
+}
+
 func (r *Repository) GetExpiredActiveAttempts(ctx context.Context, now time.Time, limit int) ([]*model.Attempt, error) {
 	var attempts []*model.Attempt
 	if err := r.db.WithContext(ctx).
@@ -231,6 +403,13 @@ func (r *Repository) GetExpiredActiveAttempts(ctx context.Context, now time.Time
 
 func (r *Repository) CreateAttempt(ctx context.Context, attempt *model.Attempt) error {
 	return r.db.WithContext(ctx).Create(attempt).Error
+}
+
+func (r *Repository) DeleteAttemptRollback(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).
+		Unscoped().
+		Where("id = ? AND status = ?", id, model.AttemptStatusInProgress).
+		Delete(&model.Attempt{}).Error
 }
 
 func (r *Repository) UpsertAttemptAnswer(ctx context.Context, answer *model.AttemptAnswer) error {
@@ -294,6 +473,19 @@ func (r *Repository) UpsertHistory(ctx context.Context, history *model.History) 
 func (r *Repository) CreateOutboxEvent(ctx context.Context, event *model.OutboxEvent) error {
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).Create(event).Error
+}
+
+func (r *Repository) RequeueOrCreateOutboxEvent(ctx context.Context, event *model.OutboxEvent) error {
+	result := r.db.WithContext(ctx).Model(&model.OutboxEvent{}).
+		Where("type = ? AND aggregate_id = ? AND deleted_at IS NULL", event.Type, event.AggregateID).
+		Updates(map[string]any{
+			"status": model.OutboxEventStatusPending, "attempts": 0, "last_error": "",
+			"processed_at": nil, "next_attempt_at": event.NextAttemptAt, "payload": event.Payload,
+		})
+	if result.Error != nil || result.RowsAffected > 0 {
+		return result.Error
+	}
+	return r.CreateOutboxEvent(ctx, event)
 }
 
 func (r *Repository) ClaimPendingOutboxEvents(ctx context.Context, now time.Time, limit int, visibilityTimeout time.Duration) ([]*model.OutboxEvent, error) {
@@ -412,18 +604,27 @@ func (r *Repository) GetPendingOutboxEvents(ctx context.Context, filter dto.GetP
 	return events, total, nil
 }
 
-func (r *Repository) GetSubmittedClassroomAssignmentAttemptsForReconcile(ctx context.Context, limit int) ([]*model.Attempt, error) {
+func (r *Repository) GetSubmittedClassroomAssignmentAttemptsForReconcile(ctx context.Context, afterID uint, limit int) ([]*model.Attempt, error) {
 	var attempts []*model.Attempt
 	if err := r.db.WithContext(ctx).
 		Where("status = ? AND context_type = ? AND context_id IS NOT NULL AND score IS NOT NULL",
 			model.AttemptStatusSubmitted,
 			model.AttemptContextTypeClassroomAssignment,
 		).
-		Order("submitted_at DESC, id DESC").
+		Where("id > ?", afterID).
+		Order("id ASC").
 		Limit(limit).
 		Find(&attempts).Error; err != nil {
 		return nil, err
 	}
 
 	return attempts, nil
+}
+
+func (r *Repository) GetSubmittedAttemptsByAssignment(ctx context.Context, assignmentID uint) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	err := r.db.WithContext(ctx).
+		Where("context_type = ? AND context_id = ? AND status = ? AND score IS NOT NULL", model.AttemptContextTypeClassroomAssignment, assignmentID, model.AttemptStatusSubmitted).
+		Order("id ASC").Find(&attempts).Error
+	return attempts, err
 }

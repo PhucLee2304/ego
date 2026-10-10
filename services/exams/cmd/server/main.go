@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
+	examsClient "ego/api/gen/go/exams"
 	tokenClient "ego/api/gen/go/token"
 	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
@@ -15,6 +16,7 @@ import (
 	"ego/services/exams/internal/repository"
 	"ego/services/exams/internal/service"
 	examssocket "ego/services/exams/internal/socket"
+	examsRpc "ego/services/exams/rpc"
 	"ego/services/exams/workers"
 	"fmt"
 	"net"
@@ -120,6 +122,7 @@ func main() {
 	service := service.New(repo, classroomsServiceClient)
 	handler := handler.New(service)
 	socketServer := platformsocket.NewServer(tokenServiceClient)
+	service.SetAttemptEventPublisher(socketServer.BroadcastToUser)
 
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
 		resp, err := usersServiceClient.GetUserRole(ctx, &usersClient.GetUserRoleRequest{Id: userID})
@@ -150,7 +153,8 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	// examsClient.RegisterExamsServiceServer(grpcServer, rpcServer) // To be implemented when gRPC is needed
+	rpcServer := examsRpc.New(service)
+	examsClient.RegisterExamServiceServer(grpcServer, rpcServer)
 
 	logger.Log.Info().Str("EXAMS_GRPC_PORT", appConfig.GRPCPort).Msg("[STARTUP] Starting exams gRPC server")
 	go func() {

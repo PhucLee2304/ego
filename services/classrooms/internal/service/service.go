@@ -3,15 +3,21 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	examsClient "ego/api/gen/go/exams"
 	usersClient "ego/api/gen/go/users"
+	platformdb "ego/platform/db"
 	"ego/platform/httpx"
+	"ego/platform/logger"
 	classroomsConfig "ego/services/classrooms/config"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
 	"errors"
+	"math/big"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type Service interface {
@@ -27,66 +33,99 @@ type Service interface {
 	ApproveMember(ctx context.Context, teacherID string, classroomID uint, userID string) (*dto.ClassroomJoinRequestResponse, error)
 	RejectMember(ctx context.Context, teacherID string, classroomID uint, userID string) (*dto.ClassroomJoinRequestResponse, error)
 	RemoveMember(ctx context.Context, teacherID string, classroomID uint, userID string) error
+	CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, error)
+	AssignExistingExam(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.AssignExistingExamRequest) (*dto.CreatedAssignmentsResponse, error)
+	UpdateAssignmentSchedule(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentScheduleRequest) (*dto.AssignmentResponse, error)
+	GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int, error)
+	GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, error)
+	SetAssignmentActive(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, active bool) (*dto.AssignmentResponse, error)
+	GetGradebook(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, error)
+	GetEditableAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.EditableAssignmentResponse, error)
+	UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, error)
+	ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) error
+	ReconcileAssignmentSubmissions(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (int, error)
 }
 
 type service struct {
 	repo        *repository.Repository
 	cfg         *classroomsConfig.AppConfig
 	usersClient usersClient.UserServiceClient
+	examsClient examsClient.ExamServiceClient
 }
 
-func New(repo *repository.Repository, appConfig *classroomsConfig.AppConfig, usersServiceClient usersClient.UserServiceClient) Service {
+func New(repo *repository.Repository, appConfig *classroomsConfig.AppConfig, usersServiceClient usersClient.UserServiceClient, examsServiceClient examsClient.ExamServiceClient) Service {
 	return &service{
 		repo:        repo,
 		cfg:         appConfig,
 		usersClient: usersServiceClient,
+		examsClient: examsServiceClient,
 	}
 }
 
 var (
-	ErrClassroomNotActive     = errors.New("[ERROR] Classroom is not active")
-	ErrClassroomForbidden     = errors.New("[FORBIDDEN] Classroom access denied")
-	ErrClassroomCapacityFull  = errors.New("[ERROR] Classroom capacity is full")
-	ErrTeacherCannotJoinClass = errors.New("[ERROR] Teacher cannot join own classroom as student")
+	ErrClassroomNotActive             = errors.New("[ERROR] Classroom is not active")
+	ErrClassroomForbidden             = errors.New("[FORBIDDEN] Classroom access denied")
+	ErrClassroomCapacityFull          = errors.New("[ERROR] Classroom capacity is full")
+	ErrTeacherCannotJoinClass         = errors.New("[ERROR] Teacher cannot join own classroom as student")
+	ErrAssignmentInvalidTime          = errors.New("[ERROR] Assignment due time must be after open time")
+	ErrAssignmentDuration             = errors.New("[ERROR] Assignment duration must not exceed the open time window")
+	ErrAssignmentExpired              = errors.New("[ERROR] An expired assignment cannot be activated")
+	ErrAssignmentAlreadyExists        = errors.New("[CONFLICT] This exam is already assigned to the classroom")
+	ErrAssignmentScheduleConfirmation = errors.New("[CONFIRMATION_REQUIRED] Active attempts may be affected by this schedule change")
+	ErrAssignmentContentConfirmation  = errors.New("[CONFIRMATION_REQUIRED] This exam already has attempts; confirm to submit active attempts and pause all related assignments")
 )
 
 func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, error) {
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	const codeLength = 8
-	codeBytes := make([]byte, codeLength)
-	if _, err := rand.Read(codeBytes); err != nil {
-		return nil, err
-	}
-	for i, value := range codeBytes {
-		codeBytes[i] = alphabet[int(value)%len(alphabet)]
-	}
+	const maxCodeAttempts = 5
 
-	var response *dto.CreatedClassroomResponse
-	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		classroom := &model.Classroom{
-			Code:        string(codeBytes),
-			Name:        strings.TrimSpace(req.Name),
-			Description: req.Description,
-			Avatar:      req.Avatar,
-			TeacherID:   teacherID,
-			Active:      true,
-		}
-		if err := repo.CreateClassroom(ctx, classroom); err != nil {
-			return err
+	// Thử sinh mã lớp tối đa một số lần hữu hạn để xử lý trường hợp mã ngẫu nhiên bị trùng.
+	for codeAttempt := 0; codeAttempt < maxCodeAttempts; codeAttempt++ {
+		// Dùng nguồn ngẫu nhiên mật mã và loại các ký tự dễ nhầm lẫn khi học sinh nhập mã lớp.
+		codeBytes := make([]byte, codeLength)
+		for i := range codeBytes {
+			index, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+			if err != nil {
+				return nil, err
+			}
+			codeBytes[i] = alphabet[index.Int64()]
 		}
 
-		response = dto.ToCreatedClassroomResponse(classroom)
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{teacherID}})
-		if err != nil {
-			return err
+		var response *dto.CreatedClassroomResponse
+		// Chỉ ghi nhận lớp khi cả dữ liệu lớp và thông tin giáo viên dùng cho response đều lấy thành công.
+		err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+			classroom := &model.Classroom{
+				Code:        string(codeBytes),
+				Name:        strings.TrimSpace(req.Name),
+				Description: req.Description,
+				Avatar:      req.Avatar,
+				TeacherID:   teacherID,
+				Active:      true,
+			}
+			if err := repo.CreateClassroom(ctx, classroom); err != nil {
+				return err
+			}
+
+			response = dto.ToCreatedClassroomResponse(classroom)
+			// Lấy thông tin hiển thị của giáo viên từ Users thay vì sao chép dữ liệu người dùng sang Classrooms.
+			usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{teacherID}})
+			if err != nil {
+				return err
+			}
+			usersByID := dto.ToUserInfoMap(usersResp.Users)
+			response.Teacher = usersByID[teacherID]
+			return nil
+		})
+		if err == nil {
+			return response, nil
 		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		response.Teacher = usersByID[teacherID]
-		return nil
-	}); err != nil {
-		return nil, err
+		// Chỉ sinh mã mới khi vi phạm unique; các lỗi khác phải được trả về ngay.
+		if !platformdb.IsUniqueViolation(err, "") {
+			return nil, err
+		}
 	}
-	return response, nil
+	return nil, errors.New("[ERROR] Could not generate a unique classroom code")
 }
 
 func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, error) {
@@ -293,6 +332,28 @@ func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req d
 		if count >= int64(s.cfg.MaxStudentsPerClass) {
 			return ErrClassroomCapacityFull
 		}
+		if existing, err := repo.GetMember(ctx, classroom.ID, userID); err == nil {
+			if existing.Approved != nil && !*existing.Approved {
+				existing.Approved = nil
+				existing.ApprovedAt = nil
+				existing.JoinedAt = nil
+				if err := repo.UpsertMember(ctx, existing); err != nil {
+					return err
+				}
+			}
+			existing.Classroom = *classroom
+			response = dto.ToClassroomJoinRequestResponse(existing)
+			usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{existing.UserID, classroom.TeacherID}})
+			if err != nil {
+				return err
+			}
+			usersByID := dto.ToUserInfoMap(usersResp.Users)
+			response.User = usersByID[existing.UserID]
+			response.Classroom.Teacher = usersByID[classroom.TeacherID]
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 
 		member := &model.Member{
 			ClassroomID: classroom.ID,
@@ -464,4 +525,627 @@ func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomI
 		}
 		return repo.DeleteMember(ctx, member)
 	})
+}
+
+func (s *service) CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, error) {
+	// Kiểm tra toàn bộ lịch, lớp trùng và quyền sở hữu trước khi tạo Exam ở service khác.
+	// Việc kiểm tra sớm giúp hạn chế tạo ra Exam mồ côi khi request không hợp lệ.
+	seenClassroomIDs := make(map[uint]struct{}, len(req.Schedules))
+	for _, schedule := range req.Schedules {
+		if _, ok := seenClassroomIDs[schedule.ClassroomID]; ok {
+			return nil, ErrAssignmentAlreadyExists
+		}
+		seenClassroomIDs[schedule.ClassroomID] = struct{}{}
+		if !schedule.DueAt.After(schedule.OpensAt) {
+			return nil, ErrAssignmentInvalidTime
+		}
+		if time.Duration(schedule.Duration)*time.Minute > schedule.DueAt.Sub(schedule.OpensAt) {
+			return nil, ErrAssignmentDuration
+		}
+		classroom, err := s.repo.GetClassroomByID(ctx, schedule.ClassroomID)
+		if err != nil {
+			return nil, err
+		}
+		if classroom.TeacherID != teacherID {
+			return nil, ErrClassroomForbidden
+		}
+		if !classroom.Active {
+			return nil, ErrClassroomNotActive
+		}
+	}
+
+	// Chuyển dữ liệu câu hỏi sang contract gRPC của Exams và chuẩn hóa các chuỗi nhập vào.
+	examReq := &examsClient.CreatePrivateExamRequest{
+		Title:     strings.TrimSpace(req.Title),
+		Questions: make([]*examsClient.CreatePrivateExamQuestion, len(req.Questions)),
+	}
+	if req.Description != nil {
+		examReq.Description = req.Description
+	}
+	for i, question := range req.Questions {
+		examQuestion := &examsClient.CreatePrivateExamQuestion{
+			Content:            strings.TrimSpace(question.Content),
+			Options:            make([]string, len(question.Options)),
+			CorrectOptionIndex: int32(question.CorrectOptionIndex),
+		}
+		if question.Explanation != nil {
+			examQuestion.Explanation = question.Explanation
+		}
+		for optionIndex, option := range question.Options {
+			examQuestion.Options[optionIndex] = strings.TrimSpace(option)
+		}
+		examReq.Questions[i] = examQuestion
+	}
+
+	// Exams chịu trách nhiệm tạo toàn bộ cây Exam private, section, câu hỏi và lựa chọn trong transaction riêng.
+	exam, err := s.examsClient.CreatePrivateExam(ctx, examReq)
+	if err != nil {
+		return nil, err
+	}
+
+	var assignments []*model.Assignment
+	// Tạo tất cả Assignment trong cùng transaction để không xảy ra trạng thái chỉ một phần lớp được giao bài.
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		assignments = make([]*model.Assignment, 0, len(req.Schedules))
+		for _, schedule := range req.Schedules {
+			assignments = append(assignments, &model.Assignment{
+				ClassroomID: schedule.ClassroomID,
+				Title:       strings.TrimSpace(req.Title),
+				Description: req.Description,
+				ExamID:      uint(exam.Id),
+				Duration:    schedule.Duration,
+				OpensAt:     schedule.OpensAt,
+				DueAt:       schedule.DueAt,
+				Active:      true,
+			})
+		}
+
+		// Ghi toàn bộ Assignment sau khi mọi lớp đều đã vượt qua bước kiểm tra.
+		if err := repo.CreateAssignments(ctx, assignments); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		// Classrooms không thể rollback transaction của Exams, vì vậy phải gọi RPC bù để xóa Exam vừa tạo.
+		if _, rollbackErr := s.examsClient.DeletePrivateExamRollback(ctx, &examsClient.DeletePrivateExamRollbackRequest{Id: exam.Id}); rollbackErr != nil {
+			logger.Log.Error().Err(rollbackErr).Uint64("exam_id", exam.Id).Msg("[CLASSROOMS] Failed to rollback private exam after assignment creation failed")
+		}
+		return nil, err
+	}
+
+	// Chỉ trả response khi Exam và toàn bộ Assignment đều đã được tạo thành công.
+	return dto.ToCreatedAssignmentsResponse(assignments), nil
+}
+
+func (s *service) AssignExistingExam(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.AssignExistingExamRequest) (*dto.CreatedAssignmentsResponse, error) {
+	source, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	sourceClassroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if sourceClassroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+
+	seen := make(map[uint]struct{}, len(req.Schedules))
+	for _, schedule := range req.Schedules {
+		if _, ok := seen[schedule.ClassroomID]; ok {
+			return nil, ErrAssignmentAlreadyExists
+		}
+		seen[schedule.ClassroomID] = struct{}{}
+		if !schedule.DueAt.After(schedule.OpensAt) {
+			return nil, ErrAssignmentInvalidTime
+		}
+		if time.Duration(schedule.Duration)*time.Minute > schedule.DueAt.Sub(schedule.OpensAt) {
+			return nil, ErrAssignmentDuration
+		}
+		classroom, err := s.repo.GetClassroomByID(ctx, schedule.ClassroomID)
+		if err != nil {
+			return nil, err
+		}
+		if classroom.TeacherID != teacherID {
+			return nil, ErrClassroomForbidden
+		}
+		if !classroom.Active {
+			return nil, ErrClassroomNotActive
+		}
+		exists, err := s.repo.AssignmentExistsByClassroomAndExam(ctx, schedule.ClassroomID, source.ExamID)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, ErrAssignmentAlreadyExists
+		}
+	}
+
+	var assignments []*model.Assignment
+	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		assignments = make([]*model.Assignment, 0, len(req.Schedules))
+		for _, schedule := range req.Schedules {
+			assignments = append(assignments, &model.Assignment{
+				ClassroomID: schedule.ClassroomID,
+				Title:       source.Title,
+				Description: source.Description,
+				ExamID:      source.ExamID,
+				Duration:    schedule.Duration,
+				OpensAt:     schedule.OpensAt,
+				DueAt:       schedule.DueAt,
+				Active:      true,
+			})
+		}
+		return repo.CreateAssignments(ctx, assignments)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dto.ToCreatedAssignmentsResponse(assignments), nil
+}
+
+func (s *service) UpdateAssignmentSchedule(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentScheduleRequest) (*dto.AssignmentResponse, error) {
+	if !req.DueAt.After(req.OpensAt) {
+		return nil, ErrAssignmentInvalidTime
+	}
+	if time.Duration(req.Duration)*time.Minute > req.DueAt.Sub(req.OpensAt) {
+		return nil, ErrAssignmentDuration
+	}
+
+	// Lấy trạng thái attempt từ Exams để xác định thay đổi lịch có cần giáo viên xác nhận hay không.
+	state, err := s.examsClient.GetAssignmentAttemptState(ctx, &examsClient.GetAssignmentAttemptStateRequest{AssignmentId: uint64(assignmentID)})
+	if err != nil {
+		return nil, err
+	}
+	var response *dto.AssignmentResponse
+	var previous *model.Assignment
+	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		classroom, err := repo.GetClassroomByID(ctx, classroomID)
+		if err != nil {
+			return err
+		}
+		if classroom.TeacherID != teacherID {
+			return ErrClassroomForbidden
+		}
+		assignment, err := repo.GetAssignmentByClassroomForUpdate(ctx, classroomID, assignmentID)
+		if err != nil {
+			return err
+		}
+		if state.TotalCount > 0 && !req.Confirm && (req.DueAt.Before(assignment.DueAt) || req.Duration < assignment.Duration) {
+			return ErrAssignmentScheduleConfirmation
+		}
+
+		// Giữ bản sao trước khi cập nhật vì transaction của Classrooms không thể bao phủ database của Exams.
+		copy := *assignment
+		previous = &copy
+		assignment.Duration = req.Duration
+		assignment.OpensAt = req.OpensAt
+		assignment.DueAt = req.DueAt
+		if err := repo.UpdateAssignment(ctx, assignment); err != nil {
+			return err
+		}
+		response = dto.ToAssignmentResponse(assignment, time.Now(), "", true, nil)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Đồng bộ thời lượng và hạn nộp sang các attempt hiện có bên Exams.
+	if _, err := s.examsClient.UpdateAssignmentAttemptSchedule(ctx, &examsClient.UpdateAssignmentAttemptScheduleRequest{
+		AssignmentId: uint64(assignmentID), DurationMinutes: int32(req.Duration), DueAtUnix: req.DueAt.Unix(),
+	}); err != nil {
+		// Khôi phục lịch cũ ở Classrooms nếu Exams không nhận được lịch mới.
+		if previous != nil {
+			if rollbackErr := s.repo.UpdateAssignment(ctx, previous); rollbackErr != nil {
+				logger.Log.Error().Err(rollbackErr).Uint("assignment_id", assignmentID).
+					Msg("[CLASSROOMS] Failed to restore assignment schedule after Exams synchronization failed")
+			}
+		}
+		return nil, err
+	}
+	return response, nil
+}
+
+func (s *service) SetAssignmentActive(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, active bool) (*dto.AssignmentResponse, error) {
+	var response *dto.AssignmentResponse
+	var previousActive bool
+
+	// Khóa Assignment trong transaction để kiểm tra quyền và cập nhật trạng thái nhất quán ở Classrooms.
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		classroom, err := repo.GetClassroomByID(ctx, classroomID)
+		if err != nil {
+			return err
+		}
+		if classroom.TeacherID != teacherID {
+			return ErrClassroomForbidden
+		}
+		if active && !classroom.Active {
+			return ErrClassroomNotActive
+		}
+
+		// Lấy Assignment kèm khóa ghi để tránh hai request bật/tắt cập nhật đè lên nhau.
+		assignment, err := repo.GetAssignmentByClassroomForUpdate(ctx, classroomID, assignmentID)
+		if err != nil {
+			return err
+		}
+		if active && !assignment.DueAt.After(time.Now()) {
+			return ErrAssignmentExpired
+		}
+
+		// Lưu trạng thái cũ để có thể khôi phục nếu thao tác liên service phía sau thất bại.
+		previousActive = assignment.Active
+		assignment.Active = active
+		if err := repo.UpdateAssignment(ctx, assignment); err != nil {
+			return err
+		}
+		response = dto.ToAssignmentResponse(assignment, time.Now(), "", true, nil)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Khi tắt Assignment, yêu cầu Exams nộp ngay mọi attempt đang làm bằng các đáp án đã lưu.
+	if !active {
+		if _, err := s.examsClient.SubmitAssignmentAttempts(ctx, &examsClient.SubmitAssignmentAttemptsRequest{AssignmentId: uint64(assignmentID)}); err != nil {
+			// Nếu Assignment trước đó đang bật, khôi phục lại để tránh trạng thái đã tắt nhưng attempt chưa được xử lý.
+			if previousActive {
+				rollbackErr := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+					assignment, rollbackErr := repo.GetAssignmentByClassroomForUpdate(ctx, classroomID, assignmentID)
+					if rollbackErr != nil {
+						return rollbackErr
+					}
+					assignment.Active = true
+					return repo.UpdateAssignment(ctx, assignment)
+				})
+				if rollbackErr != nil {
+					logger.Log.Error().Err(rollbackErr).Uint("assignment_id", assignmentID).
+						Msg("[CLASSROOMS] Failed to restore assignment after Exams force-submit failed")
+					return nil, errors.Join(err, rollbackErr)
+				}
+			}
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+func (s *service) GetEditableAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.EditableAssignmentResponse, error) {
+	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+	exam, err := s.examsClient.GetPrivateExam(ctx, &examsClient.GetPrivateExamRequest{Id: uint64(assignment.ExamID)})
+	if err != nil {
+		return nil, err
+	}
+	relatedAssignments, err := s.repo.GetAssignmentsByExamID(ctx, assignment.ExamID)
+	if err != nil {
+		return nil, err
+	}
+	hasAttempts := false
+	var activeAttempts int64
+	var submittedAttempts int64
+	affected := make([]*dto.AffectedAssignmentResponse, 0, len(relatedAssignments))
+	for _, related := range relatedAssignments {
+		state, err := s.examsClient.GetAssignmentAttemptState(ctx, &examsClient.GetAssignmentAttemptStateRequest{AssignmentId: uint64(related.ID)})
+		if err != nil {
+			return nil, err
+		}
+		activeAttempts += state.ActiveCount
+		submittedAttempts += state.TotalCount - state.ActiveCount
+		hasAttempts = hasAttempts || state.TotalCount > 0
+		affected = append(affected, &dto.AffectedAssignmentResponse{ID: related.ID, ClassroomID: related.ClassroomID, ClassroomName: related.Classroom.Name, Active: related.Active})
+	}
+	response := &dto.EditableAssignmentResponse{ID: assignment.ID, ExamID: assignment.ExamID, Title: exam.Title, Description: exam.Description, Questions: make([]*dto.EditableAssignmentQuestion, len(exam.Questions)), HasAttempts: hasAttempts, ActiveAttempts: activeAttempts, SubmittedAttempts: submittedAttempts, AffectedAssignments: affected}
+	for i, question := range exam.Questions {
+		optionIDs := make([]uint, len(question.OptionIds))
+		for j, id := range question.OptionIds {
+			optionIDs[j] = uint(id)
+		}
+		response.Questions[i] = &dto.EditableAssignmentQuestion{ID: uint(question.Id), Content: question.Content, Explanation: question.Explanation, Options: question.Options, CorrectOptionIndex: int(question.CorrectOptionIndex), ExcludedFromScore: question.ExcludedFromScore, OptionIDs: optionIDs}
+	}
+	return response, nil
+}
+
+func (s *service) ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) error {
+	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+	if err != nil {
+		return err
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return err
+	}
+	if classroom.TeacherID != teacherID {
+		return ErrClassroomForbidden
+	}
+	if _, err := s.repo.GetAssignmentSubmissionByAssignmentAndStudent(ctx, assignment.ID, studentID); err != nil {
+		return err
+	}
+	if _, err := s.examsClient.ResetAssignmentAttempt(ctx, &examsClient.ResetAssignmentAttemptRequest{AssignmentId: uint64(assignment.ID), StudentId: studentID}); err != nil {
+		return err
+	}
+	return s.repo.DeleteAssignmentSubmission(ctx, assignment.ID, studentID)
+}
+
+func (s *service) ReconcileAssignmentSubmissions(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (int, error) {
+	if _, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID); err != nil {
+		return 0, err
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return 0, err
+	}
+	if classroom.TeacherID != teacherID {
+		return 0, ErrClassroomForbidden
+	}
+	response, err := s.examsClient.ReconcileAssignmentSubmissions(ctx, &examsClient.ReconcileAssignmentSubmissionsRequest{AssignmentId: uint64(assignmentID)})
+	if err != nil {
+		return 0, err
+	}
+	return int(response.EnqueuedCount), nil
+}
+
+func (s *service) UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, error) {
+	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+	assignments, err := s.repo.GetAssignmentsByExamID(ctx, assignment.ExamID)
+	if err != nil {
+		return nil, err
+	}
+	activeStates := make(map[uint]bool, len(assignments))
+	var totalAttempts int64
+	for _, related := range assignments {
+		if related.Classroom.TeacherID != teacherID {
+			return nil, ErrClassroomForbidden
+		}
+		activeStates[related.ID] = related.Active
+		state, err := s.examsClient.GetAssignmentAttemptState(ctx, &examsClient.GetAssignmentAttemptStateRequest{AssignmentId: uint64(related.ID)})
+		if err != nil {
+			return nil, err
+		}
+		totalAttempts += state.TotalCount
+	}
+	if totalAttempts > 0 && !req.Confirm {
+		return nil, ErrAssignmentContentConfirmation
+	}
+	if totalAttempts > 0 && strings.TrimSpace(req.Reason) == "" {
+		return nil, errors.New("[ERROR] A reason is required when changing an exam with attempts")
+	}
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		return repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, assignment.Title, assignment.Description, false)
+	}); err != nil {
+		return nil, err
+	}
+	if totalAttempts > 0 {
+		for _, related := range assignments {
+			if _, err := s.examsClient.SubmitAssignmentAttempts(ctx, &examsClient.SubmitAssignmentAttemptsRequest{AssignmentId: uint64(related.ID)}); err != nil {
+				return nil, err
+			}
+		}
+	}
+	examReq := &examsClient.UpdatePrivateExamRequest{Id: uint64(assignment.ExamID), Title: strings.TrimSpace(req.Title), Description: req.Description, Questions: make([]*examsClient.PrivateExamQuestion, len(req.Questions)), CorrectionOnly: totalAttempts > 0, ActorId: teacherID, Reason: strings.TrimSpace(req.Reason)}
+	for i, question := range req.Questions {
+		optionIDs := make([]uint64, len(question.OptionIDs))
+		for j, id := range question.OptionIDs {
+			optionIDs[j] = uint64(id)
+		}
+		examReq.Questions[i] = &examsClient.PrivateExamQuestion{Id: uint64(question.ID), Content: strings.TrimSpace(question.Content), Explanation: question.Explanation, Options: question.Options, CorrectOptionIndex: int32(question.CorrectOptionIndex), ExcludedFromScore: question.ExcludedFromScore, OptionIds: optionIDs}
+	}
+	exam, err := s.examsClient.UpdatePrivateExam(ctx, examReq)
+	if err != nil {
+		return nil, err
+	}
+	finalActive := false
+	if totalAttempts == 0 {
+		finalActive = true
+	}
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		if err := repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, exam.Title, exam.Description, finalActive); err != nil {
+			return err
+		}
+		if totalAttempts == 0 {
+			return repo.RestoreAssignmentActiveStates(ctx, activeStates)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	response := &dto.EditableAssignmentResponse{ID: assignment.ID, ExamID: assignment.ExamID, Title: exam.Title, Description: exam.Description, Questions: make([]*dto.EditableAssignmentQuestion, len(exam.Questions))}
+	for i, question := range exam.Questions {
+		optionIDs := make([]uint, len(question.OptionIds))
+		for j, id := range question.OptionIds {
+			optionIDs[j] = uint(id)
+		}
+		response.Questions[i] = &dto.EditableAssignmentQuestion{ID: uint(question.Id), Content: question.Content, Explanation: question.Explanation, Options: question.Options, CorrectOptionIndex: int(question.CorrectOptionIndex), ExcludedFromScore: question.ExcludedFromScore, OptionIDs: optionIDs}
+	}
+	return response, nil
+}
+
+func (s *service) GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	isTeacher := classroom.TeacherID == userID
+	if !isTeacher {
+		approved, err := s.repo.IsStudentApprovedInClassroom(ctx, classroomID, userID)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !approved {
+			return nil, 0, ErrClassroomForbidden
+		}
+	}
+
+	// Inactive assignments intentionally remain visible so students can review
+	// previous results; the response state prevents starting a new attempt.
+	assignments, total, err := s.repo.GetAssignmentsByClassroom(ctx, classroomID, query.PaginationQuery)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	userIDs := make([]string, 0)
+	seenUserIDs := make(map[string]struct{})
+	if isTeacher {
+		for _, assignment := range assignments {
+			for _, submission := range assignment.Submissions {
+				if _, ok := seenUserIDs[submission.StudentID]; !ok {
+					seenUserIDs[submission.StudentID] = struct{}{}
+					userIDs = append(userIDs, submission.StudentID)
+				}
+			}
+		}
+	} else {
+		userIDs = append(userIDs, userID)
+	}
+
+	var users []*usersClient.UserInfo
+	if len(userIDs) > 0 {
+		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		if err != nil {
+			return nil, 0, err
+		}
+		users = usersResp.Users
+	}
+
+	currentUserID := userID
+	if isTeacher {
+		currentUserID = ""
+	}
+	responses := dto.ToAssignmentResponses(assignments, time.Now(), currentUserID, isTeacher, users)
+	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+}
+
+func (s *service) GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+
+	isTeacher := classroom.TeacherID == userID
+	if !isTeacher {
+		approved, err := s.repo.IsStudentApprovedInClassroom(ctx, classroomID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !approved {
+			return nil, ErrClassroomForbidden
+		}
+	}
+
+	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	userIDs := make([]string, 0)
+	seenUserIDs := make(map[string]struct{})
+	if isTeacher {
+		for _, submission := range assignment.Submissions {
+			if _, ok := seenUserIDs[submission.StudentID]; !ok {
+				seenUserIDs[submission.StudentID] = struct{}{}
+				userIDs = append(userIDs, submission.StudentID)
+			}
+		}
+	} else {
+		userIDs = append(userIDs, userID)
+	}
+
+	var users []*usersClient.UserInfo
+	if len(userIDs) > 0 {
+		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		if err != nil {
+			return nil, err
+		}
+		users = usersResp.Users
+	}
+
+	currentUserID := userID
+	if isTeacher {
+		currentUserID = ""
+	}
+	return dto.ToAssignmentResponse(assignment, time.Now(), currentUserID, isTeacher, users), nil
+}
+
+func (s *service) GetGradebook(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+
+	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	members, err := s.repo.GetApprovedMembersByClassroom(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	userIDs := make([]string, 0, len(members))
+	seenUserIDs := make(map[string]struct{}, len(members))
+	for _, member := range members {
+		if _, ok := seenUserIDs[member.UserID]; !ok {
+			seenUserIDs[member.UserID] = struct{}{}
+			userIDs = append(userIDs, member.UserID)
+		}
+	}
+	for _, submission := range assignment.Submissions {
+		if _, ok := seenUserIDs[submission.StudentID]; !ok {
+			seenUserIDs[submission.StudentID] = struct{}{}
+			userIDs = append(userIDs, submission.StudentID)
+		}
+	}
+
+	var users []*usersClient.UserInfo
+	if len(userIDs) > 0 {
+		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		if err != nil {
+			return nil, err
+		}
+		users = usersResp.Users
+	}
+
+	now := time.Now()
+	response := dto.ToAssignmentResponse(assignment, now, "", true, users)
+	usersByID := dto.ToUserInfoMap(users)
+	submittedStudents := make(map[string]struct{}, len(response.Submissions))
+	for _, submission := range response.Submissions {
+		if submission.Student != nil {
+			submittedStudents[submission.Student.ID] = struct{}{}
+		}
+	}
+	for _, member := range members {
+		if _, ok := submittedStudents[member.UserID]; ok {
+			continue
+		}
+		response.Submissions = append(response.Submissions, &dto.AssignmentSubmissionResponse{
+			AssignmentID: response.ID,
+			Student:      usersByID[member.UserID],
+			Status:       model.Status(nil, now, response.DueAt),
+		})
+	}
+	return response, nil
 }

@@ -36,8 +36,9 @@ type Attempt struct {
 type AttemptMode string
 
 const (
-	AttemptModePractice AttemptMode = "PRACTICE"
-	AttemptModeTest     AttemptMode = "TEST"
+	AttemptModePractice   AttemptMode = "PRACTICE"
+	AttemptModeTest       AttemptMode = "TEST"
+	AttemptModeAssignment AttemptMode = "ASSIGNMENT"
 )
 
 type AttemptStatus string

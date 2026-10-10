@@ -12,6 +12,7 @@ import (
 	"ego/services/exams/internal/repository"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +24,8 @@ import (
 type Service interface {
 	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, error)
 	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, error)
+	CreatePrivateExam(ctx context.Context, req dto.CreatePrivateExamRequest) (*model.Exam, error)
+	DeletePrivateExamRollback(ctx context.Context, id uint) error
 	CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, error)
 	GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, error)
 	GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, error)
@@ -31,14 +34,28 @@ type Service interface {
 	CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error)
 	GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error)
 	AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int, error)
+	SubmitAssignmentAttempts(ctx context.Context, assignmentID uint) (int, error)
+	GetAssignmentAttemptState(ctx context.Context, assignmentID uint) (int64, int64, error)
+	UpdateAssignmentAttemptSchedule(ctx context.Context, assignmentID uint, duration int, dueAt time.Time) (int64, error)
+	GetPrivateExam(ctx context.Context, id uint) (*model.Exam, error)
+	UpdatePrivateExam(ctx context.Context, id uint, req dto.UpdatePrivateExamRequest) (*model.Exam, error)
+	ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error
 	ProcessOutboxEvents(ctx context.Context, limit int) (int, error)
 	GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, error)
 	ReconcileClassroomAssignmentSubmissions(ctx context.Context, limit int) (int, error)
+	ReconcileAssignmentSubmissions(ctx context.Context, assignmentID uint) (int, error)
+	SetAttemptEventPublisher(publisher func(userID string, payload any))
 }
 
 type service struct {
 	repo             *repository.Repository
 	classroomsClient classroomsClient.ClassroomServiceClient
+	reconcileCursor  atomic.Uint64
+	attemptPublisher func(userID string, payload any)
+}
+
+func (s *service) SetAttemptEventPublisher(publisher func(userID string, payload any)) {
+	s.attemptPublisher = publisher
 }
 
 func New(repo *repository.Repository, classroomsClient classroomsClient.ClassroomServiceClient) Service {
@@ -100,9 +117,239 @@ func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, e
 	return dto.ToGetExamResponse(exam), nil
 }
 
+func (s *service) CreatePrivateExam(ctx context.Context, req dto.CreatePrivateExamRequest) (*model.Exam, error) {
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" {
+		return nil, errors.New("[ERROR] Exam title is required")
+	}
+	if len(req.Questions) == 0 {
+		return nil, errors.New("[ERROR] Exam must contain at least one question")
+	}
+
+	questions := make([]model.Question, len(req.Questions))
+	optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
+	for i, input := range req.Questions {
+		if strings.TrimSpace(input.Content) == "" || len(input.Options) != len(optionKeys) || input.CorrectOptionIndex < 0 || input.CorrectOptionIndex >= len(optionKeys) {
+			return nil, errors.New("[ERROR] Each question must have content, exactly four options, and one valid correct option")
+		}
+		options := make([]model.Option, len(optionKeys))
+		for optionIndex, key := range optionKeys {
+			content := strings.TrimSpace(input.Options[optionIndex])
+			if content == "" {
+				return nil, errors.New("[ERROR] Question options cannot be blank")
+			}
+			options[optionIndex] = model.Option{
+				Key:       key,
+				Content:   &content,
+				IsCorrect: optionIndex == input.CorrectOptionIndex,
+				Order:     optionIndex + 1,
+			}
+		}
+		explanation := ""
+		if input.Explanation != nil {
+			explanation = strings.TrimSpace(*input.Explanation)
+		}
+		questions[i] = model.Question{
+			Content:           strings.TrimSpace(input.Content),
+			Explanation:       explanation,
+			Order:             i + 1,
+			ExcludedFromScore: false,
+			Options:           options,
+		}
+	}
+
+	exam := &model.Exam{
+		Title:       req.Title,
+		Description: req.Description,
+		IsPublic:    false,
+		Type:        model.ExamTypeAssignment,
+		Sections: []model.Section{{
+			Code:      model.SectionCodeFull,
+			Title:     "Assignment",
+			Order:     1,
+			Questions: questions,
+		}},
+	}
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		return repo.CreateExam(ctx, exam)
+	}); err != nil {
+		return nil, err
+	}
+	return exam, nil
+}
+
+func (s *service) DeletePrivateExamRollback(ctx context.Context, id uint) error {
+	return s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		return repo.DeletePrivateExam(ctx, id)
+	})
+}
+
+func (s *service) GetPrivateExam(ctx context.Context, id uint) (*model.Exam, error) {
+	return s.repo.GetPrivateAssignmentExam(ctx, id)
+}
+
+func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.UpdatePrivateExamRequest) (*model.Exam, error) {
+	var updated *model.Exam
+	err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		exam, err := repo.GetPrivateAssignmentExam(ctx, id)
+		if err != nil {
+			return err
+		}
+		before, err := json.Marshal(exam)
+		if err != nil {
+			return err
+		}
+		title := strings.TrimSpace(req.Title)
+		if title == "" || len(req.Questions) == 0 {
+			return errors.New("[ERROR] Exam title and at least one question are required")
+		}
+		if req.CorrectionOnly {
+			if strings.TrimSpace(req.ActorID) == "" || strings.TrimSpace(req.Reason) == "" {
+				return errors.New("[ERROR] Correction actor and reason are required")
+			}
+			if title != exam.Title || (exam.Description == nil) != (req.Description == nil) || (exam.Description != nil && req.Description != nil && *exam.Description != *req.Description) || len(req.Questions) != len(exam.Sections[0].Questions) {
+				return errors.New("[ERROR] An exam with attempts only allows correcting the answer or changing score exclusion")
+			}
+			questionsByID := make(map[uint]*model.Question, len(exam.Sections[0].Questions))
+			for i := range exam.Sections[0].Questions {
+				question := &exam.Sections[0].Questions[i]
+				questionsByID[question.ID] = question
+			}
+			for _, input := range req.Questions {
+				question := questionsByID[input.ID]
+				if question == nil || strings.TrimSpace(input.Content) != question.Content || input.Explanation == nil || strings.TrimSpace(*input.Explanation) != question.Explanation || len(input.Options) != len(question.Options) || len(input.OptionIDs) != len(question.Options) {
+					return errors.New("[ERROR] Question structure cannot be changed after an attempt exists")
+				}
+				correctOptionID := uint(0)
+				for index, option := range question.Options {
+					if input.OptionIDs[index] != option.ID || strings.TrimSpace(input.Options[index]) != strings.TrimSpace(*option.Content) {
+						return errors.New("[ERROR] Question options cannot be changed after an attempt exists")
+					}
+					if index == input.CorrectOptionIndex {
+						correctOptionID = option.ID
+					}
+				}
+				if correctOptionID == 0 {
+					return errors.New("[ERROR] Correct option is invalid")
+				}
+				if err := repo.UpdateQuestionScoring(ctx, question.ID, input.ExcludedFromScore, correctOptionID); err != nil {
+					return err
+				}
+			}
+			attempts, err := repo.GetSubmittedAttemptsByExamID(ctx, id)
+			if err != nil {
+				return err
+			}
+			for _, attempt := range attempts {
+				questionMap := make(map[uint]*model.Question)
+				for i := range attempt.Exam.Sections[0].Questions {
+					question := &attempt.Exam.Sections[0].Questions[i]
+					questionMap[question.ID] = question
+				}
+				correctAnswers := 0
+				for i := range attempt.Answers {
+					answer := &attempt.Answers[i]
+					question := questionMap[answer.QuestionID]
+					isCorrect := false
+					if question != nil && answer.SelectedOptionID != nil {
+						for _, option := range question.Options {
+							if option.ID == *answer.SelectedOptionID {
+								isCorrect = option.IsCorrect
+							}
+						}
+					}
+					answer.IsCorrect = &isCorrect
+					if question != nil && !question.ExcludedFromScore && isCorrect {
+						correctAnswers++
+					}
+				}
+				if err := repo.ReplaceAttemptAnswers(ctx, attempt.ID, attempt.Answers); err != nil {
+					return err
+				}
+				score, err := dto.CalculateAttemptScore(attempt.Exam.Type, attempt.Answers, questionMap, attempt.TotalQuestions)
+				if err != nil {
+					return err
+				}
+				score = valuex.RoundFloat(score, 2)
+				attempt.CorrectAnswers, attempt.Score = &correctAnswers, &score
+				if err := repo.UpdateAttempt(ctx, attempt); err != nil {
+					return err
+				}
+				data, err := dto.MarshalAttemptHistory(attempt)
+				if err != nil {
+					return err
+				}
+				if err := repo.UpsertHistory(ctx, &model.History{Data: datatypes.JSON(data), AttemptID: attempt.ID, ExamTitle: attempt.Exam.Title, ExamType: attempt.Exam.Type, ExamYear: attempt.Exam.Year}); err != nil {
+					return err
+				}
+				if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil {
+					payload, err := json.Marshal(classroomAssignmentAttemptSubmittedPayload{StudentID: attempt.UserID, AssignmentID: *attempt.ContextID, AttemptID: attempt.ID, Score: score})
+					if err != nil {
+						return err
+					}
+					if err := repo.RequeueOrCreateOutboxEvent(ctx, &model.OutboxEvent{Type: model.OutboxEventTypeClassroomAssignmentAttemptSubmitted, AggregateID: valuex.UintStringPtr(attempt.ID), Status: model.OutboxEventStatusPending, Payload: payload, NextAttemptAt: time.Now()}); err != nil {
+						return err
+					}
+				}
+			}
+			updated, err = repo.GetPrivateAssignmentExam(ctx, id)
+			if err != nil {
+				return err
+			}
+			after, err := json.Marshal(updated)
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), RegradedAt: &now})
+		}
+		optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
+		questions := make([]model.Question, len(req.Questions))
+		for i, input := range req.Questions {
+			if strings.TrimSpace(input.Content) == "" || len(input.Options) != 4 || input.CorrectOptionIndex < 0 || input.CorrectOptionIndex > 3 {
+				return errors.New("[ERROR] Each question must have content, exactly four options, and one valid correct option")
+			}
+			options := make([]model.Option, 4)
+			for j, value := range input.Options {
+				content := strings.TrimSpace(value)
+				if content == "" {
+					return errors.New("[ERROR] Question options cannot be blank")
+				}
+				options[j] = model.Option{Key: optionKeys[j], Content: &content, IsCorrect: j == input.CorrectOptionIndex, Order: j + 1}
+			}
+			explanation := ""
+			if input.Explanation != nil {
+				explanation = strings.TrimSpace(*input.Explanation)
+			}
+			questions[i] = model.Question{Content: strings.TrimSpace(input.Content), Explanation: explanation, Order: i + 1, ExcludedFromScore: input.ExcludedFromScore, Options: options}
+		}
+		exam.Title, exam.Description = title, req.Description
+		if err := repo.ReplacePrivateExamQuestions(ctx, exam, questions); err != nil {
+			return err
+		}
+		updated, err = repo.GetPrivateAssignmentExam(ctx, id)
+		if err != nil {
+			return err
+		}
+		after, err := json.Marshal(updated)
+		if err != nil {
+			return err
+		}
+		return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after)})
+	})
+	return updated, err
+}
+
+func (s *service) ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error {
+	return s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		return repo.ResetAssignmentAttempt(ctx, assignmentID, studentID)
+	})
+}
+
 func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, error) {
+	var assignmentValidation *classroomsClient.ValidateAssignmentAttemptResponse
 	if req.ContextType == model.AttemptContextTypeClassroomAssignment {
-		_, err := s.classroomsClient.ValidateAssignmentAttempt(ctx, &classroomsClient.ValidateAssignmentAttemptRequest{
+		resp, err := s.classroomsClient.ValidateAssignmentAttempt(ctx, &classroomsClient.ValidateAssignmentAttemptRequest{
 			UserId:       userID,
 			AssignmentId: uint64(*req.ContextID),
 			ExamId:       uint64(examID),
@@ -110,9 +357,13 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		if err != nil {
 			return nil, err
 		}
+		assignmentValidation = resp
 	}
 
 	activeAttempt, activeErr := s.repo.GetActiveAttemptByUserID(ctx, userID)
+	// Submitting an expired attempt completes its own transaction before the
+	// create transaction starts. The unique active-attempt index remains the
+	// final guard when concurrent create requests race here.
 	if activeErr == nil && activeAttempt.ExpiresAt != nil && !time.Now().Before(*activeAttempt.ExpiresAt) {
 		if _, err := s.submitAttempt(ctx, userID, activeAttempt.ID, nil); err != nil &&
 			!errors.Is(err, ErrAttemptAlreadySubmitted) {
@@ -135,7 +386,9 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			return err
 		}
 
-		if (exam.Type == model.ExamTypeTHPT || exam.Type == model.ExamTypeTOEIC) && !exam.IsPublic {
+		if (exam.Type == model.ExamTypeTHPT || exam.Type == model.ExamTypeTOEIC) &&
+			!exam.IsPublic &&
+			req.ContextType != model.AttemptContextTypeClassroomAssignment {
 			return gorm.ErrRecordNotFound
 		}
 
@@ -145,12 +398,17 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 
 		now := time.Now()
 		var duration *int
-		if req.Mode == model.AttemptModeTest {
-			value, ok := model.GetTestDurationByExamType(exam.Type)
-			if !ok {
-				return errors.New("[ERROR] Unsupported exam type")
-			}
+		if req.Mode == model.AttemptModeAssignment {
+			value := int(assignmentValidation.DurationMinutes)
 			duration = &value
+		} else if req.Mode == model.AttemptModeTest {
+			if exam.Type != model.ExamTypeAssignment {
+				value, ok := model.GetTestDurationByExamType(exam.Type)
+				if !ok {
+					return errors.New("[ERROR] Unsupported exam type")
+				}
+				duration = &value
+			}
 		} else if req.Duration != nil {
 			duration = valuex.MapPtr(req.Duration, func(value model.AttemptDuration) int {
 				return int(value)
@@ -160,6 +418,10 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		var expiresAt *time.Time
 		if duration != nil {
 			value := now.Add(time.Duration(*duration) * time.Minute)
+			if assignmentValidation != nil {
+				dueAt := time.Unix(assignmentValidation.DueAtUnix, 0)
+				value = assignmentAttemptExpiresAt(now, *duration, dueAt)
+			}
 			expiresAt = &value
 		}
 
@@ -192,6 +454,14 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 				}
 				totalQuestions++
 			}
+			for _, group := range section.Groups {
+				for _, question := range group.Questions {
+					if len(partSet) > 0 && (question.Part == nil || !partInSet(*question.Part, partSet)) {
+						continue
+					}
+					totalQuestions++
+				}
+			}
 		}
 
 		attempt = &model.Attempt{
@@ -215,25 +485,6 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		if err := repo.CreateAttempt(ctx, attempt); err != nil {
 			return err
 		}
-		if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil {
-			payload, err := json.Marshal(classroomAssignmentAttemptCreatedPayload{
-				StudentID:    userID,
-				AssignmentID: *attempt.ContextID,
-				AttemptID:    attempt.ID,
-			})
-			if err != nil {
-				return err
-			}
-			if err := repo.CreateOutboxEvent(ctx, &model.OutboxEvent{
-				Type:          model.OutboxEventTypeClassroomAssignmentAttemptCreated,
-				AggregateID:   valuex.UintStringPtr(attempt.ID),
-				Status:        model.OutboxEventStatusPending,
-				Payload:       payload,
-				NextAttemptAt: time.Now(),
-			}); err != nil {
-				return err
-			}
-		}
 		attempt.Exam = *exam
 		attempt.Answers = []model.AttemptAnswer{}
 
@@ -248,8 +499,26 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		}
 		return nil, err
 	}
+	if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil {
+		if _, err := s.classroomsClient.CreateAssignmentSubmission(ctx, &classroomsClient.CreateAssignmentSubmissionRequest{
+			StudentId: userID, AssignmentId: uint64(*attempt.ContextID), AttemptId: uint64(attempt.ID),
+		}); err != nil {
+			if cleanupErr := s.repo.DeleteAttemptRollback(ctx, attempt.ID); cleanupErr != nil {
+				return nil, errors.Join(err, cleanupErr)
+			}
+			return nil, err
+		}
+	}
 
 	return dto.ToAttemptResponseWithQuestions(attempt), nil
+}
+
+func assignmentAttemptExpiresAt(startedAt time.Time, durationMinutes int, dueAt time.Time) time.Time {
+	expiresAt := startedAt.Add(time.Duration(durationMinutes) * time.Minute)
+	if dueAt.Before(expiresAt) {
+		return dueAt
+	}
+	return expiresAt
 }
 
 func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, error) {
@@ -324,6 +593,25 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 				matchedQuestion = question
 				break
 			}
+			if matchedQuestion == nil {
+				for groupIdx := range section.Groups {
+					group := &section.Groups[groupIdx]
+					for questionIdx := range group.Questions {
+						question := &group.Questions[questionIdx]
+						if question.ID != questionID {
+							continue
+						}
+						if len(attempt.PartCodes) > 0 && (question.Part == nil || !partInSlice(*question.Part, attempt.PartCodes)) {
+							continue
+						}
+						matchedQuestion = question
+						break
+					}
+					if matchedQuestion != nil {
+						break
+					}
+				}
+			}
 			if matchedQuestion != nil {
 				break
 			}
@@ -379,7 +667,6 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 	if err != nil {
 		return nil, err
 	}
-
 	return response, nil
 }
 
@@ -416,7 +703,6 @@ func (s *service) CancelAttempt(ctx context.Context, userID string, attemptID ui
 		default:
 			return ErrAttemptNotActive
 		}
-
 		attempt.Status = model.AttemptStatusCancelled
 		attempt.SubmittedAt = nil
 		attempt.CorrectAnswers = nil
@@ -517,6 +803,42 @@ func (s *service) AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int
 	return int(submitted.Load()), errors.Join(readErrors(errs)...)
 }
 
+func (s *service) SubmitAssignmentAttempts(ctx context.Context, assignmentID uint) (int, error) {
+	if err := s.repo.ExpireActiveAssignmentAttempts(ctx, assignmentID, time.Now()); err != nil {
+		return 0, err
+	}
+	attempts, err := s.repo.GetActiveAttemptsByAssignmentID(ctx, assignmentID)
+	if err != nil {
+		return 0, err
+	}
+
+	submitted := 0
+	var errs []error
+	for _, attempt := range attempts {
+		if _, err := s.submitAttempt(ctx, attempt.UserID, attempt.ID, nil); err != nil {
+			if errors.Is(err, ErrAttemptAlreadySubmitted) || errors.Is(err, ErrAttemptCancelled) {
+				continue
+			}
+			errs = append(errs, err)
+			continue
+		}
+		submitted++
+	}
+	if len(errs) > 0 {
+		logger.Log.Error().Err(errors.Join(errs...)).Uint("assignment_id", assignmentID).
+			Msg("[EXAMS] Some assignment attempts were queued for auto-submit retry")
+	}
+	return submitted, nil
+}
+
+func (s *service) GetAssignmentAttemptState(ctx context.Context, assignmentID uint) (int64, int64, error) {
+	return s.repo.CountAssignmentAttempts(ctx, assignmentID)
+}
+
+func (s *service) UpdateAssignmentAttemptSchedule(ctx context.Context, assignmentID uint, duration int, dueAt time.Time) (int64, error) {
+	return s.repo.UpdateActiveAssignmentAttemptSchedule(ctx, assignmentID, duration, dueAt)
+}
+
 func readErrors(errs <-chan error) []error {
 	result := make([]error, 0, len(errs))
 	for err := range errs {
@@ -546,6 +868,9 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		default:
 			return ErrAttemptNotActive
 		}
+		if submittedAnswers != nil && attempt.ExpiresAt != nil && !time.Now().Before(*attempt.ExpiresAt) {
+			return ErrAttemptExpired
+		}
 
 		questions := make(map[uint]*model.Question, attempt.TotalQuestions)
 		for sectionIdx := range attempt.Exam.Sections {
@@ -559,6 +884,16 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 					continue
 				}
 				questions[question.ID] = question
+			}
+			for groupIdx := range section.Groups {
+				group := &section.Groups[groupIdx]
+				for questionIdx := range group.Questions {
+					question := &group.Questions[questionIdx]
+					if len(attempt.PartCodes) > 0 && (question.Part == nil || !partInSlice(*question.Part, attempt.PartCodes)) {
+						continue
+					}
+					questions[question.ID] = question
+				}
 			}
 		}
 
@@ -642,7 +977,8 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 
 		correctAnswers := 0
 		for _, answer := range answers {
-			if answer.IsCorrect != nil && *answer.IsCorrect {
+			question := questions[answer.QuestionID]
+			if question != nil && !question.ExcludedFromScore && answer.IsCorrect != nil && *answer.IsCorrect {
 				correctAnswers++
 			}
 		}
@@ -705,6 +1041,12 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		return nil, err
 	}
 
+	if s.attemptPublisher != nil && response != nil {
+		s.attemptPublisher(userID, map[string]any{
+			"type":    "ATTEMPT_SUBMITTED",
+			"payload": map[string]any{"attemptId": attemptID, "score": response.Score},
+		})
+	}
 	return response, nil
 }
 
@@ -731,9 +1073,10 @@ func (s *service) ProcessOutboxEvents(ctx context.Context, limit int) (int, erro
 				break
 			}
 			_, publishErr = s.classroomsClient.CreateAssignmentSubmission(ctx, &classroomsClient.CreateAssignmentSubmissionRequest{
-				StudentId:    payload.StudentID,
-				AssignmentId: uint64(payload.AssignmentID),
-				AttemptId:    uint64(payload.AttemptID),
+				StudentId:     payload.StudentID,
+				AssignmentId:  uint64(payload.AssignmentID),
+				AttemptId:     uint64(payload.AttemptID),
+				AllowInactive: true,
 			})
 		case model.OutboxEventTypeClassroomAssignmentAttemptSubmitted:
 			var payload classroomAssignmentAttemptSubmittedPayload
@@ -826,7 +1169,8 @@ func (s *service) ReconcileClassroomAssignmentSubmissions(ctx context.Context, l
 		return 0, nil
 	}
 
-	attempts, err := s.repo.GetSubmittedClassroomAssignmentAttemptsForReconcile(ctx, limit)
+	cursor := uint(s.reconcileCursor.Load())
+	attempts, err := s.repo.GetSubmittedClassroomAssignmentAttemptsForReconcile(ctx, cursor, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -871,12 +1215,17 @@ func (s *service) ReconcileClassroomAssignmentSubmissions(ctx context.Context, l
 	}
 
 	if len(pendingEvents) == 0 {
+		if len(attempts) == 0 && cursor != 0 {
+			s.reconcileCursor.Store(0)
+		} else if len(attempts) > 0 {
+			s.reconcileCursor.Store(uint64(attempts[len(attempts)-1].ID))
+		}
 		return 0, nil
 	}
 
 	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		for _, event := range pendingEvents {
-			if err := repo.CreateOutboxEvent(ctx, event); err != nil {
+			if err := repo.RequeueOrCreateOutboxEvent(ctx, event); err != nil {
 				return err
 			}
 		}
@@ -885,8 +1234,39 @@ func (s *service) ReconcileClassroomAssignmentSubmissions(ctx context.Context, l
 	if err != nil {
 		return 0, err
 	}
+	s.reconcileCursor.Store(uint64(attempts[len(attempts)-1].ID))
 
 	return len(pendingEvents), nil
+}
+
+func (s *service) ReconcileAssignmentSubmissions(ctx context.Context, assignmentID uint) (int, error) {
+	attempts, err := s.repo.GetSubmittedAttemptsByAssignment(ctx, assignmentID)
+	if err != nil {
+		return 0, err
+	}
+	enqueued := 0
+	for _, attempt := range attempts {
+		if attempt.Score == nil {
+			continue
+		}
+		status, err := s.classroomsClient.GetAssignmentSubmissionSyncStatus(ctx, &classroomsClient.GetAssignmentSubmissionSyncStatusRequest{StudentId: attempt.UserID, AssignmentId: uint64(assignmentID), AttemptId: uint64(attempt.ID), Score: *attempt.Score})
+		if err != nil {
+			return enqueued, err
+		}
+		if status.Synced {
+			continue
+		}
+		payload, err := json.Marshal(classroomAssignmentAttemptSubmittedPayload{StudentID: attempt.UserID, AssignmentID: assignmentID, AttemptID: attempt.ID, Score: *attempt.Score})
+		if err != nil {
+			return enqueued, err
+		}
+		event := &model.OutboxEvent{Type: model.OutboxEventTypeClassroomAssignmentAttemptSubmitted, AggregateID: valuex.UintStringPtr(attempt.ID), Status: model.OutboxEventStatusPending, Payload: payload, NextAttemptAt: time.Now()}
+		if err := s.repo.RequeueOrCreateOutboxEvent(ctx, event); err != nil {
+			return enqueued, err
+		}
+		enqueued++
+	}
+	return enqueued, nil
 }
 func partInSet(part model.PartCode, parts map[model.PartCode]struct{}) bool {
 	_, ok := parts[part]

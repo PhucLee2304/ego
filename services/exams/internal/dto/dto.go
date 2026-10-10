@@ -32,6 +32,38 @@ type GetExamQuestionsQuery struct {
 	Part    model.PartCode    `schema:"part" validate:"omitempty,oneof=1 2 3 4 5 6 7"`
 }
 
+type CreatePrivateExamRequest struct {
+	Title       string                             `validate:"required,notblank"`
+	Description *string                            `validate:"omitempty"`
+	Questions   []CreatePrivateExamQuestionRequest `validate:"required,min=1,dive"`
+}
+
+type UpdatePrivateExamRequest struct {
+	Title          string
+	Description    *string
+	Questions      []UpdatePrivateExamQuestionRequest
+	CorrectionOnly bool
+	ActorID        string
+	Reason         string
+}
+
+type UpdatePrivateExamQuestionRequest struct {
+	ID                 uint
+	Content            string
+	Explanation        *string
+	Options            []string
+	CorrectOptionIndex int
+	ExcludedFromScore  bool
+	OptionIDs          []uint
+}
+
+type CreatePrivateExamQuestionRequest struct {
+	Content            string   `validate:"required,notblank"`
+	Explanation        *string  `validate:"omitempty"`
+	Options            []string `validate:"required,len=4,dive,notblank"`
+	CorrectOptionIndex int      `validate:"gte=0,lte=3"`
+}
+
 type GetAttemptsQuery struct {
 	httpx.PaginationQuery
 	Status model.AttemptStatus `schema:"status" validate:"required,oneof=ACTIVE SUBMITTED CANCELLED"`
@@ -50,7 +82,7 @@ type GetPendingOutboxEventsQuery struct {
 }
 
 type CreateExamAttemptRequest struct {
-	Mode        model.AttemptMode        `json:"mode" validate:"required,oneof=PRACTICE TEST"`
+	Mode        model.AttemptMode        `json:"mode,omitempty" validate:"omitempty,oneof=PRACTICE TEST ASSIGNMENT"`
 	Section     *model.SectionCode       `json:"section,omitempty" validate:"omitempty,oneof=FULL LISTENING READING"`
 	Parts       []model.PartCode         `json:"parts,omitempty" validate:"omitempty,dive,oneof=1 2 3 4 5 6 7"`
 	Duration    *model.AttemptDuration   `json:"duration,omitempty" validate:"omitempty,oneof=10 15 20 30 45 60 75 90 120"`
@@ -179,15 +211,16 @@ type ExamQuestionGroup struct {
 }
 
 type ExamQuestion struct {
-	ID               uint                  `json:"id"`
-	Content          string                `json:"content"`
-	Part             *string               `json:"part"`
-	Explanation      string                `json:"explanation"`
-	Order            int                   `json:"order"`
-	SelectedOptionID *uint                 `json:"selectedOptionId,omitempty"`
-	CorrectOptionID  *uint                 `json:"correctOptionId,omitempty"`
-	IsCorrect        *bool                 `json:"isCorrect,omitempty"`
-	Options          []*ExamQuestionOption `json:"options"`
+	ID                uint                  `json:"id"`
+	Content           string                `json:"content"`
+	Part              *string               `json:"part"`
+	Explanation       string                `json:"explanation"`
+	Order             int                   `json:"order"`
+	ExcludedFromScore *bool                 `json:"excludedFromScore,omitempty"`
+	SelectedOptionID  *uint                 `json:"selectedOptionId,omitempty"`
+	CorrectOptionID   *uint                 `json:"correctOptionId,omitempty"`
+	IsCorrect         *bool                 `json:"isCorrect,omitempty"`
+	Options           []*ExamQuestionOption `json:"options"`
 }
 
 type ExamQuestionOption struct {
@@ -219,6 +252,9 @@ func ToGetExamResponse(exam *model.Exam) *GetExamResponse {
 
 	for _, section := range exam.Sections {
 		questionCount := len(section.Questions)
+		for _, group := range section.Groups {
+			questionCount += len(group.Questions)
+		}
 		totalQuestions += questionCount
 		if section.Duration != nil {
 			totalDuration += *section.Duration
@@ -248,6 +284,24 @@ func ToGetExamResponse(exam *model.Exam) *GetExamResponse {
 				partsMap[partKey] = partSummary
 			}
 			partSummary.QuestionCount++
+		}
+		for _, group := range section.Groups {
+			for _, question := range group.Questions {
+				if question.Part == nil || strings.TrimSpace(string(*question.Part)) == "" {
+					continue
+				}
+
+				partKey := string(*question.Part)
+				partSummary, ok := partsMap[partKey]
+				if !ok {
+					partSummary = &ExamPartSummary{
+						Part:        "PART " + partKey,
+						SectionCode: string(section.Code),
+					}
+					partsMap[partKey] = partSummary
+				}
+				partSummary.QuestionCount++
+			}
 		}
 	}
 
@@ -366,6 +420,7 @@ func (q *GetExamsQuery) Normalize() {
 	q.PaginationQuery.Normalize()
 
 	q.Type = model.ExamType(strings.ToUpper(strings.TrimSpace(string(q.Type))))
+	// THPT is the intentional product default for the public exam catalog.
 	if q.Type == "" {
 		q.Type = model.ExamTypeTHPT
 	}
@@ -385,6 +440,9 @@ func (q *GetPendingOutboxEventsQuery) Normalize() {
 func (r *CreateExamAttemptRequest) Normalize() {
 	r.Mode = model.AttemptMode(strings.ToUpper(strings.TrimSpace(string(r.Mode))))
 	r.ContextType = model.AttemptContextType(strings.ToUpper(strings.TrimSpace(string(r.ContextType))))
+	if r.ContextType == model.AttemptContextTypeClassroomAssignment && r.Mode == "" {
+		r.Mode = model.AttemptModeAssignment
+	}
 
 	if r.Section != nil {
 		value := model.SectionCode(strings.ToUpper(strings.TrimSpace(string(*r.Section))))
@@ -404,6 +462,9 @@ func (r *CreateExamAttemptRequest) Normalize() {
 func (r CreateExamAttemptRequest) Validate() error {
 	switch r.ContextType {
 	case model.AttemptContextTypeStandalone:
+		if r.Mode != model.AttemptModePractice && r.Mode != model.AttemptModeTest {
+			return errors.New("[ERROR] STANDALONE attempts must use PRACTICE or TEST mode")
+		}
 		if r.ContextID != nil {
 			return errors.New("[ERROR] STANDALONE context does not accept contextId")
 		}
@@ -411,8 +472,8 @@ func (r CreateExamAttemptRequest) Validate() error {
 		if r.ContextID == nil || *r.ContextID == 0 {
 			return errors.New("[ERROR] CLASSROOM_ASSIGNMENT context requires contextId")
 		}
-		if r.Mode != model.AttemptModeTest {
-			return errors.New("[ERROR] CLASSROOM_ASSIGNMENT attempts must use TEST mode")
+		if r.Mode != model.AttemptModeAssignment {
+			return errors.New("[ERROR] CLASSROOM_ASSIGNMENT attempts must omit mode")
 		}
 	default:
 		return errors.New("[ERROR] Invalid context type")
@@ -452,6 +513,26 @@ func (r SubmitAttemptRequest) Validate() error {
 }
 
 func ValidateCreateExamAttemptRequestForExam(examType model.ExamType, req CreateExamAttemptRequest) error {
+	if examType == model.ExamTypeAssignment {
+		if req.Mode != model.AttemptModeAssignment {
+			return errors.New("[ERROR] ASSIGNMENT exams require ASSIGNMENT mode")
+		}
+		if req.Section != nil {
+			return errors.New("[ERROR] ASSIGNMENT mode does not support section")
+		}
+		if len(req.Parts) > 0 {
+			return errors.New("[ERROR] ASSIGNMENT mode does not support parts")
+		}
+		if req.Duration != nil {
+			return errors.New("[ERROR] ASSIGNMENT mode does not accept duration")
+		}
+		return nil
+	}
+
+	if req.Mode == model.AttemptModeAssignment {
+		return errors.New("[ERROR] ASSIGNMENT mode only supports ASSIGNMENT exams")
+	}
+
 	if req.Mode == model.AttemptModeTest {
 		if req.Section != nil {
 			return errors.New("[ERROR] TEST mode does not support section")
@@ -481,6 +562,7 @@ func ValidateCreateExamAttemptRequestForExam(examType model.ExamType, req Create
 }
 
 func toExamQuestion(question model.Question) *ExamQuestion {
+	excludedFromScore := question.ExcludedFromScore
 	options := make([]*ExamQuestionOption, 0, len(question.Options))
 	for _, option := range question.Options {
 		options = append(options, &ExamQuestionOption{
@@ -496,8 +578,9 @@ func toExamQuestion(question model.Question) *ExamQuestion {
 	})
 
 	return &ExamQuestion{
-		ID:      question.ID,
-		Content: question.Content,
+		ID:                question.ID,
+		Content:           question.Content,
+		ExcludedFromScore: &excludedFromScore,
 		Part: valuex.MapPtr(question.Part, func(value model.PartCode) string {
 			return string(value)
 		}),

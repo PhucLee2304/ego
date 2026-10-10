@@ -20,7 +20,7 @@ type AppConfig struct {
 
 	AuthServiceAddr  string
 	UsersServiceAddr string
-	ExamsServiceURL  string
+	ExamsServiceAddr string
 
 	MaxStudentsPerClass int
 }
@@ -39,7 +39,7 @@ func LoadAppConfig() (*AppConfig, error) {
 
 		AuthServiceAddr:  getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
 		UsersServiceAddr: getEnv("USERS_SERVICE_ADDR", "users:50052"),
-		ExamsServiceURL:  getEnv("EXAMS_SERVICE_URL", "exams:50056"),
+		ExamsServiceAddr: getEnv("EXAMS_SERVICE_ADDR", "exams:50056"),
 
 		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
 	}
