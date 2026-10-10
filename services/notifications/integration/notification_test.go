@@ -109,29 +109,49 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 func TestDeviceTokenUpsertAndScopedDelete(t *testing.T) {
 	repo, db := testRepository(t)
 	ctx := context.Background()
-	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", Token: "token", Platform: model.TokenPlatformWeb}); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", DeviceID: "browser-a", Token: "token-a", Platform: model.TokenPlatformWeb}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "2", Token: "token", Platform: model.TokenPlatformAndroid}); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", DeviceID: "browser-b", Token: "token-b", Platform: model.TokenPlatformWeb}); err != nil {
 		t.Fatal(err)
 	}
-	var token model.DeviceToken
-	if err := db.First(&token).Error; err != nil {
+	var count int64
+	if err := db.Model(&model.DeviceToken{}).Where("user_id = ? AND platform = ?", "1", model.TokenPlatformWeb).Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
-	if token.UserID != "2" || token.Platform != model.TokenPlatformAndroid {
-		t.Fatalf("upsert failed: %+v", token)
+	if count != 2 {
+		t.Fatalf("multiple web installations were not preserved: %d", count)
 	}
-	if err := repo.DeleteDeviceToken(ctx, "1", "token"); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "2", DeviceID: "browser-c", Token: "token-b", Platform: model.TokenPlatformWeb}); err == nil {
+		t.Fatal("expected a token assigned to another installation to be rejected")
+	}
+	var original model.DeviceToken
+	if err := db.Where("device_id = ?", "browser-b").First(&original).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.First(&token).Error; err != nil {
+	if original.UserID != "1" || original.Token != "token-b" {
+		t.Fatalf("conflicting registration changed the original installation: %+v", original)
+	}
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "2", DeviceID: "browser-a", Token: "token-c", Platform: model.TokenPlatformWeb}); err != nil {
+		t.Fatal(err)
+	}
+	var saved model.DeviceToken
+	if err := db.Where("device_id = ?", "browser-a").First(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.UserID != "2" || saved.Token != "token-c" {
+		t.Fatalf("installation was not transferred to the current user: %+v", saved)
+	}
+	if err := repo.DeleteDeviceToken(ctx, "1", "token-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("token = ?", "token-c").First(&model.DeviceToken{}).Error; err != nil {
 		t.Fatalf("wrong user deleted token: %v", err)
 	}
-	if err := repo.DeleteDeviceToken(ctx, "2", "token"); err != nil {
+	if err := repo.DeleteDeviceToken(ctx, "2", "token-c"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.First(&token).Error; err != gorm.ErrRecordNotFound {
+	if err := db.Where("token = ?", "token-c").First(&model.DeviceToken{}).Error; err != gorm.ErrRecordNotFound {
 		t.Fatalf("token was not hard deleted: %v", err)
 	}
 }
@@ -139,7 +159,7 @@ func TestDeviceTokenUpsertAndScopedDelete(t *testing.T) {
 func TestCreateNotificationCommitsBeforeBestEffortPush(t *testing.T) {
 	repo, db := testRepository(t)
 	ctx := context.Background()
-	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", Token: "invalid-token", Platform: model.TokenPlatformWeb}); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", DeviceID: "browser", Token: "invalid-token", Platform: model.TokenPlatformWeb}); err != nil {
 		t.Fatal(err)
 	}
 	sender := &fakeSender{called: make(chan struct{}), invalid: []string{"invalid-token"}}

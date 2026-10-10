@@ -11,7 +11,7 @@ import (
 )
 
 func Connect(cfg *config.AppConfig) (*gorm.DB, error) {
-	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{})
+	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{TranslateError: true})
 }
 
 func Migrate(db *gorm.DB) error {

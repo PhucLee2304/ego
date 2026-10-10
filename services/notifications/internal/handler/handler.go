@@ -40,7 +40,11 @@ func (h *Handler) RegisterDeviceToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.service.RegisterDeviceToken(r.Context(), userID, req); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		if errors.Is(err, service.ErrDeviceTokenConflict) {
+			httpx.Error(w, http.StatusConflict, err.Error())
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

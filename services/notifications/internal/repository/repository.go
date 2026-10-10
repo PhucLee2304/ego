@@ -41,8 +41,8 @@ func (r *Repository) GetNotifications(ctx context.Context, userID string, read *
 
 func (r *Repository) UpsertDeviceToken(ctx context.Context, token *model.DeviceToken) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "token"}},
-		DoUpdates: clause.AssignmentColumns([]string{"user_id", "platform"}),
+		Columns:   []clause.Column{{Name: "device_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"user_id", "token", "platform"}),
 	}).Create(token).Error
 }
 
