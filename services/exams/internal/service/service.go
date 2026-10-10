@@ -44,6 +44,8 @@ type Service interface {
 	GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, error)
 	ReconcileClassroomAssignmentSubmissions(ctx context.Context, limit int) (int, error)
 	ReconcileAssignmentSubmissions(ctx context.Context, assignmentID uint) (int, error)
+	SubmitStudentAssignmentAttempts(ctx context.Context, studentID string, assignmentIDs []uint) (int, error)
+	GetExamAudits(ctx context.Context, examID uint) ([]*model.ExamAudit, error)
 	SetAttemptEventPublisher(publisher func(userID string, payload any))
 }
 
@@ -240,7 +242,13 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 			if err != nil {
 				return err
 			}
+			scoreChanges := make([]model.ExamAuditScoreChange, 0, len(attempts))
 			for _, attempt := range attempts {
+				var beforeScore *float64
+				if attempt.Score != nil {
+					value := *attempt.Score
+					beforeScore = &value
+				}
 				questionMap := make(map[uint]*model.Question)
 				for i := range attempt.Exam.Sections[0].Questions {
 					question := &attempt.Exam.Sections[0].Questions[i]
@@ -272,6 +280,8 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 				}
 				score = valuex.RoundFloat(score, 2)
 				attempt.CorrectAnswers, attempt.Score = &correctAnswers, &score
+				afterScore := score
+				scoreChanges = append(scoreChanges, model.ExamAuditScoreChange{AttemptID: attempt.ID, StudentID: attempt.UserID, BeforeScore: beforeScore, AfterScore: &afterScore})
 				if err := repo.UpdateAttempt(ctx, attempt); err != nil {
 					return err
 				}
@@ -301,7 +311,11 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 				return err
 			}
 			now := time.Now()
-			return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), RegradedAt: &now})
+			changes, err := json.Marshal(scoreChanges)
+			if err != nil {
+				return err
+			}
+			return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON(changes), RegradedAt: &now})
 		}
 		optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
 		questions := make([]model.Question, len(req.Questions))
@@ -335,7 +349,7 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 		if err != nil {
 			return err
 		}
-		return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after)})
+		return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON("[]")})
 	})
 	return updated, err
 }
@@ -831,6 +845,40 @@ func (s *service) SubmitAssignmentAttempts(ctx context.Context, assignmentID uin
 	return submitted, nil
 }
 
+func (s *service) SubmitStudentAssignmentAttempts(ctx context.Context, studentID string, assignmentIDs []uint) (int, error) {
+	if len(assignmentIDs) == 0 {
+		return 0, nil
+	}
+	if err := s.repo.ExpireActiveAssignmentAttemptsByUser(ctx, assignmentIDs, studentID, time.Now()); err != nil {
+		return 0, err
+	}
+	attempts, err := s.repo.GetActiveAttemptsByAssignmentIDsAndUser(ctx, assignmentIDs, studentID)
+	if err != nil {
+		return 0, err
+	}
+
+	submitted := 0
+	var errs []error
+	for _, attempt := range attempts {
+		if _, err := s.submitAttempt(ctx, studentID, attempt.ID, nil); err != nil {
+			if errors.Is(err, ErrAttemptAlreadySubmitted) || errors.Is(err, ErrAttemptCancelled) {
+				continue
+			}
+			errs = append(errs, err)
+			continue
+		}
+		submitted++
+	}
+	if len(errs) > 0 {
+		return submitted, errors.Join(errs...)
+	}
+	return submitted, nil
+}
+
+func (s *service) GetExamAudits(ctx context.Context, examID uint) ([]*model.ExamAudit, error) {
+	return s.repo.GetExamAudits(ctx, examID)
+}
+
 func (s *service) GetAssignmentAttemptState(ctx context.Context, assignmentID uint) (int64, int64, error) {
 	return s.repo.CountAssignmentAttempts(ctx, assignmentID)
 }
@@ -848,6 +896,12 @@ func readErrors(errs <-chan error) []error {
 }
 
 func (s *service) submitAttempt(ctx context.Context, userID string, attemptID uint, submittedAnswers *[]dto.SubmitAttemptAnswer) (*dto.AttemptResponse, error) {
+	if submittedAnswers == nil && s.attemptPublisher != nil {
+		s.attemptPublisher(userID, map[string]any{
+			"type":    "ATTEMPT_SUBMITTING",
+			"payload": map[string]any{"attemptId": attemptID},
+		})
+	}
 	var response *dto.AttemptResponse
 	err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		attempt, err := repo.GetAttemptForLifecycle(ctx, attemptID, userID)

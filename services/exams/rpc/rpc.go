@@ -6,6 +6,7 @@ import (
 	"ego/services/exams/internal/dto"
 	"ego/services/exams/internal/model"
 	"ego/services/exams/internal/service"
+	"encoding/json"
 	"time"
 )
 
@@ -154,4 +155,42 @@ func (s *server) ReconcileAssignmentSubmissions(ctx context.Context, req *examsC
 		return nil, err
 	}
 	return &examsClient.ReconcileAssignmentSubmissionsResponse{EnqueuedCount: int32(count)}, nil
+}
+
+func (s *server) SubmitStudentAssignmentAttempts(ctx context.Context, req *examsClient.SubmitStudentAssignmentAttemptsRequest) (*examsClient.SubmitStudentAssignmentAttemptsResponse, error) {
+	assignmentIDs := make([]uint, len(req.AssignmentIds))
+	for i, id := range req.AssignmentIds {
+		assignmentIDs[i] = uint(id)
+	}
+	count, err := s.service.SubmitStudentAssignmentAttempts(ctx, req.StudentId, assignmentIDs)
+	if err != nil {
+		return nil, err
+	}
+	return &examsClient.SubmitStudentAssignmentAttemptsResponse{SubmittedCount: int32(count)}, nil
+}
+
+func (s *server) GetExamAudits(ctx context.Context, req *examsClient.GetExamAuditsRequest) (*examsClient.GetExamAuditsResponse, error) {
+	audits, err := s.service.GetExamAudits(ctx, uint(req.ExamId))
+	if err != nil {
+		return nil, err
+	}
+	response := &examsClient.GetExamAuditsResponse{Audits: make([]*examsClient.ExamAuditResponse, len(audits))}
+	for i, audit := range audits {
+		item := &examsClient.ExamAuditResponse{Id: uint64(audit.ID), ExamId: uint64(audit.ExamID), ActorId: audit.ActorID, Reason: audit.Reason, Before: audit.Before, After: audit.After, CreatedAtUnix: audit.CreatedAt.Unix()}
+		if audit.RegradedAt != nil {
+			value := audit.RegradedAt.Unix()
+			item.RegradedAtUnix = &value
+		}
+		var changes []model.ExamAuditScoreChange
+		if len(audit.ScoreChanges) > 0 {
+			if err := json.Unmarshal(audit.ScoreChanges, &changes); err != nil {
+				return nil, err
+			}
+		}
+		for _, change := range changes {
+			item.ScoreChanges = append(item.ScoreChanges, &examsClient.ExamAuditScoreChange{AttemptId: uint64(change.AttemptID), StudentId: change.StudentID, BeforeScore: change.BeforeScore, AfterScore: change.AfterScore})
+		}
+		response.Audits[i] = item
+	}
+	return response, nil
 }

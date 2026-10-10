@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"time"
 
 	usersClient "ego/api/gen/go/users"
@@ -119,6 +120,26 @@ type EditableAssignmentQuestion struct {
 
 type SetAssignmentActiveRequest struct {
 	Active *bool `json:"active" validate:"required"`
+}
+
+type ExamAuditResponse struct {
+	ID           uint                            `json:"id"`
+	ExamID       uint                            `json:"examId"`
+	ActorID      string                          `json:"actorId"`
+	Actor        *UserInfo                       `json:"actor,omitempty"`
+	Reason       string                          `json:"reason"`
+	Before       json.RawMessage                 `json:"before"`
+	After        json.RawMessage                 `json:"after"`
+	RegradedAt   *time.Time                      `json:"regradedAt,omitempty"`
+	CreatedAt    time.Time                       `json:"createdAt"`
+	ScoreChanges []*ExamAuditScoreChangeResponse `json:"scoreChanges"`
+}
+
+type ExamAuditScoreChangeResponse struct {
+	AttemptID   uint     `json:"attemptId"`
+	StudentID   string   `json:"studentId"`
+	BeforeScore *float64 `json:"beforeScore"`
+	AfterScore  *float64 `json:"afterScore"`
 }
 
 type ClassroomResponse struct {

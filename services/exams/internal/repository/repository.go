@@ -138,6 +138,14 @@ func (r *Repository) CreateExamAudit(ctx context.Context, audit *model.ExamAudit
 	return r.db.WithContext(ctx).Create(audit).Error
 }
 
+func (r *Repository) GetExamAudits(ctx context.Context, examID uint) ([]*model.ExamAudit, error) {
+	var audits []*model.ExamAudit
+	if err := r.db.WithContext(ctx).Where("exam_id = ?", examID).Order("created_at DESC, id DESC").Find(&audits).Error; err != nil {
+		return nil, err
+	}
+	return audits, nil
+}
+
 func (r *Repository) ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error {
 	var attempt model.Attempt
 	if err := r.db.WithContext(ctx).Where("context_type = ? AND context_id = ? AND user_id = ?", model.AttemptContextTypeClassroomAssignment, assignmentID, studentID).First(&attempt).Error; err != nil {
@@ -352,6 +360,29 @@ func (r *Repository) GetActiveAttemptsByAssignmentID(ctx context.Context, assign
 		return nil, err
 	}
 	return attempts, nil
+}
+
+func (r *Repository) GetActiveAttemptsByAssignmentIDsAndUser(ctx context.Context, assignmentIDs []uint, userID string) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	if len(assignmentIDs) == 0 {
+		return attempts, nil
+	}
+	if err := r.db.WithContext(ctx).
+		Where("context_type = ? AND context_id IN ? AND user_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentIDs, userID, model.AttemptStatusInProgress).
+		Order("id ASC").
+		Find(&attempts).Error; err != nil {
+		return nil, err
+	}
+	return attempts, nil
+}
+
+func (r *Repository) ExpireActiveAssignmentAttemptsByUser(ctx context.Context, assignmentIDs []uint, userID string, now time.Time) error {
+	if len(assignmentIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.Attempt{}).
+		Where("context_type = ? AND context_id IN ? AND user_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentIDs, userID, model.AttemptStatusInProgress).
+		Update("expires_at", now).Error
 }
 
 func (r *Repository) ExpireActiveAssignmentAttempts(ctx context.Context, assignmentID uint, now time.Time) error {

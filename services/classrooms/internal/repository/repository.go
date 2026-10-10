@@ -207,6 +207,14 @@ func (r *Repository) GetAssignmentsByClassroom(ctx context.Context, classroomID 
 	return assignments, total, nil
 }
 
+func (r *Repository) GetAssignmentIDsByClassroom(ctx context.Context, classroomID uint) ([]uint, error) {
+	var ids []uint
+	if err := r.db.WithContext(ctx).Model(&model.Assignment{}).Where("classroom_id = ?", classroomID).Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func (r *Repository) GetAssignmentByClassroom(ctx context.Context, classroomID uint, assignmentID uint) (*model.Assignment, error) {
 	var assignment model.Assignment
 	if err := r.db.WithContext(ctx).

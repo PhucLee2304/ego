@@ -44,6 +44,7 @@ type Service interface {
 	UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, error)
 	ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) error
 	ReconcileAssignmentSubmissions(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (int, error)
+	GetAssignmentAudits(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) ([]*dto.ExamAuditResponse, error)
 }
 
 type service struct {
@@ -511,20 +512,45 @@ func (s *service) RejectMember(ctx context.Context, teacherID string, classroomI
 }
 
 func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomID uint, userID string) error {
-	return s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		classroom, err := repo.GetClassroomByID(ctx, classroomID)
-		if err != nil {
-			return err
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return err
+	}
+	if classroom.TeacherID != teacherID {
+		return ErrClassroomForbidden
+	}
+	member, err := s.repo.GetMember(ctx, classroomID, userID)
+	if err != nil {
+		return err
+	}
+	previousApproved := member.Approved
+	previousApprovedAt := member.ApprovedAt
+	revoked := false
+	member.Approved = &revoked
+	member.ApprovedAt = nil
+	if err := s.repo.UpsertMember(ctx, member); err != nil {
+		return err
+	}
+	assignmentIDs, err := s.repo.GetAssignmentIDsByClassroom(ctx, classroomID)
+	if err != nil {
+		member.Approved = previousApproved
+		member.ApprovedAt = previousApprovedAt
+		_ = s.repo.UpsertMember(ctx, member)
+		return err
+	}
+	grpcAssignmentIDs := make([]uint64, len(assignmentIDs))
+	for i, id := range assignmentIDs {
+		grpcAssignmentIDs[i] = uint64(id)
+	}
+	if _, err := s.examsClient.SubmitStudentAssignmentAttempts(ctx, &examsClient.SubmitStudentAssignmentAttemptsRequest{StudentId: userID, AssignmentIds: grpcAssignmentIDs}); err != nil {
+		member.Approved = previousApproved
+		member.ApprovedAt = previousApprovedAt
+		if rollbackErr := s.repo.UpsertMember(ctx, member); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
 		}
-		if classroom.TeacherID != teacherID {
-			return ErrClassroomForbidden
-		}
-		member, err := repo.GetMember(ctx, classroomID, userID)
-		if err != nil {
-			return err
-		}
-		return repo.DeleteMember(ctx, member)
-	})
+		return err
+	}
+	return s.repo.DeleteMember(ctx, member)
 }
 
 func (s *service) CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, error) {
@@ -892,6 +918,53 @@ func (s *service) ReconcileAssignmentSubmissions(ctx context.Context, teacherID 
 		return 0, err
 	}
 	return int(response.EnqueuedCount), nil
+}
+
+func (s *service) GetAssignmentAudits(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) ([]*dto.ExamAuditResponse, error) {
+	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+	audits, err := s.examsClient.GetExamAudits(ctx, &examsClient.GetExamAuditsRequest{ExamId: uint64(assignment.ExamID)})
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]*dto.ExamAuditResponse, len(audits.Audits))
+	actorIDs := make([]string, 0, len(audits.Audits))
+	seenActorIDs := make(map[string]struct{}, len(audits.Audits))
+	for i, audit := range audits.Audits {
+		item := &dto.ExamAuditResponse{ID: uint(audit.Id), ExamID: uint(audit.ExamId), ActorID: audit.ActorId, Reason: audit.Reason, Before: audit.Before, After: audit.After, CreatedAt: time.Unix(audit.CreatedAtUnix, 0), ScoreChanges: make([]*dto.ExamAuditScoreChangeResponse, len(audit.ScoreChanges))}
+		if audit.RegradedAtUnix != nil {
+			value := time.Unix(*audit.RegradedAtUnix, 0)
+			item.RegradedAt = &value
+		}
+		for j, change := range audit.ScoreChanges {
+			item.ScoreChanges[j] = &dto.ExamAuditScoreChangeResponse{AttemptID: uint(change.AttemptId), StudentID: change.StudentId, BeforeScore: change.BeforeScore, AfterScore: change.AfterScore}
+		}
+		responses[i] = item
+		if _, exists := seenActorIDs[audit.ActorId]; !exists {
+			seenActorIDs[audit.ActorId] = struct{}{}
+			actorIDs = append(actorIDs, audit.ActorId)
+		}
+	}
+	if len(actorIDs) > 0 {
+		users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: actorIDs})
+		if err != nil {
+			return nil, err
+		}
+		usersByID := dto.ToUserInfoMap(users.Users)
+		for _, response := range responses {
+			response.Actor = usersByID[response.ActorID]
+		}
+	}
+	return responses, nil
 }
 
 func (s *service) UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, error) {

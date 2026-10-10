@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -86,12 +87,26 @@ func TestPrivateAssignmentExamConstraints(t *testing.T) {
 	}
 
 	svc := service.New(repo, nil)
+	var attemptEvents []string
+	svc.SetAttemptEventPublisher(func(userID string, payload any) {
+		if userID != "student" {
+			t.Fatalf("event sent to unexpected user %q", userID)
+		}
+		message, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected event payload: %#v", payload)
+		}
+		attemptEvents = append(attemptEvents, message["type"].(string))
+	})
 	count, err := svc.SubmitAssignmentAttempts(context.Background(), assignmentID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
 		t.Fatalf("expected one submitted attempt, got %d", count)
+	}
+	if len(attemptEvents) != 2 || attemptEvents[0] != "ATTEMPT_SUBMITTING" || attemptEvents[1] != "ATTEMPT_SUBMITTED" {
+		t.Fatalf("unexpected attempt event sequence: %#v", attemptEvents)
 	}
 	var saved model.Attempt
 	if err := db.Preload("History").First(&saved, attempt.ID).Error; err != nil {
@@ -125,6 +140,13 @@ func TestPrivateAssignmentExamConstraints(t *testing.T) {
 	if audit.ActorID != "teacher-1" || audit.Reason != "Correct an invalid answer key" || len(audit.Before) == 0 || len(audit.After) == 0 || audit.RegradedAt == nil {
 		t.Fatalf("correction audit is incomplete: %#v", audit)
 	}
+	var scoreChanges []model.ExamAuditScoreChange
+	if err := json.Unmarshal(audit.ScoreChanges, &scoreChanges); err != nil {
+		t.Fatalf("decode audit score changes: %v", err)
+	}
+	if len(scoreChanges) != 1 || scoreChanges[0].AttemptID != attempt.ID || scoreChanges[0].BeforeScore == nil || *scoreChanges[0].BeforeScore != 10 || scoreChanges[0].AfterScore == nil || *scoreChanges[0].AfterScore != 0 {
+		t.Fatalf("unexpected audit score changes: %#v", scoreChanges)
+	}
 	var preservedHistory model.History
 	if err := db.First(&preservedHistory, saved.History.ID).Error; err != nil {
 		t.Fatalf("submitted history must survive exam replacement: %v", err)
@@ -138,6 +160,27 @@ func TestPrivateAssignmentExamConstraints(t *testing.T) {
 		Questions: []dto.UpdatePrivateExamQuestionRequest{{ID: question.ID, Content: "Changed content", Explanation: &emptyExplanation, Options: []string{"1", "2", "3", "4"}, OptionIDs: optionIDs, CorrectOptionIndex: 0}},
 	}); err == nil {
 		t.Fatal("expected structural correction to be rejected after submission")
+	}
+
+	secondAssignmentID := uint(73)
+	secondAttempt := &model.Attempt{
+		Mode: model.AttemptModeAssignment, Status: model.AttemptStatusInProgress,
+		StartedAt: now, TotalQuestions: 1, ExamID: exam.ID, UserID: "student-2",
+		ContextType: model.AttemptContextTypeClassroomAssignment, ContextID: &secondAssignmentID,
+	}
+	if err := db.Create(secondAttempt).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.AttemptAnswer{AttemptID: secondAttempt.ID, QuestionID: question.ID, SelectedOptionID: &correctOptionID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAttemptEventPublisher(nil)
+	count, err = svc.SubmitStudentAssignmentAttempts(context.Background(), "student-2", []uint{secondAssignmentID})
+	if err != nil || count != 1 {
+		t.Fatalf("submit removed student's active attempt: count=%d err=%v", count, err)
+	}
+	if err := db.First(&secondAttempt, secondAttempt.ID).Error; err != nil || secondAttempt.Status != model.AttemptStatusSubmitted {
+		t.Fatalf("student attempt was not submitted: attempt=%#v err=%v", secondAttempt, err)
 	}
 
 	aggregateID := "attempt-72"
