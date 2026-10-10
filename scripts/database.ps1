@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$databases = @{ users = "users-db"; topics = "topics-db"; exams = "exams-db"; classrooms = "classrooms-db" }
+$databases = @{ users = "users-db"; topics = "topics-db"; exams = "exams-db"; classrooms = "classrooms-db"; notifications = "notifications-db" }
 
 if ($Action -eq "seed") {
     if ($Service -notin @("topics", "exams")) { throw "Seed is only available for topics and exams" }

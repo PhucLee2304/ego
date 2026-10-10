@@ -9,7 +9,7 @@ case "$ACTION:$SERVICE" in
     echo "Seed is only available for topics and exams" >&2
     exit 1
     ;;
-  reset-db:users|reset-db:topics|reset-db:exams|reset-db:classrooms)
+  reset-db:users|reset-db:topics|reset-db:exams|reset-db:classrooms|reset-db:notifications)
     docker exec "${SERVICE}-db" sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
     docker compose restart "$SERVICE"
     ;;
