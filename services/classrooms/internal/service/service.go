@@ -14,6 +14,7 @@ import (
 	"ego/services/classrooms/internal/repository"
 	"errors"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,6 +46,10 @@ type Service interface {
 	ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) error
 	ReconcileAssignmentSubmissions(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (int, error)
 	GetAssignmentAudits(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) ([]*dto.ExamAuditResponse, error)
+	CreateSchedule(ctx context.Context, teacherID string, classroomID uint, req dto.CreateScheduleRequest) (*dto.CalendarResponse, error)
+	GetCalendar(ctx context.Context, userID string, classroomID uint, query dto.CalendarQuery) ([]*dto.CalendarResponse, error)
+	UpdateSchedule(ctx context.Context, teacherID string, scheduleID uint, req dto.UpdateScheduleRequest) (*dto.CalendarResponse, error)
+	DeleteSchedule(ctx context.Context, teacherID string, scheduleID uint) error
 }
 
 type service struct {
@@ -74,7 +79,124 @@ var (
 	ErrAssignmentAlreadyExists        = errors.New("[CONFLICT] This exam is already assigned to the classroom")
 	ErrAssignmentScheduleConfirmation = errors.New("[CONFIRMATION_REQUIRED] Active attempts may be affected by this schedule change")
 	ErrAssignmentContentConfirmation  = errors.New("[CONFIRMATION_REQUIRED] This exam already has attempts; confirm to submit active attempts and pause all related assignments")
+	ErrScheduleInvalidTime            = errors.New("[ERROR] Schedule end time must be after start time")
+	ErrCalendarInvalidRange           = errors.New("[ERROR] Calendar range must be valid and no longer than 366 days")
 )
+
+func (s *service) CreateSchedule(ctx context.Context, teacherID string, classroomID uint, req dto.CreateScheduleRequest) (*dto.CalendarResponse, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+	if !classroom.Active {
+		return nil, ErrClassroomNotActive
+	}
+	if !req.EndsAt.After(req.StartsAt) {
+		return nil, ErrScheduleInvalidTime
+	}
+	schedule := &model.Schedule{ClassroomID: classroomID, Title: strings.TrimSpace(req.Title), Description: req.Description, StartsAt: req.StartsAt, EndsAt: req.EndsAt}
+	if schedule.Description != nil {
+		value := strings.TrimSpace(*schedule.Description)
+		schedule.Description = &value
+	}
+	if err := s.repo.CreateSchedule(ctx, schedule); err != nil {
+		return nil, err
+	}
+	return dto.ToCalendarResponse(schedule), nil
+}
+
+func (s *service) GetCalendar(ctx context.Context, userID string, classroomID uint, query dto.CalendarQuery) ([]*dto.CalendarResponse, error) {
+	if !query.To.After(query.From) || query.To.Sub(query.From) > 366*24*time.Hour {
+		return nil, ErrCalendarInvalidRange
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != userID {
+		approved, err := s.repo.IsStudentApprovedInClassroom(ctx, classroomID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !approved {
+			return nil, ErrClassroomForbidden
+		}
+	}
+	schedules, err := s.repo.GetSchedulesByRange(ctx, classroomID, query.From, query.To)
+	if err != nil {
+		return nil, err
+	}
+	assignments, err := s.repo.GetAssignmentsDueInRange(ctx, classroomID, query.From, query.To)
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]*dto.CalendarResponse, 0, len(schedules)+len(assignments))
+	for _, schedule := range schedules {
+		responses = append(responses, dto.ToCalendarResponse(schedule))
+	}
+	for _, assignment := range assignments {
+		assignmentID := assignment.ID
+		responses = append(responses, &dto.CalendarResponse{ClassroomID: classroomID, CalendarType: dto.CalendarTypeAssignmentDeadline, Title: "Deadline: " + assignment.Title, Description: assignment.Description, StartsAt: assignment.DueAt, RelatedAssignmentID: &assignmentID, Editable: false})
+	}
+	sort.SliceStable(responses, func(i, j int) bool {
+		if responses[i].StartsAt.Equal(responses[j].StartsAt) {
+			return responses[i].ID < responses[j].ID
+		}
+		return responses[i].StartsAt.Before(responses[j].StartsAt)
+	})
+	return responses, nil
+}
+
+func (s *service) UpdateSchedule(ctx context.Context, teacherID string, scheduleID uint, req dto.UpdateScheduleRequest) (*dto.CalendarResponse, error) {
+	schedule, err := s.repo.GetScheduleByID(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, schedule.ClassroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+	if !classroom.Active {
+		return nil, ErrClassroomNotActive
+	}
+	if !req.EndsAt.After(req.StartsAt) {
+		return nil, ErrScheduleInvalidTime
+	}
+	schedule.Title, schedule.Description = strings.TrimSpace(req.Title), req.Description
+	schedule.StartsAt, schedule.EndsAt = req.StartsAt, req.EndsAt
+	if schedule.Description != nil {
+		value := strings.TrimSpace(*schedule.Description)
+		schedule.Description = &value
+	}
+	if err := s.repo.UpdateSchedule(ctx, schedule); err != nil {
+		return nil, err
+	}
+	return dto.ToCalendarResponse(schedule), nil
+}
+
+func (s *service) DeleteSchedule(ctx context.Context, teacherID string, scheduleID uint) error {
+	schedule, err := s.repo.GetScheduleByID(ctx, scheduleID)
+	if err != nil {
+		return err
+	}
+	classroom, err := s.repo.GetClassroomByID(ctx, schedule.ClassroomID)
+	if err != nil {
+		return err
+	}
+	if classroom.TeacherID != teacherID {
+		return ErrClassroomForbidden
+	}
+	if !classroom.Active {
+		return ErrClassroomNotActive
+	}
+	return s.repo.DeleteSchedule(ctx, schedule)
+}
 
 func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, error) {
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"

@@ -13,7 +13,6 @@ type Classroom struct {
 	Active    bool   `gorm:"not null;default:true;index"`
 
 	Members     []Member     `gorm:"foreignKey:ClassroomID;references:ID"`
-	Events      []Event      `gorm:"foreignKey:ClassroomID;references:ID"`
+	Schedules   []Schedule   `gorm:"foreignKey:ClassroomID;references:ID"`
 	Assignments []Assignment `gorm:"foreignKey:ClassroomID;references:ID"`
-	Rooms       []Room       `gorm:"foreignKey:ClassroomID;references:ID"`
 }

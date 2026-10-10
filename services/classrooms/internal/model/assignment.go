@@ -20,5 +20,4 @@ type Assignment struct {
 	Classroom   Classroom `gorm:"foreignKey:ClassroomID;references:ID"`
 
 	Submissions []AssignmentSubmission `gorm:"foreignKey:AssignmentID;references:ID"`
-	Events      []Event                `gorm:"foreignKey:RelatedAssignmentID;references:ID"`
 }

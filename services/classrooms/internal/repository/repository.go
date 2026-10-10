@@ -6,6 +6,7 @@ import (
 	"ego/platform/httpx"
 	"ego/services/classrooms/internal/model"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -213,6 +214,48 @@ func (r *Repository) GetAssignmentIDsByClassroom(ctx context.Context, classroomI
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (r *Repository) CreateSchedule(ctx context.Context, schedule *model.Schedule) error {
+	return r.db.WithContext(ctx).Create(schedule).Error
+}
+
+func (r *Repository) GetScheduleByID(ctx context.Context, id uint) (*model.Schedule, error) {
+	var schedule model.Schedule
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&schedule).Error; err != nil {
+		return nil, err
+	}
+	return &schedule, nil
+}
+
+func (r *Repository) GetSchedulesByRange(ctx context.Context, classroomID uint, from time.Time, to time.Time) ([]*model.Schedule, error) {
+	var schedules []*model.Schedule
+	if err := r.db.WithContext(ctx).
+		Where("classroom_id = ? AND starts_at < ? AND COALESCE(ends_at, starts_at) >= ?", classroomID, to, from).
+		Order("starts_at ASC, id ASC").
+		Find(&schedules).Error; err != nil {
+		return nil, err
+	}
+	return schedules, nil
+}
+
+func (r *Repository) GetAssignmentsDueInRange(ctx context.Context, classroomID uint, from time.Time, to time.Time) ([]*model.Assignment, error) {
+	var assignments []*model.Assignment
+	if err := r.db.WithContext(ctx).
+		Where("classroom_id = ? AND due_at >= ? AND due_at < ?", classroomID, from, to).
+		Order("due_at ASC, id ASC").
+		Find(&assignments).Error; err != nil {
+		return nil, err
+	}
+	return assignments, nil
+}
+
+func (r *Repository) UpdateSchedule(ctx context.Context, schedule *model.Schedule) error {
+	return r.db.WithContext(ctx).Save(schedule).Error
+}
+
+func (r *Repository) DeleteSchedule(ctx context.Context, schedule *model.Schedule) error {
+	return r.db.WithContext(ctx).Delete(schedule).Error
 }
 
 func (r *Repository) GetAssignmentByClassroom(ctx context.Context, classroomID uint, assignmentID uint) (*model.Assignment, error) {

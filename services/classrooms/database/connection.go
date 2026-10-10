@@ -29,13 +29,16 @@ func Migrate(db *gorm.DB) error {
 	err := db.AutoMigrate(
 		&model.Classroom{},
 		&model.Member{},
-		&model.Event{},
+		&model.Schedule{},
 		&model.Assignment{},
 		&model.AssignmentSubmission{},
 		&model.Room{},
 		&model.RoomParticipant{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := db.Exec(model.CreateRoomParticipantOpenSessionUniqueIndexSQL).Error; err != nil {
 		return err
 	}
 

@@ -38,6 +38,10 @@ type Handler interface {
 	ResetAssignmentAttempt(w http.ResponseWriter, r *http.Request)
 	ReconcileAssignmentSubmissions(w http.ResponseWriter, r *http.Request)
 	GetAssignmentAudits(w http.ResponseWriter, r *http.Request)
+	CreateSchedule(w http.ResponseWriter, r *http.Request)
+	GetCalendar(w http.ResponseWriter, r *http.Request)
+	UpdateSchedule(w http.ResponseWriter, r *http.Request)
+	DeleteSchedule(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -73,6 +77,144 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("DELETE /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt", mw.Handle(h.ResetAssignmentAttempt))
 	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/gradebook/reconcile", mw.Handle(h.ReconcileAssignmentSubmissions))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/audits", mw.Handle(h.GetAssignmentAudits))
+	mux.HandleFunc("POST /classrooms/{id}/schedules", mw.Handle(h.CreateSchedule))
+	mux.HandleFunc("GET /classrooms/{id}/calendar", mw.Handle(h.GetCalendar))
+	mux.HandleFunc("PATCH /classrooms/{id}/schedules/{scheduleId}", mw.Handle(h.UpdateSchedule))
+	mux.HandleFunc("DELETE /classrooms/{id}/schedules/{scheduleId}", mw.Handle(h.DeleteSchedule))
+}
+
+func (h *handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	var body dto.CreateScheduleRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	response, err := h.service.CreateSchedule(r.Context(), userID, classroomID, body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrClassroomNotActive), errors.Is(err, service.ErrScheduleInvalidTime):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, response)
+}
+
+func (h *handler) GetCalendar(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	var query dto.CalendarQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid calendar range")
+		return
+	}
+	response, err := h.service.GetCalendar(r.Context(), userID, classroomID, query)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrCalendarInvalidRange):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *handler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	scheduleID, err := httpx.ParsePathID(r, "scheduleId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid schedule ID")
+		return
+	}
+	var body dto.UpdateScheduleRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	response, err := h.service.UpdateSchedule(r.Context(), userID, scheduleID, body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrClassroomNotActive), errors.Is(err, service.ErrScheduleInvalidTime):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *handler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	scheduleID, err := httpx.ParsePathID(r, "scheduleId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid schedule ID")
+		return
+	}
+	if err := h.service.DeleteSchedule(r.Context(), userID, scheduleID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, service.ErrClassroomNotActive):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) GetAssignmentAudits(w http.ResponseWriter, r *http.Request) {
