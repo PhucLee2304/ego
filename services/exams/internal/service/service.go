@@ -46,7 +46,12 @@ type Service interface {
 	ReconcileAssignmentSubmissions(ctx context.Context, assignmentID uint) (int, error)
 	SubmitStudentAssignmentAttempts(ctx context.Context, studentID string, assignmentIDs []uint) (int, error)
 	GetExamAudits(ctx context.Context, examID uint) ([]*model.ExamAudit, error)
+	GetAssignmentQuestionAnalytics(ctx context.Context, assignmentID uint, examID uint) ([]*repository.AssignmentQuestionAnalytics, error)
 	SetAttemptEventPublisher(publisher func(userID string, payload any))
+}
+
+func (s *service) GetAssignmentQuestionAnalytics(ctx context.Context, assignmentID uint, examID uint) ([]*repository.AssignmentQuestionAnalytics, error) {
+	return s.repo.GetAssignmentQuestionAnalytics(ctx, assignmentID, examID)
 }
 
 type service struct {

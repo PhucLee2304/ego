@@ -17,6 +17,31 @@ type Repository struct {
 	db *gorm.DB
 }
 
+type AssignmentQuestionAnalytics struct {
+	QuestionID    uint
+	Content       string
+	Order         int
+	AnsweredCount int64
+	WrongCount    int64
+}
+
+func (r *Repository) GetAssignmentQuestionAnalytics(ctx context.Context, assignmentID uint, examID uint) ([]*AssignmentQuestionAnalytics, error) {
+	var results []*AssignmentQuestionAnalytics
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT q.id AS question_id, q.content, q."order",
+		       COUNT(aa.id) FILTER (WHERE aa.selected_option_id IS NOT NULL) AS answered_count,
+		       COUNT(aa.id) FILTER (WHERE aa.selected_option_id IS NOT NULL AND aa.is_correct = false) AS wrong_count
+		FROM questions q
+		JOIN sections s ON s.id = q.section_id AND s.deleted_at IS NULL
+		LEFT JOIN attempts a ON a.exam_id = s.exam_id AND a.context_type = ? AND a.context_id = ? AND a.status = ? AND a.deleted_at IS NULL
+		LEFT JOIN attempt_answers aa ON aa.attempt_id = a.id AND aa.question_id = q.id AND aa.deleted_at IS NULL
+		WHERE s.exam_id = ? AND q.deleted_at IS NULL
+		GROUP BY q.id, q.content, q."order"
+		ORDER BY q."order" ASC, q.id ASC`, model.AttemptContextTypeClassroomAssignment, assignmentID, model.AttemptStatusSubmitted, examID).
+		Scan(&results).Error
+	return results, err
+}
+
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }

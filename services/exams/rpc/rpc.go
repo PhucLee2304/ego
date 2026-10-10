@@ -194,3 +194,18 @@ func (s *server) GetExamAudits(ctx context.Context, req *examsClient.GetExamAudi
 	}
 	return response, nil
 }
+
+func (s *server) GetAssignmentQuestionAnalytics(ctx context.Context, req *examsClient.GetAssignmentQuestionAnalyticsRequest) (*examsClient.GetAssignmentQuestionAnalyticsResponse, error) {
+	rows, err := s.service.GetAssignmentQuestionAnalytics(ctx, uint(req.AssignmentId), uint(req.ExamId))
+	if err != nil {
+		return nil, err
+	}
+	response := &examsClient.GetAssignmentQuestionAnalyticsResponse{Questions: make([]*examsClient.AssignmentQuestionAnalytics, len(rows))}
+	for i, row := range rows {
+		response.Questions[i] = &examsClient.AssignmentQuestionAnalytics{
+			QuestionId: uint64(row.QuestionID), Content: row.Content, Order: int32(row.Order),
+			AnsweredCount: row.AnsweredCount, WrongCount: row.WrongCount,
+		}
+	}
+	return response, nil
+}

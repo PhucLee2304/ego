@@ -33,6 +33,9 @@ type Handler interface {
 	GetAssignment(w http.ResponseWriter, r *http.Request)
 	SetAssignmentActive(w http.ResponseWriter, r *http.Request)
 	GetGradebook(w http.ResponseWriter, r *http.Request)
+	GetClassGradebook(w http.ResponseWriter, r *http.Request)
+	GetStudentProgress(w http.ResponseWriter, r *http.Request)
+	GetAssignmentAnalytics(w http.ResponseWriter, r *http.Request)
 	GetEditableAssignment(w http.ResponseWriter, r *http.Request)
 	UpdateAssignmentContent(w http.ResponseWriter, r *http.Request)
 	ResetAssignmentAttempt(w http.ResponseWriter, r *http.Request)
@@ -72,6 +75,9 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}/schedule", mw.Handle(h.UpdateAssignmentSchedule))
 	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}/active", mw.Handle(h.SetAssignmentActive))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/gradebook", mw.Handle(h.GetGradebook))
+	mux.HandleFunc("GET /classrooms/{id}/gradebook", mw.Handle(h.GetClassGradebook))
+	mux.HandleFunc("GET /classrooms/{id}/students/{userId}/progress", mw.Handle(h.GetStudentProgress))
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/analytics", mw.Handle(h.GetAssignmentAnalytics))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/edit", mw.Handle(h.GetEditableAssignment))
 	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}", mw.Handle(h.UpdateAssignmentContent))
 	mux.HandleFunc("DELETE /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt", mw.Handle(h.ResetAssignmentAttempt))
@@ -1247,4 +1253,122 @@ func (h *handler) GetGradebook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, resp)
+}
+
+// GetClassGradebook godoc
+// @Summary Get class gradebook
+// @Tags Gradebook
+// @Security BearerAuth
+// @Param id path int true "Classroom ID"
+// @Param from query string false "Minimum assignment due time (RFC3339)"
+// @Param to query string false "Maximum assignment due time (RFC3339, exclusive)"
+// @Success 200 {object} dto.ClassGradebookResponse
+// @Router /classrooms/{id}/gradebook [get]
+func (h *handler) GetClassGradebook(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	var query dto.GradebookRangeQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil || (query.From != nil && query.To != nil && !query.To.After(*query.From)) {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid gradebook range")
+		return
+	}
+	response, err := h.service.GetClassGradebook(r.Context(), userID, classroomID, query)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		default:
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+// GetStudentProgress godoc
+// @Summary Get student assignment progress
+// @Tags Gradebook
+// @Security BearerAuth
+// @Param id path int true "Classroom ID"
+// @Param userId path string true "Student ID"
+// @Success 200 {object} dto.StudentProgressResponse
+// @Router /classrooms/{id}/students/{userId}/progress [get]
+func (h *handler) GetStudentProgress(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	studentID := r.PathValue("userId")
+	if studentID == "" {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid user ID")
+		return
+	}
+	response, err := h.service.GetStudentProgress(r.Context(), userID, classroomID, studentID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		default:
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+// GetAssignmentAnalytics godoc
+// @Summary Get assignment analytics
+// @Tags Gradebook
+// @Security BearerAuth
+// @Param id path int true "Classroom ID"
+// @Param assignmentId path int true "Assignment ID"
+// @Success 200 {object} dto.AssignmentAnalyticsResponse
+// @Router /classrooms/{id}/assignments/{assignmentId}/analytics [get]
+func (h *handler) GetAssignmentAnalytics(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwt.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid assignment ID")
+		return
+	}
+	response, err := h.service.GetAssignmentAnalytics(r.Context(), userID, classroomID, assignmentID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrClassroomForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		default:
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
 }

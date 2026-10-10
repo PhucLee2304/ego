@@ -50,6 +50,10 @@ func (testExamsServer) SubmitStudentAssignmentAttempts(context.Context, *examsCl
 	return &examsClient.SubmitStudentAssignmentAttemptsResponse{}, nil
 }
 
+func (testExamsServer) GetAssignmentQuestionAnalytics(context.Context, *examsClient.GetAssignmentQuestionAnalyticsRequest) (*examsClient.GetAssignmentQuestionAnalyticsResponse, error) {
+	return &examsClient.GetAssignmentQuestionAnalyticsResponse{Questions: []*examsClient.AssignmentQuestionAnalytics{{QuestionId: 1, Content: "Question", Order: 1, AnsweredCount: 1, WrongCount: 1}}}, nil
+}
+
 func classroomTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("CLASSROOMS_TEST_DSN")

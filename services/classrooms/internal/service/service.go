@@ -8,6 +8,7 @@ import (
 	platformdb "ego/platform/db"
 	"ego/platform/httpx"
 	"ego/platform/logger"
+	"ego/platform/valuex"
 	classroomsConfig "ego/services/classrooms/config"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/model"
@@ -41,6 +42,9 @@ type Service interface {
 	GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, error)
 	SetAssignmentActive(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, active bool) (*dto.AssignmentResponse, error)
 	GetGradebook(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, error)
+	GetClassGradebook(ctx context.Context, teacherID string, classroomID uint, query dto.GradebookRangeQuery) (*dto.ClassGradebookResponse, error)
+	GetStudentProgress(ctx context.Context, userID string, classroomID uint, studentID string) (*dto.StudentProgressResponse, error)
+	GetAssignmentAnalytics(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.AssignmentAnalyticsResponse, error)
 	GetEditableAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.EditableAssignmentResponse, error)
 	UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, error)
 	ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) error
@@ -1357,6 +1361,176 @@ func (s *service) GetGradebook(ctx context.Context, teacherID string, classroomI
 			Student:      usersByID[member.UserID],
 			Status:       model.Status(nil, now, response.DueAt),
 		})
+	}
+	return response, nil
+}
+
+func (s *service) GetClassGradebook(ctx context.Context, teacherID string, classroomID uint, query dto.GradebookRangeQuery) (*dto.ClassGradebookResponse, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != teacherID {
+		return nil, ErrClassroomForbidden
+	}
+	assignments, err := s.repo.GetAssignmentsForGradebook(ctx, classroomID, query.From, query.To)
+	if err != nil {
+		return nil, err
+	}
+	members, err := s.repo.GetApprovedMembersByClassroom(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(members))
+	for i, member := range members {
+		ids[i] = member.UserID
+	}
+	users := []*usersClient.UserInfo{}
+	if len(ids) > 0 {
+		resp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: ids})
+		if err != nil {
+			return nil, err
+		}
+		users = resp.Users
+	}
+	usersByID := dto.ToUserInfoMap(users)
+	now := time.Now()
+	response := &dto.ClassGradebookResponse{ClassroomID: classroomID, Assignments: make([]*dto.GradebookAssignment, len(assignments)), Students: make([]*dto.StudentProgressResponse, 0, len(members))}
+	for i, assignment := range assignments {
+		response.Assignments[i] = &dto.GradebookAssignment{ID: assignment.ID, Title: assignment.Title, DueAt: assignment.DueAt}
+	}
+	var totalScore float64
+	var scored, completed, total int
+	for _, member := range members {
+		student := usersByID[member.UserID]
+		if student == nil {
+			student = &dto.UserInfo{ID: member.UserID}
+		}
+		progress := &dto.StudentProgressResponse{Student: student, Assignments: make([]*dto.StudentAssignmentProgress, 0, len(assignments))}
+		var studentScore float64
+		var studentScored, studentCompleted int
+		for _, assignment := range assignments {
+			var found *model.AssignmentSubmission
+			for i := range assignment.Submissions {
+				if assignment.Submissions[i].StudentID == member.UserID {
+					found = &assignment.Submissions[i]
+					break
+				}
+			}
+			status := model.Status(found, now, assignment.DueAt)
+			cell := &dto.StudentAssignmentProgress{AssignmentID: assignment.ID, Title: assignment.Title, DueAt: assignment.DueAt, Status: status}
+			if found != nil {
+				cell.Score = found.Score
+			}
+			progress.Assignments = append(progress.Assignments, cell)
+			total++
+			if status == model.SubmissionStatusSubmitted {
+				completed++
+				studentCompleted++
+			}
+			if cell.Score != nil {
+				totalScore += *cell.Score
+				scored++
+				studentScore += *cell.Score
+				studentScored++
+			}
+		}
+		if studentScored > 0 {
+			value := valuex.RoundFloat(studentScore/float64(studentScored), 2)
+			progress.AverageScore = &value
+		}
+		if len(assignments) > 0 {
+			progress.CompletionRate = valuex.RoundFloat(float64(studentCompleted)*100/float64(len(assignments)), 2)
+		}
+		response.Students = append(response.Students, progress)
+	}
+	if scored > 0 {
+		value := valuex.RoundFloat(totalScore/float64(scored), 2)
+		response.AverageScore = &value
+	}
+	if total > 0 {
+		response.CompletionRate = valuex.RoundFloat(float64(completed)*100/float64(total), 2)
+	}
+	return response, nil
+}
+
+func (s *service) GetStudentProgress(ctx context.Context, userID string, classroomID uint, studentID string) (*dto.StudentProgressResponse, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	if classroom.TeacherID != userID && userID != studentID {
+		return nil, ErrClassroomForbidden
+	}
+	approved, err := s.repo.IsStudentApprovedInClassroom(ctx, classroomID, studentID)
+	if err != nil {
+		return nil, err
+	}
+	if !approved {
+		return nil, ErrClassroomForbidden
+	}
+	book, err := s.GetClassGradebook(ctx, classroom.TeacherID, classroomID, dto.GradebookRangeQuery{})
+	if err != nil {
+		return nil, err
+	}
+	for _, progress := range book.Students {
+		if progress.Student != nil && progress.Student.ID == studentID {
+			return progress, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (s *service) GetAssignmentAnalytics(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.AssignmentAnalyticsResponse, error) {
+	gradebook, err := s.GetGradebook(ctx, teacherID, classroomID, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	response := &dto.AssignmentAnalyticsResponse{AssignmentID: assignmentID, TotalStudents: len(gradebook.Submissions)}
+	var sum float64
+	var scored int
+	for _, submission := range gradebook.Submissions {
+		switch submission.Status {
+		case model.SubmissionStatusNotStarted:
+			response.NotStarted++
+		case model.SubmissionStatusInProgress:
+			response.InProgress++
+		case model.SubmissionStatusSubmitted:
+			response.Submitted++
+		case model.SubmissionStatusLate:
+			response.Late++
+		}
+		if submission.Score != nil {
+			score := *submission.Score
+			sum += score
+			scored++
+			if response.MinimumScore == nil || score < *response.MinimumScore {
+				value := score
+				response.MinimumScore = &value
+			}
+			if response.MaximumScore == nil || score > *response.MaximumScore {
+				value := score
+				response.MaximumScore = &value
+			}
+		}
+	}
+	if scored > 0 {
+		value := valuex.RoundFloat(sum/float64(scored), 2)
+		response.AverageScore = &value
+	}
+	if response.TotalStudents > 0 {
+		response.CompletionRate = valuex.RoundFloat(float64(response.Submitted)*100/float64(response.TotalStudents), 2)
+	}
+	analytics, err := s.examsClient.GetAssignmentQuestionAnalytics(ctx, &examsClient.GetAssignmentQuestionAnalyticsRequest{AssignmentId: uint64(assignmentID), ExamId: uint64(gradebook.ExamID)})
+	if err != nil {
+		return nil, err
+	}
+	for _, question := range analytics.Questions {
+		item := &dto.QuestionAnalyticsResponse{QuestionID: uint(question.QuestionId), Content: question.Content, Order: int(question.Order), AnsweredCount: question.AnsweredCount, WrongCount: question.WrongCount}
+		if item.AnsweredCount > 0 {
+			item.WrongRate = valuex.RoundFloat(float64(item.WrongCount)*100/float64(item.AnsweredCount), 2)
+		}
+		response.Questions = append(response.Questions, item)
 	}
 	return response, nil
 }

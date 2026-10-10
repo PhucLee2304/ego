@@ -16,6 +16,7 @@ service ExamService {
   rpc ReconcileAssignmentSubmissions(ReconcileAssignmentSubmissionsRequest) returns (ReconcileAssignmentSubmissionsResponse);
   rpc SubmitStudentAssignmentAttempts(SubmitStudentAssignmentAttemptsRequest) returns (SubmitStudentAssignmentAttemptsResponse);
   rpc GetExamAudits(GetExamAuditsRequest) returns (GetExamAuditsResponse);
+  rpc GetAssignmentQuestionAnalytics(GetAssignmentQuestionAnalyticsRequest) returns (GetAssignmentQuestionAnalyticsResponse);
 }
 
 message CreatePrivateExamRequest {
@@ -117,6 +118,15 @@ message ExamAuditResponse {
   repeated ExamAuditScoreChange score_changes = 9;
 }
 message GetExamAuditsResponse { repeated ExamAuditResponse audits = 1; }
+message GetAssignmentQuestionAnalyticsRequest { uint64 assignment_id = 1; uint64 exam_id = 2; }
+message AssignmentQuestionAnalytics {
+  uint64 question_id = 1;
+  string content = 2;
+  int32 order = 3;
+  int64 answered_count = 4;
+  int64 wrong_count = 5;
+}
+message GetAssignmentQuestionAnalyticsResponse { repeated AssignmentQuestionAnalytics questions = 1; }
 message PrivateExamResponse {
   uint64 id = 1;
   string title = 2;

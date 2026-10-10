@@ -233,6 +233,19 @@ func (r *Repository) GetAssignmentsByClassroom(ctx context.Context, classroomID 
 	return assignments, total, nil
 }
 
+func (r *Repository) GetAssignmentsForGradebook(ctx context.Context, classroomID uint, from *time.Time, to *time.Time) ([]*model.Assignment, error) {
+	var assignments []*model.Assignment
+	db := r.db.WithContext(ctx).Where("classroom_id = ?", classroomID)
+	if from != nil {
+		db = db.Where("due_at >= ?", *from)
+	}
+	if to != nil {
+		db = db.Where("due_at < ?", *to)
+	}
+	err := db.Preload("Submissions").Order("due_at ASC, id ASC").Find(&assignments).Error
+	return assignments, err
+}
+
 func (r *Repository) GetAssignmentIDsByClassroom(ctx context.Context, classroomID uint) ([]uint, error) {
 	var ids []uint
 	if err := r.db.WithContext(ctx).Model(&model.Assignment{}).Where("classroom_id = ?", classroomID).Pluck("id", &ids).Error; err != nil {

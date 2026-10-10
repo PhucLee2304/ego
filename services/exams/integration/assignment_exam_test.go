@@ -147,6 +147,10 @@ func TestPrivateAssignmentExamConstraints(t *testing.T) {
 	if len(scoreChanges) != 1 || scoreChanges[0].AttemptID != attempt.ID || scoreChanges[0].BeforeScore == nil || *scoreChanges[0].BeforeScore != 10 || scoreChanges[0].AfterScore == nil || *scoreChanges[0].AfterScore != 0 {
 		t.Fatalf("unexpected audit score changes: %#v", scoreChanges)
 	}
+	questionAnalytics, err := svc.GetAssignmentQuestionAnalytics(context.Background(), assignmentID, exam.ID)
+	if err != nil || len(questionAnalytics) != 1 || questionAnalytics[0].AnsweredCount != 1 || questionAnalytics[0].WrongCount != 1 {
+		t.Fatalf("assignment question analytics: rows=%#v err=%v", questionAnalytics, err)
+	}
 	var preservedHistory model.History
 	if err := db.First(&preservedHistory, saved.History.ID).Error; err != nil {
 		t.Fatalf("submitted history must survive exam replacement: %v", err)

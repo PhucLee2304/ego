@@ -47,6 +47,11 @@ func TestAssignmentScheduleAndExamUniqueness(t *testing.T) {
 	if err := db.Create(assignment).Error; err != nil {
 		t.Fatal(err)
 	}
+	approved := true
+	joinedAt := time.Now()
+	if err := db.Create(&model.Member{ClassroomID: classroom.ID, UserID: "student", Approved: &approved, JoinedAt: &joinedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
 	duplicate := *assignment
 	duplicate.Model = gorm.Model{}
 	if err := db.Create(&duplicate).Error; err == nil {
@@ -82,7 +87,20 @@ func TestAssignmentScheduleAndExamUniqueness(t *testing.T) {
 		t.Fatalf("unexpected submitted gradebook event: %#v", publishedEvents[1])
 	}
 
-	svc := service.New(repo, &config.AppConfig{}, nil, nil)
+	usersClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{}, usersClient, examsClient)
+	classGradebook, err := svc.GetClassGradebook(ctx, classroom.TeacherID, classroom.ID, dto.GradebookRangeQuery{})
+	if err != nil || len(classGradebook.Students) != 1 || classGradebook.AverageScore == nil || *classGradebook.AverageScore != 8.5 {
+		t.Fatalf("class gradebook: response=%#v err=%v", classGradebook, err)
+	}
+	progress, err := svc.GetStudentProgress(ctx, classroom.TeacherID, classroom.ID, "student")
+	if err != nil || len(progress.Assignments) != 1 || progress.CompletionRate != 100 {
+		t.Fatalf("student progress: response=%#v err=%v", progress, err)
+	}
+	analytics, err := svc.GetAssignmentAnalytics(ctx, classroom.TeacherID, classroom.ID, assignment.ID)
+	if err != nil || analytics.Submitted != 1 || len(analytics.Questions) != 1 || analytics.Questions[0].WrongRate != 100 {
+		t.Fatalf("assignment analytics: response=%#v err=%v", analytics, err)
+	}
 	endsAt := opensAt.Add(time.Hour)
 	created, err := svc.CreateSchedule(ctx, classroom.TeacherID, classroom.ID, dto.CreateScheduleRequest{Title: "Live class", StartsAt: opensAt, EndsAt: endsAt})
 	if err != nil || created.ID == 0 {
