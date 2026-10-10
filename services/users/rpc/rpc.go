@@ -36,3 +36,47 @@ func (s *server) UpsertUser(ctx context.Context, req *usersClient.UpsertUserRequ
 		Id: strconv.Itoa(int(user.ID)),
 	}, nil
 }
+
+func (s *server) GetUserRole(ctx context.Context, req *usersClient.GetUserRoleRequest) (*usersClient.GetUserRoleResponse, error) {
+	user, err := s.repo.GetByID(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &usersClient.GetUserRoleResponse{
+		Role: string(user.Role),
+	}, nil
+}
+
+func (s *server) GetUsersInfo(ctx context.Context, req *usersClient.GetUsersInfoRequest) (*usersClient.GetUsersInfoResponse, error) {
+	users, err := s.repo.GetByIDs(ctx, req.Ids)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &usersClient.GetUsersInfoResponse{
+		Users: make([]*usersClient.UserInfo, len(users)),
+	}
+	for i, user := range users {
+		avatar := ""
+		if user.Avatar != nil {
+			avatar = *user.Avatar
+		}
+		res.Users[i] = &usersClient.UserInfo{
+			Id:     strconv.Itoa(int(user.ID)),
+			Email:  user.Email,
+			Name:   user.Name,
+			Avatar: avatar,
+		}
+	}
+
+	return res, nil
+}
+
+func (s *server) SearchUserIDsByName(ctx context.Context, req *usersClient.SearchUserIDsByNameRequest) (*usersClient.SearchUserIDsByNameResponse, error) {
+	ids, err := s.repo.SearchUserIDsByName(ctx, req.Query)
+	if err != nil {
+		return nil, err
+	}
+	return &usersClient.SearchUserIDsByNameResponse{Ids: ids}, nil
+}

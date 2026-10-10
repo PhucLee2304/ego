@@ -22,6 +22,27 @@ func TestCalculateAttemptScoreTHPT(t *testing.T) {
 	}
 }
 
+func TestCalculateAttemptScoreExcludesUnscoredQuestion(t *testing.T) {
+	trueValue := true
+	falseValue := false
+	answers := []model.AttemptAnswer{
+		{QuestionID: 1, IsCorrect: &trueValue},
+		{QuestionID: 2, IsCorrect: &falseValue},
+	}
+	questions := map[uint]*model.Question{
+		1: {ExcludedFromScore: false},
+		2: {ExcludedFromScore: true},
+	}
+
+	got, err := CalculateAttemptScore(model.ExamTypeAssignment, answers, questions, 2)
+	if err != nil {
+		t.Fatalf("CalculateAttemptScore() error = %v", err)
+	}
+	if got != 10 {
+		t.Fatalf("CalculateAttemptScore() = %v, want %v", got, 10.0)
+	}
+}
+
 func TestCalculateAttemptScoreTOEIC(t *testing.T) {
 	trueValue := true
 	answers := []model.AttemptAnswer{

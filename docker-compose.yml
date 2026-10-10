@@ -21,7 +21,9 @@ services:
           { "url": "/users/docs/doc.json", "name": "Users" },
           { "url": "/storage/docs/doc.json", "name": "Storage" },
           { "url": "/topics/docs/doc.json", "name": "Topics" },
-          { "url": "/exams/docs/doc.json", "name": "Exams" }
+          { "url": "/exams/docs/doc.json", "name": "Exams" },
+          { "url": "/classrooms/docs/doc.json", "name": "Classrooms" },
+          { "url": "/notifications/docs/doc.json", "name": "Notifications" }
         ]
     networks:
       - ego-network
@@ -45,6 +47,10 @@ services:
       topics:
         condition: service_healthy
       exams:
+        condition: service_healthy
+      classrooms:
+        condition: service_healthy
+      notifications:
         condition: service_healthy
     networks:
       - ego-network
@@ -171,6 +177,8 @@ services:
         condition: service_healthy
       auth:
         condition: service_healthy
+      users:
+        condition: service_healthy
 
   exams-seed:
     build:
@@ -210,6 +218,81 @@ services:
       - ego-network
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${EXAMS_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  classrooms:
+    <<: *go-service
+    container_name: classrooms
+    build:
+      context: .
+      dockerfile: services/classrooms/Dockerfile
+      target: server
+    env_file:
+      - ./services/classrooms/.env
+    depends_on:
+      classrooms-db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      users:
+        condition: service_healthy
+      exams:
+        condition: service_healthy
+
+  classrooms-db:
+    image: postgres:15.8-alpine
+    container_name: classrooms-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CLASSROOMS_DB_USER}
+      POSTGRES_PASSWORD: ${CLASSROOMS_DB_PASSWORD}
+      POSTGRES_DB: ${CLASSROOMS_DB_NAME}
+    ports:
+      - "${CLASSROOMS_DB_PORT}:5432"
+    volumes:
+      - ./data/classrooms-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${CLASSROOMS_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  notifications:
+    <<: *go-service
+    container_name: notifications
+    build:
+      context: .
+      dockerfile: services/notifications/Dockerfile
+    env_file:
+      - ./services/notifications/.env
+    volumes:
+      - ./platform/credentials:/app/platform/credentials:ro
+    depends_on:
+      notifications-db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+
+  notifications-db:
+    image: postgres:15.8-alpine
+    container_name: notifications-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${NOTIFICATIONS_DB_USER}
+      POSTGRES_PASSWORD: ${NOTIFICATIONS_DB_PASSWORD}
+      POSTGRES_DB: ${NOTIFICATIONS_DB_NAME}
+    ports:
+      - "${NOTIFICATIONS_DB_PORT}:5432"
+    volumes:
+      - ./data/notifications-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${NOTIFICATIONS_DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5

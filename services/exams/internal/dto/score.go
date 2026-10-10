@@ -3,8 +3,8 @@ package dto
 import (
 	"errors"
 	"fmt"
-	"math"
 
+	"ego/platform/valuex"
 	"ego/services/exams/internal/model"
 )
 
@@ -17,8 +17,21 @@ func CalculateAttemptScore(examType model.ExamType, answers []model.AttemptAnswe
 	correctAnswers := 0
 	listeningCorrect := 0
 	readingCorrect := 0
+	scoredQuestions := totalQuestions
+	if questions != nil {
+		scoredQuestions = 0
+		for _, question := range questions {
+			if !question.ExcludedFromScore {
+				scoredQuestions++
+			}
+		}
+	}
 
 	for _, answer := range answers {
+		question := questions[answer.QuestionID]
+		if question != nil && question.ExcludedFromScore {
+			continue
+		}
 		if answer.IsCorrect == nil || !*answer.IsCorrect {
 			continue
 		}
@@ -28,7 +41,6 @@ func CalculateAttemptScore(examType model.ExamType, answers []model.AttemptAnswe
 			continue
 		}
 
-		question := questions[answer.QuestionID]
 		if question == nil {
 			return 0, fmt.Errorf("%w: questionID=%d", ErrScoreQuestionNotFound, answer.QuestionID)
 		}
@@ -52,7 +64,7 @@ func CalculateAttemptScore(examType model.ExamType, answers []model.AttemptAnswe
 		return float64(calculateTOEICScore(listeningCorrect, readingCorrect)), nil
 	}
 
-	return calculateLinearScore(correctAnswers, totalQuestions, 10), nil
+	return calculateLinearScore(correctAnswers, scoredQuestions, 10), nil
 }
 
 func calculateLinearScore(correctAnswers, totalQuestions int, maxScore float64) float64 {
@@ -63,7 +75,7 @@ func calculateLinearScore(correctAnswers, totalQuestions int, maxScore float64) 
 		correctAnswers = totalQuestions
 	}
 
-	return math.Round((float64(correctAnswers)/float64(totalQuestions))*maxScore*100) / 100
+	return valuex.RoundFloat((float64(correctAnswers)/float64(totalQuestions))*maxScore, 2)
 }
 
 func calculateTOEICScore(listeningCorrect, readingCorrect int) int {
@@ -72,6 +84,8 @@ func calculateTOEICScore(listeningCorrect, readingCorrect int) int {
 
 func calculateTOEICSectionScore(correctAnswers int) int {
 	correctAnswers = clampCorrectAnswers(correctAnswers)
+	// TOEIC sections intentionally have a minimum scaled score of 5, even
+	// when no answer is correct.
 	if correctAnswers <= 2 {
 		return 5
 	}

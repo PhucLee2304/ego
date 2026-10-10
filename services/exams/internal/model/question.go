@@ -4,10 +4,11 @@ import "gorm.io/gorm"
 
 type Question struct {
 	gorm.Model
-	Content     string    `gorm:"type:text;not null"`
-	Part        *PartCode `gorm:"type:text;index"`
-	Explanation string    `gorm:"type:text"`
-	Order       int       `gorm:"not null"`
+	Content           string    `gorm:"type:text;not null"`
+	Part              *PartCode `gorm:"type:text;index"`
+	Explanation       string    `gorm:"type:text"`
+	Order             int       `gorm:"not null"`
+	ExcludedFromScore bool      `gorm:"not null;default:false;index"`
 
 	SectionID uint    `gorm:"not null;index"`
 	Section   Section `gorm:"foreignKey:SectionID;references:ID"`

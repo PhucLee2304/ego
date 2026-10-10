@@ -69,7 +69,8 @@ func ToPaginatedResponse[T any](data []T, query PaginationQuery, pageCounts int)
 
 func Error(w http.ResponseWriter, code int, message string) {
 	if code >= http.StatusInternalServerError {
-		logger.Log.Error().Int("code", code).Msg("Internal server error")
+		logger.Log.Error().Int("code", code).Str("error", message).Msg("Internal server error")
+		message = "[ERROR] Internal server error"
 	}
 
 	JSON(w, code, ErrorResponse{Error: message})

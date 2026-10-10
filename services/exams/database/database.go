@@ -25,7 +25,6 @@ func Migrate(db *gorm.DB) error {
 	}
 
 	log.Println("Running database migrations...")
-
 	err := db.AutoMigrate(
 		&model.Exam{},
 		&model.Section{},
@@ -35,12 +34,29 @@ func Migrate(db *gorm.DB) error {
 		&model.Attempt{},
 		&model.AttemptAnswer{},
 		&model.History{},
+		&model.OutboxEvent{},
+		&model.ExamAudit{},
 	)
 	if err != nil {
 		return err
 	}
 
 	if err := db.Exec(model.CreateAttemptActiveUserUniqueIndexSQL).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(model.CreateAttemptClassroomAssignmentUniqueIndexSQL).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(model.CreateOutboxEventTypeAggregateUniqueIndexSQL).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(model.CreateOptionCorrectQuestionUniqueIndexSQL).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(model.CreateOptionQuestionKeyUniqueIndexSQL).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(model.CreateAssignmentQuestionOptionsConstraintSQL).Error; err != nil {
 		return err
 	}
 

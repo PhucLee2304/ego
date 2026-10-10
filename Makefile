@@ -1,4 +1,6 @@
-.PHONY: swag protoc build
+.PHONY: swag protoc build test reset-db seed
+
+SERVICE := $(word 2,$(MAKECMDGOALS))
 
 ifeq ($(OS),Windows_NT)
 
@@ -7,6 +9,17 @@ swag:
 
 protoc:
 	powershell.exe -ExecutionPolicy Bypass -File generate.ps1 protoc
+
+test:
+	powershell.exe -ExecutionPolicy Bypass -File scripts/test.ps1
+
+reset-db:
+	$(if $(SERVICE),,$(error Usage: make reset-db SERVICE_NAME))
+	powershell.exe -ExecutionPolicy Bypass -File scripts/database.ps1 reset-db $(SERVICE)
+
+seed:
+	$(if $(SERVICE),,$(error Usage: make seed SERVICE_NAME))
+	powershell.exe -ExecutionPolicy Bypass -File scripts/database.ps1 seed $(SERVICE)
 
 else
 
@@ -31,6 +44,17 @@ protoc:
 				$$dir/*.proto ; \
 		fi \
 	done
+
+test:
+	./scripts/test.sh
+
+reset-db:
+	$(if $(SERVICE),,$(error Usage: make reset-db SERVICE_NAME))
+	SERVICE=$(SERVICE) ACTION=reset-db ./scripts/database.sh
+
+seed:
+	$(if $(SERVICE),,$(error Usage: make seed SERVICE_NAME))
+	SERVICE=$(SERVICE) ACTION=seed ./scripts/database.sh
 
 endif
 

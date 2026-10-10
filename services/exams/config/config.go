@@ -18,11 +18,14 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr    string
-	StorageServiceAddr string
-	SeedDir            string
-	SeedUploadWorkers  int
-	SeedUploadRetries  int
+	UsersServiceAddr      string
+	AuthServiceAddr       string
+	StorageServiceAddr    string
+	ClassroomsServiceAddr string
+
+	SeedDir           string
+	SeedUploadWorkers int
+	SeedUploadRetries int
 }
 
 func LoadAppConfig() (*AppConfig, error) {
@@ -37,11 +40,14 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "examsdb"),
 
-		AuthServiceAddr:    getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		StorageServiceAddr: getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
-		SeedDir:            getEnv("SEED_DIR", "services/exams/seed"),
-		SeedUploadWorkers:  getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
-		SeedUploadRetries:  getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
+		UsersServiceAddr:      getEnv("USERS_SERVICE_ADDR", "users:50052"),
+		AuthServiceAddr:       getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		StorageServiceAddr:    getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
+		ClassroomsServiceAddr: getEnv("CLASSROOMS_SERVICE_ADDR", "classrooms:50057"),
+
+		SeedDir:           getEnv("SEED_DIR", "services/exams/seed"),
+		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
+		SeedUploadRetries: getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",

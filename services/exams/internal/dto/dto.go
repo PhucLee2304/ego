@@ -24,33 +24,79 @@ type GetExamsResponse struct {
 
 type GetExamsQuery struct {
 	httpx.PaginationQuery
-	Type model.ExamType `schema:"type"`
+	Type model.ExamType `schema:"type" validate:"omitempty,oneof=THPT TOEIC"`
 }
 
 type GetExamQuestionsQuery struct {
-	Section model.SectionCode `schema:"section"`
-	Part    model.PartCode    `schema:"part"`
+	Section model.SectionCode `schema:"section" validate:"omitempty,oneof=FULL LISTENING READING"`
+	Part    model.PartCode    `schema:"part" validate:"omitempty,oneof=1 2 3 4 5 6 7"`
+}
+
+type CreatePrivateExamRequest struct {
+	Title       string                             `validate:"required,notblank"`
+	Description *string                            `validate:"omitempty"`
+	Questions   []CreatePrivateExamQuestionRequest `validate:"required,min=1,dive"`
+}
+
+type UpdatePrivateExamRequest struct {
+	Title          string
+	Description    *string
+	Questions      []UpdatePrivateExamQuestionRequest
+	CorrectionOnly bool
+	ActorID        string
+	Reason         string
+}
+
+type UpdatePrivateExamQuestionRequest struct {
+	ID                 uint
+	Content            string
+	Explanation        *string
+	Options            []string
+	CorrectOptionIndex int
+	ExcludedFromScore  bool
+	OptionIDs          []uint
+}
+
+type CreatePrivateExamQuestionRequest struct {
+	Content            string   `validate:"required,notblank"`
+	Explanation        *string  `validate:"omitempty"`
+	Options            []string `validate:"required,len=4,dive,notblank"`
+	CorrectOptionIndex int      `validate:"gte=0,lte=3"`
 }
 
 type GetAttemptsQuery struct {
 	httpx.PaginationQuery
-	Status model.AttemptStatus `schema:"status"`
+	Status model.AttemptStatus `schema:"status" validate:"required,oneof=ACTIVE SUBMITTED CANCELLED"`
+}
+
+type GetPendingOutboxEventsQuery struct {
+	httpx.PaginationQuery
+	Type            model.OutboxEventType   `schema:"type" validate:"omitempty,oneof=CLASSROOM_ASSIGNMENT_ATTEMPT_CREATED CLASSROOM_ASSIGNMENT_ATTEMPT_SUBMITTED"`
+	Status          model.OutboxEventStatus `schema:"status" validate:"omitempty,oneof=PENDING PROCESSING FAILED FAILED_PERMANENT"`
+	MinAttempts     int                     `schema:"minAttempts" validate:"omitempty,gte=0"`
+	HasError        *bool                   `schema:"hasError" validate:"omitempty"`
+	CreatedFrom     *time.Time              `schema:"createdFrom" validate:"omitempty"`
+	CreatedTo       *time.Time              `schema:"createdTo" validate:"omitempty"`
+	NextAttemptFrom *time.Time              `schema:"nextAttemptFrom" validate:"omitempty"`
+	NextAttemptTo   *time.Time              `schema:"nextAttemptTo" validate:"omitempty"`
 }
 
 type CreateExamAttemptRequest struct {
-	Mode     model.AttemptMode      `json:"mode"`
-	Section  *model.SectionCode     `json:"section,omitempty"`
-	Parts    []model.PartCode       `json:"parts,omitempty"`
-	Duration *model.AttemptDuration `json:"duration,omitempty"`
+	Mode        model.AttemptMode        `json:"mode,omitempty" validate:"omitempty,oneof=PRACTICE TEST ASSIGNMENT"`
+	Section     *model.SectionCode       `json:"section,omitempty" validate:"omitempty,oneof=FULL LISTENING READING"`
+	Parts       []model.PartCode         `json:"parts,omitempty" validate:"omitempty,dive,oneof=1 2 3 4 5 6 7"`
+	Duration    *model.AttemptDuration   `json:"duration,omitempty" validate:"omitempty,oneof=10 15 20 30 45 60 75 90 120"`
+	ContextType model.AttemptContextType `json:"contextType" validate:"required,oneof=STANDALONE CLASSROOM_ASSIGNMENT"`
+	ContextID   *uint                    `json:"contextId,omitempty" validate:"omitempty,gt=0"`
 }
 
 type SubmitAttemptRequest struct {
-	Answers []SubmitAttemptAnswer `json:"answers"`
+	Answers []SubmitAttemptAnswer `json:"answers" validate:"dive"`
 }
 
 type SubmitAttemptAnswer struct {
-	QuestionID       uint  `json:"questionId"`
-	SelectedOptionID *uint `json:"selectedOptionId"`
+	QuestionID       uint  `json:"questionId" validate:"required,gt=0"`
+	SelectedOptionID *uint `json:"selectedOptionId" validate:"omitempty,gt=0"`
 }
 
 type AttemptResponse struct {
@@ -72,6 +118,19 @@ type AttemptResponse struct {
 	CreatedAt      time.Time               `json:"createdAt"`
 	UpdatedAt      time.Time               `json:"updatedAt"`
 	Sections       []*ExamQuestionsSection `json:"sections,omitempty"`
+}
+
+type OutboxEventResponse struct {
+	ID            uint       `json:"id"`
+	Type          string     `json:"type"`
+	AggregateID   *string    `json:"aggregateId,omitempty"`
+	Status        string     `json:"status"`
+	Attempts      int        `json:"attempts"`
+	NextAttemptAt time.Time  `json:"nextAttemptAt"`
+	ProcessedAt   *time.Time `json:"processedAt,omitempty"`
+	LastError     *string    `json:"lastError,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 type AttemptExamSummary struct {
@@ -152,15 +211,16 @@ type ExamQuestionGroup struct {
 }
 
 type ExamQuestion struct {
-	ID               uint                  `json:"id"`
-	Content          string                `json:"content"`
-	Part             *string               `json:"part"`
-	Explanation      string                `json:"explanation"`
-	Order            int                   `json:"order"`
-	SelectedOptionID *uint                 `json:"selectedOptionId,omitempty"`
-	CorrectOptionID  *uint                 `json:"correctOptionId,omitempty"`
-	IsCorrect        *bool                 `json:"isCorrect,omitempty"`
-	Options          []*ExamQuestionOption `json:"options"`
+	ID                uint                  `json:"id"`
+	Content           string                `json:"content"`
+	Part              *string               `json:"part"`
+	Explanation       string                `json:"explanation"`
+	Order             int                   `json:"order"`
+	ExcludedFromScore *bool                 `json:"excludedFromScore,omitempty"`
+	SelectedOptionID  *uint                 `json:"selectedOptionId,omitempty"`
+	CorrectOptionID   *uint                 `json:"correctOptionId,omitempty"`
+	IsCorrect         *bool                 `json:"isCorrect,omitempty"`
+	Options           []*ExamQuestionOption `json:"options"`
 }
 
 type ExamQuestionOption struct {
@@ -192,6 +252,9 @@ func ToGetExamResponse(exam *model.Exam) *GetExamResponse {
 
 	for _, section := range exam.Sections {
 		questionCount := len(section.Questions)
+		for _, group := range section.Groups {
+			questionCount += len(group.Questions)
+		}
 		totalQuestions += questionCount
 		if section.Duration != nil {
 			totalDuration += *section.Duration
@@ -221,6 +284,24 @@ func ToGetExamResponse(exam *model.Exam) *GetExamResponse {
 				partsMap[partKey] = partSummary
 			}
 			partSummary.QuestionCount++
+		}
+		for _, group := range section.Groups {
+			for _, question := range group.Questions {
+				if question.Part == nil || strings.TrimSpace(string(*question.Part)) == "" {
+					continue
+				}
+
+				partKey := string(*question.Part)
+				partSummary, ok := partsMap[partKey]
+				if !ok {
+					partSummary = &ExamPartSummary{
+						Part:        "PART " + partKey,
+						SectionCode: string(section.Code),
+					}
+					partsMap[partKey] = partSummary
+				}
+				partSummary.QuestionCount++
+			}
 		}
 	}
 
@@ -339,14 +420,10 @@ func (q *GetExamsQuery) Normalize() {
 	q.PaginationQuery.Normalize()
 
 	q.Type = model.ExamType(strings.ToUpper(strings.TrimSpace(string(q.Type))))
+	// THPT is the intentional product default for the public exam catalog.
 	if q.Type == "" {
 		q.Type = model.ExamTypeTHPT
 	}
-}
-
-func (q *GetExamQuestionsQuery) Normalize() {
-	q.Section = model.SectionCode(strings.ToUpper(strings.TrimSpace(string(q.Section))))
-	q.Part = model.PartCode(strings.TrimSpace(string(q.Part)))
 }
 
 func (q *GetAttemptsQuery) Normalize() {
@@ -354,8 +431,18 @@ func (q *GetAttemptsQuery) Normalize() {
 	q.Status = model.AttemptStatus(strings.ToUpper(strings.TrimSpace(string(q.Status))))
 }
 
+func (q *GetPendingOutboxEventsQuery) Normalize() {
+	q.PaginationQuery.Normalize()
+	q.Type = model.OutboxEventType(strings.ToUpper(strings.TrimSpace(string(q.Type))))
+	q.Status = model.OutboxEventStatus(strings.ToUpper(strings.TrimSpace(string(q.Status))))
+}
+
 func (r *CreateExamAttemptRequest) Normalize() {
 	r.Mode = model.AttemptMode(strings.ToUpper(strings.TrimSpace(string(r.Mode))))
+	r.ContextType = model.AttemptContextType(strings.ToUpper(strings.TrimSpace(string(r.ContextType))))
+	if r.ContextType == model.AttemptContextTypeClassroomAssignment && r.Mode == "" {
+		r.Mode = model.AttemptModeAssignment
+	}
 
 	if r.Section != nil {
 		value := model.SectionCode(strings.ToUpper(strings.TrimSpace(string(*r.Section))))
@@ -372,61 +459,28 @@ func (r *CreateExamAttemptRequest) Normalize() {
 	}
 }
 
-func (q GetExamQuestionsQuery) Validate() error {
-	if q.Section != "" {
-		switch q.Section {
-		case model.SectionCodeFull, model.SectionCodeListening, model.SectionCodeReading:
-		default:
-			return errors.New("[ERROR] Invalid section")
-		}
-	}
-
-	if q.Part != "" {
-		switch q.Part {
-		case model.Part1, model.Part2, model.Part3, model.Part4, model.Part5, model.Part6, model.Part7:
-		default:
-			return errors.New("[ERROR] Invalid part")
-		}
-	}
-
-	if q.Section != "" && q.Part != "" {
-		return errors.New("[ERROR] section and part cannot be used together")
-	}
-
-	return nil
-}
-
-func (q GetAttemptsQuery) Validate() error {
-	switch q.Status {
-	case model.AttemptStatusInProgress, model.AttemptStatusSubmitted, model.AttemptStatusCancelled:
-		return nil
-	default:
-		return errors.New("[ERROR] Invalid status")
-	}
-}
-
 func (r CreateExamAttemptRequest) Validate() error {
-	switch r.Mode {
-	case model.AttemptModePractice, model.AttemptModeTest:
-	default:
-		return errors.New("[ERROR] Invalid mode")
-	}
-
-	if r.Section != nil {
-		switch *r.Section {
-		case model.SectionCodeFull, model.SectionCodeListening, model.SectionCodeReading:
-		default:
-			return errors.New("[ERROR] Invalid section")
+	switch r.ContextType {
+	case model.AttemptContextTypeStandalone:
+		if r.Mode != model.AttemptModePractice && r.Mode != model.AttemptModeTest {
+			return errors.New("[ERROR] STANDALONE attempts must use PRACTICE or TEST mode")
 		}
+		if r.ContextID != nil {
+			return errors.New("[ERROR] STANDALONE context does not accept contextId")
+		}
+	case model.AttemptContextTypeClassroomAssignment:
+		if r.ContextID == nil || *r.ContextID == 0 {
+			return errors.New("[ERROR] CLASSROOM_ASSIGNMENT context requires contextId")
+		}
+		if r.Mode != model.AttemptModeAssignment {
+			return errors.New("[ERROR] CLASSROOM_ASSIGNMENT attempts must omit mode")
+		}
+	default:
+		return errors.New("[ERROR] Invalid context type")
 	}
 
 	seenParts := make(map[model.PartCode]struct{}, len(r.Parts))
 	for _, part := range r.Parts {
-		switch part {
-		case model.Part1, model.Part2, model.Part3, model.Part4, model.Part5, model.Part6, model.Part7:
-		default:
-			return errors.New("[ERROR] Invalid part")
-		}
 		if _, ok := seenParts[part]; ok {
 			return errors.New("[ERROR] Duplicate part")
 		}
@@ -458,23 +512,27 @@ func (r SubmitAttemptRequest) Validate() error {
 	return nil
 }
 
-func ValidateGetExamQuestionsQueryForExam(examType model.ExamType, query GetExamQuestionsQuery) error {
-	if query.Part != "" && examType != model.ExamTypeTOEIC {
-		return errors.New("[ERROR] part filter is only supported for TOEIC exams")
-	}
-
-	if examType == model.ExamTypeTHPT && query.Section != "" && query.Section != model.SectionCodeFull {
-		return errors.New("[ERROR] THPT exams only support FULL section")
-	}
-
-	if examType == model.ExamTypeTOEIC && query.Section == model.SectionCodeFull {
-		return errors.New("[ERROR] TOEIC exams do not support FULL section")
-	}
-
-	return nil
-}
-
 func ValidateCreateExamAttemptRequestForExam(examType model.ExamType, req CreateExamAttemptRequest) error {
+	if examType == model.ExamTypeAssignment {
+		if req.Mode != model.AttemptModeAssignment {
+			return errors.New("[ERROR] ASSIGNMENT exams require ASSIGNMENT mode")
+		}
+		if req.Section != nil {
+			return errors.New("[ERROR] ASSIGNMENT mode does not support section")
+		}
+		if len(req.Parts) > 0 {
+			return errors.New("[ERROR] ASSIGNMENT mode does not support parts")
+		}
+		if req.Duration != nil {
+			return errors.New("[ERROR] ASSIGNMENT mode does not accept duration")
+		}
+		return nil
+	}
+
+	if req.Mode == model.AttemptModeAssignment {
+		return errors.New("[ERROR] ASSIGNMENT mode only supports ASSIGNMENT exams")
+	}
+
 	if req.Mode == model.AttemptModeTest {
 		if req.Section != nil {
 			return errors.New("[ERROR] TEST mode does not support section")
@@ -500,16 +558,11 @@ func ValidateCreateExamAttemptRequestForExam(examType model.ExamType, req Create
 		return errors.New("[ERROR] TOEIC exams do not support FULL section")
 	}
 
-	if !model.IsAllowedPracticeDuration(valuex.MapPtr(req.Duration, func(value model.AttemptDuration) int {
-		return int(value)
-	})) {
-		return errors.New("[ERROR] Invalid duration")
-	}
-
 	return nil
 }
 
 func toExamQuestion(question model.Question) *ExamQuestion {
+	excludedFromScore := question.ExcludedFromScore
 	options := make([]*ExamQuestionOption, 0, len(question.Options))
 	for _, option := range question.Options {
 		options = append(options, &ExamQuestionOption{
@@ -525,8 +578,9 @@ func toExamQuestion(question model.Question) *ExamQuestion {
 	})
 
 	return &ExamQuestion{
-		ID:      question.ID,
-		Content: question.Content,
+		ID:                question.ID,
+		Content:           question.Content,
+		ExcludedFromScore: &excludedFromScore,
 		Part: valuex.MapPtr(question.Part, func(value model.PartCode) string {
 			return string(value)
 		}),
@@ -574,6 +628,21 @@ func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 		CreatedAt:      attempt.CreatedAt,
 		UpdatedAt:      attempt.UpdatedAt,
 		Sections:       nil,
+	}
+}
+
+func ToOutboxEventResponse(event *model.OutboxEvent) *OutboxEventResponse {
+	return &OutboxEventResponse{
+		ID:            event.ID,
+		Type:          string(event.Type),
+		AggregateID:   event.AggregateID,
+		Status:        string(event.Status),
+		Attempts:      event.Attempts,
+		NextAttemptAt: event.NextAttemptAt,
+		ProcessedAt:   event.ProcessedAt,
+		LastError:     event.LastError,
+		CreatedAt:     event.CreatedAt,
+		UpdatedAt:     event.UpdatedAt,
 	}
 }
 

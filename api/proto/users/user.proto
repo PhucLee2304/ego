@@ -13,6 +13,10 @@ service UserService {
       body: "*"
     };
   }
+
+  rpc GetUserRole(GetUserRoleRequest) returns (GetUserRoleResponse);
+  rpc GetUsersInfo(GetUsersInfoRequest) returns (GetUsersInfoResponse);
+  rpc SearchUserIDsByName(SearchUserIDsByNameRequest) returns (SearchUserIDsByNameResponse);
 }
 
 message UpsertUserRequest {
@@ -23,4 +27,35 @@ message UpsertUserRequest {
 
 message UpsertUserResponse {
     string id = 1;
+}
+
+message GetUserRoleRequest {
+    string id = 1;
+}
+
+message GetUserRoleResponse {
+    string role = 1;
+}
+
+message GetUsersInfoRequest {
+    repeated string ids = 1;
+}
+
+message UserInfo {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string avatar = 4;
+}
+
+message GetUsersInfoResponse {
+    repeated UserInfo users = 1;
+}
+
+message SearchUserIDsByNameRequest {
+  string query = 1;
+}
+
+message SearchUserIDsByNameResponse {
+  repeated string ids = 1;
 }

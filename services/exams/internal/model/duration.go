@@ -14,38 +14,6 @@ const (
 	AttemptDuration120 AttemptDuration = 120
 )
 
-var practiceDurationOptions = []AttemptDuration{
-	AttemptDuration10,
-	AttemptDuration15,
-	AttemptDuration20,
-	AttemptDuration30,
-	AttemptDuration45,
-	AttemptDuration60,
-	AttemptDuration75,
-	AttemptDuration90,
-	AttemptDuration120,
-}
-
-func AllowedPracticeDurations() []AttemptDuration {
-	options := make([]AttemptDuration, len(practiceDurationOptions))
-	copy(options, practiceDurationOptions)
-	return options
-}
-
-func IsAllowedPracticeDuration(duration *int) bool {
-	if duration == nil {
-		return true
-	}
-
-	for _, option := range practiceDurationOptions {
-		if int(option) == *duration {
-			return true
-		}
-	}
-
-	return false
-}
-
 func GetTestDurationByExamType(examType ExamType) (int, bool) {
 	switch examType {
 	case ExamTypeTHPT:
