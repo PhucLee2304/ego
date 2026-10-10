@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"ego/services/users/internal/model"
 
@@ -54,6 +55,20 @@ func (r *Repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.U
 		return nil, err
 	}
 	return users, nil
+}
+
+func (r *Repository) SearchUserIDsByName(ctx context.Context, query string) ([]string, error) {
+	var ids []string
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ids, nil
+	}
+	if err := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("name ILIKE ?", "%"+query+"%").
+		Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func (r *Repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {

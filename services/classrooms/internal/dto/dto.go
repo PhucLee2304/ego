@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	usersClient "ego/api/gen/go/users"
@@ -11,7 +12,13 @@ import (
 
 type ClassroomsQuery struct {
 	httpx.PaginationQuery
-	Query string `schema:"query" validate:"omitempty"`
+	Query  string `schema:"query" validate:"omitempty,notblank"`
+	Active *bool  `schema:"active" validate:"omitempty"`
+}
+
+func (q *ClassroomsQuery) Normalize() {
+	q.PaginationQuery.Normalize()
+	q.Query = strings.TrimSpace(q.Query)
 }
 
 type GetClassroomByCodeQuery struct {

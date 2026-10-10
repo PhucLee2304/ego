@@ -360,7 +360,8 @@ func (h *handler) CreateClassroom(w http.ResponseWriter, r *http.Request) {
 // @Security     BearerAuth
 // @Param        page query int false "Page number"
 // @Param        pageSize query int false "Page size"
-// @Param        query query string false "Search by classroom code or name"
+// @Param        query query string false "Search by classroom name, description or teacher name"
+// @Param        active query bool false "Filter by active state"
 // @Success      200 {object} httpx.PaginatedResponse[dto.ClassroomResponse]
 // @Failure      400 {object} httpx.ErrorResponse
 // @Failure      401 {object} httpx.ErrorResponse
@@ -392,7 +393,8 @@ func (h *handler) GetClassrooms(w http.ResponseWriter, r *http.Request) {
 // @Security     BearerAuth
 // @Param        page query int false "Page number"
 // @Param        pageSize query int false "Page size"
-// @Param        query query string false "Search by classroom code or name"
+// @Param        query query string false "Search by classroom name, description or teacher name"
+// @Param        active query bool false "Filter by active state"
 // @Success      200 {object} httpx.PaginatedResponse[dto.ClassroomResponse]
 // @Failure      400 {object} httpx.ErrorResponse
 // @Failure      401 {object} httpx.ErrorResponse

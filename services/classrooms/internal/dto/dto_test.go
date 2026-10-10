@@ -69,6 +69,36 @@ func TestGetClassroomByCodeQuery(t *testing.T) {
 	})
 }
 
+func TestClassroomsQuery(t *testing.T) {
+	t.Run("accepts omitted query", func(t *testing.T) {
+		request := httptest.NewRequest("GET", "/classrooms?page=1&pageSize=12", nil)
+		var query ClassroomsQuery
+		if err := httpx.DecodeQuery(request, &query); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("rejects blank query", func(t *testing.T) {
+		request := httptest.NewRequest("GET", "/classrooms?query=%20%20", nil)
+		var query ClassroomsQuery
+		if err := httpx.DecodeQuery(request, &query); err == nil {
+			t.Fatal("expected validation error")
+		}
+	})
+
+	t.Run("normalizes query", func(t *testing.T) {
+		request := httptest.NewRequest("GET", "/classrooms?query=%20English%20", nil)
+		var query ClassroomsQuery
+		if err := httpx.DecodeQuery(request, &query); err != nil {
+			t.Fatal(err)
+		}
+		query.Normalize()
+		if query.Query != "English" {
+			t.Fatalf("expected normalized query, got %q", query.Query)
+		}
+	})
+}
+
 func TestCreateAssignmentsRequestUsesSharedExamMetadata(t *testing.T) {
 	body := `{
 		"title":"Bài kiểm tra tuần 1",

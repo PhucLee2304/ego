@@ -252,7 +252,15 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 }
 
 func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, error) {
-	classrooms, total, err := s.repo.GetClassrooms(ctx, query.PaginationQuery, query.Query)
+	var teacherIDs []string
+	if query.Query != "" {
+		usersResp, err := s.usersClient.SearchUserIDsByName(ctx, &usersClient.SearchUserIDsByNameRequest{Query: query.Query})
+		if err != nil {
+			return nil, 0, err
+		}
+		teacherIDs = usersResp.Ids
+	}
+	classrooms, total, err := s.repo.GetClassrooms(ctx, query, teacherIDs)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -284,7 +292,15 @@ func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) 
 }
 
 func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, error) {
-	classrooms, total, err := s.repo.GetClassroomsByUser(ctx, userID, query.PaginationQuery, query.Query)
+	var teacherIDs []string
+	if query.Query != "" {
+		usersResp, err := s.usersClient.SearchUserIDsByName(ctx, &usersClient.SearchUserIDsByNameRequest{Query: query.Query})
+		if err != nil {
+			return nil, 0, err
+		}
+		teacherIDs = usersResp.Ids
+	}
+	classrooms, total, err := s.repo.GetClassroomsByUser(ctx, userID, query, teacherIDs)
 	if err != nil {
 		return nil, 0, err
 	}

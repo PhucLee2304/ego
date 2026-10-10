@@ -72,3 +72,11 @@ func (s *server) GetUsersInfo(ctx context.Context, req *usersClient.GetUsersInfo
 
 	return res, nil
 }
+
+func (s *server) SearchUserIDsByName(ctx context.Context, req *usersClient.SearchUserIDsByNameRequest) (*usersClient.SearchUserIDsByNameResponse, error) {
+	ids, err := s.repo.SearchUserIDsByName(ctx, req.Query)
+	if err != nil {
+		return nil, err
+	}
+	return &usersClient.SearchUserIDsByNameResponse{Ids: ids}, nil
+}
