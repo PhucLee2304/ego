@@ -10,14 +10,24 @@ import (
 	"testing"
 	"time"
 
+	notificationsClient "ego/api/gen/go/notifications"
 	"ego/services/exams/database"
 	"ego/services/exams/internal/dto"
 	"ego/services/exams/internal/model"
 	"ego/services/exams/internal/repository"
 	"ego/services/exams/internal/service"
+	"google.golang.org/grpc"
+	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+type fakeNotificationClient struct{ calls int }
+
+func (f *fakeNotificationClient) CreateNotifications(_ context.Context, req *notificationsClient.CreateNotificationsRequest, _ ...grpc.CallOption) (*notificationsClient.CreateNotificationsResponse, error) {
+	f.calls++
+	return &notificationsClient.CreateNotificationsResponse{CreatedCount: uint32(len(req.Recipients))}, nil
+}
 
 func TestPrivateAssignmentExamConstraints(t *testing.T) {
 	option := func(key model.OptionKey, content string, correct bool) model.Option {
@@ -49,6 +59,18 @@ func TestPrivateAssignmentExamConstraints(t *testing.T) {
 		t.Fatalf("unexpected private exam: %#v", exam)
 	}
 	repo := repository.NewRepository(db)
+	if err := repo.CreateNotificationOutbox(context.Background(), &model.NotificationOutbox{EventKey: "attempt:test", Recipients: datatypes.JSONSlice[string]{"student"}, Title: "Graded", Body: "Body", Data: datatypes.JSONMap{"id": "1", "type": "ATTEMPT"}, NextAttemptAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	notificationClient := &fakeNotificationClient{}
+	notificationSvc := service.New(repo, nil)
+	notificationSvc.SetNotificationClient(notificationClient)
+	if processed, err := notificationSvc.ProcessNotificationOutbox(context.Background(), 10); err != nil || processed != 1 || notificationClient.calls != 1 {
+		t.Fatalf("process notification outbox: processed=%d calls=%d err=%v", processed, notificationClient.calls, err)
+	}
+	if processed, err := notificationSvc.ProcessNotificationOutbox(context.Background(), 10); err != nil || processed != 0 || notificationClient.calls != 1 {
+		t.Fatalf("processed event was retried: processed=%d calls=%d err=%v", processed, notificationClient.calls, err)
+	}
 	if _, err := repo.GetExamByID(context.Background(), exam.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("private exam must not be returned by public lookup, got %v", err)
 	}

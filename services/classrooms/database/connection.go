@@ -34,6 +34,7 @@ func Migrate(db *gorm.DB) error {
 		&model.AssignmentSubmission{},
 		&model.Room{},
 		&model.RoomParticipant{},
+		&model.NotificationOutbox{},
 	)
 	if err != nil {
 		return err

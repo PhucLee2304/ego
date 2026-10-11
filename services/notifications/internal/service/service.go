@@ -83,7 +83,11 @@ func (s *service) CreateNotifications(ctx context.Context, requests []dto.Create
 	if s.sender == nil {
 		return nil
 	}
-	for _, req := range requests {
+	for i, req := range requests {
+		// OnConflict bỏ qua notification đã tồn tại; chỉ bản ghi vừa insert mới được gửi push.
+		if items[i].ID == 0 {
+			continue
+		}
 		pushRequest := req
 		pushRequest.Data = make(map[string]string, len(req.Data))
 		for key, value := range req.Data {

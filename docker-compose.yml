@@ -179,6 +179,8 @@ services:
         condition: service_healthy
       users:
         condition: service_healthy
+      notifications:
+        condition: service_healthy
 
   exams-seed:
     build:
@@ -239,6 +241,8 @@ services:
       users:
         condition: service_healthy
       exams:
+        condition: service_healthy
+      notifications:
         condition: service_healthy
 
   classrooms-db:

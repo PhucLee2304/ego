@@ -7,6 +7,7 @@ import (
 	"time"
 
 	classroomsClient "ego/api/gen/go/classrooms"
+	notificationsClient "ego/api/gen/go/notifications"
 	"ego/services/classrooms/config"
 	"ego/services/classrooms/database"
 	"ego/services/classrooms/internal/dto"
@@ -16,9 +17,22 @@ import (
 	classroomsSocket "ego/services/classrooms/internal/socket"
 	classroomsRpc "ego/services/classrooms/rpc"
 
+	"google.golang.org/grpc"
+	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+type fakeNotificationClient struct {
+	calls   int
+	request *notificationsClient.CreateNotificationsRequest
+}
+
+func (f *fakeNotificationClient) CreateNotifications(_ context.Context, req *notificationsClient.CreateNotificationsRequest, _ ...grpc.CallOption) (*notificationsClient.CreateNotificationsResponse, error) {
+	f.calls++
+	f.request = req
+	return &notificationsClient.CreateNotificationsResponse{CreatedCount: uint32(len(req.Recipients))}, nil
+}
 
 func TestAssignmentScheduleAndExamUniqueness(t *testing.T) {
 	dsn := os.Getenv("CLASSROOMS_TEST_DSN")
@@ -60,6 +74,18 @@ func TestAssignmentScheduleAndExamUniqueness(t *testing.T) {
 
 	repo := repository.NewRepository(db)
 	ctx := context.Background()
+	if err := repo.CreateNotificationOutbox(ctx, &model.NotificationOutbox{EventKey: "assignment:test", Recipients: datatypes.JSONSlice[string]{"student"}, Title: "Assignment", Body: "Body", Data: datatypes.JSONMap{"id": "1", "type": "ASSIGNMENT"}, NextAttemptAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	notificationClient := &fakeNotificationClient{}
+	notificationSvc := service.New(repo, &config.AppConfig{}, nil, nil)
+	notificationSvc.SetNotificationClient(notificationClient)
+	if processed, err := notificationSvc.ProcessNotificationOutbox(ctx, 10); err != nil || processed != 1 || notificationClient.calls != 1 {
+		t.Fatalf("process notification outbox: processed=%d calls=%d err=%v", processed, notificationClient.calls, err)
+	}
+	if processed, err := notificationSvc.ProcessNotificationOutbox(ctx, 10); err != nil || processed != 0 || notificationClient.calls != 1 {
+		t.Fatalf("processed event was retried: processed=%d calls=%d err=%v", processed, notificationClient.calls, err)
+	}
 	var publishedUserID string
 	var publishedEvents []any
 	rpcServer := classroomsRpc.New(repo, func(userID string, payload any) {

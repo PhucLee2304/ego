@@ -4,6 +4,7 @@ import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
 	examsClient "ego/api/gen/go/exams"
+	notificationsClient "ego/api/gen/go/notifications"
 	tokenClient "ego/api/gen/go/token"
 	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
@@ -118,8 +119,15 @@ func main() {
 	defer classroomsConn.Close()
 	classroomsServiceClient := classroomsClient.NewClassroomServiceClient(classroomsConn)
 
+	notificationsConn, err := grpc.NewClient(appConfig.NotificationsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to notifications service")
+	}
+	defer notificationsConn.Close()
+
 	repo := repository.NewRepository(db)
 	service := service.New(repo, classroomsServiceClient)
+	service.SetNotificationClient(notificationsClient.NewNotificationServiceClient(notificationsConn))
 	handler := handler.New(service)
 	socketServer := platformsocket.NewServer(tokenServiceClient)
 	service.SetAttemptEventPublisher(socketServer.BroadcastToUser)
@@ -138,6 +146,7 @@ func main() {
 
 	workers.StartAutoSubmitExpiredAttempts(appCtx, service, 5*time.Second, 100)
 	workers.StartOutboxPublisher(appCtx, service, 2*time.Second, 100)
+	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
 	workers.StartClassroomAssignmentSubmissionReconciler(appCtx, service, time.Minute, 100)
 
 	logger.Log.Info().Str("EXAMS_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting exams server")

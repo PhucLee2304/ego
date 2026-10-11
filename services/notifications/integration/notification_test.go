@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	notificationsClient "ego/api/gen/go/notifications"
 	"ego/services/notifications/database"
 	"ego/services/notifications/internal/dto"
 	"ego/services/notifications/internal/model"
 	"ego/services/notifications/internal/repository"
 	"ego/services/notifications/internal/service"
+	notificationsRpc "ego/services/notifications/rpc"
 
 	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
@@ -193,5 +195,47 @@ func TestCreateNotificationCommitsBeforeBestEffortPush(t *testing.T) {
 			t.Fatal("invalid token was not deleted")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCreateNotificationsIsIdempotent(t *testing.T) {
+	repo, db := testRepository(t)
+	ctx := context.Background()
+	item := &model.Notification{UserID: "1", Title: "Once", Body: "Body", SourceService: "CLASSROOMS", IdempotencyKey: "assignment:1:user:1"}
+	if err := repo.CreateNotifications(ctx, []*model.Notification{item}); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := &model.Notification{UserID: "1", Title: "Duplicate", Body: "Body", SourceService: "CLASSROOMS", IdempotencyKey: item.IdempotencyKey}
+	if err := repo.CreateNotifications(ctx, []*model.Notification{duplicate}); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Where("idempotency_key = ?", item.IdempotencyKey).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one notification, got %d", count)
+	}
+}
+
+func TestCreateNotificationsRPCCommitsAndDeduplicates(t *testing.T) {
+	repo, db := testRepository(t)
+	server := notificationsRpc.New(service.New(repo, nil))
+	request := &notificationsClient.CreateNotificationsRequest{
+		Recipients: []string{"1", "2"}, Title: "Assignment", Body: "A new assignment is available",
+		SourceService: "CLASSROOMS", Data: map[string]string{"id": "9", "type": "ASSIGNMENT"}, IdempotencyKey: "assignment:9:created",
+	}
+	if _, err := server.CreateNotifications(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.CreateNotifications(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Where("idempotency_key LIKE ?", "assignment:9:created:user:%").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected one committed notification per recipient, got %d", count)
 	}
 }

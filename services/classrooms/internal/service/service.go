@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	examsClient "ego/api/gen/go/exams"
+	notificationsClient "ego/api/gen/go/notifications"
 	usersClient "ego/api/gen/go/users"
 	platformdb "ego/platform/db"
 	"ego/platform/httpx"
@@ -14,6 +15,7 @@ import (
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 	"strings"
@@ -49,6 +51,8 @@ type Service interface {
 	UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, error)
 	ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) error
 	ReconcileAssignmentSubmissions(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (int, error)
+	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
+	SetNotificationClient(notificationsClient.NotificationServiceClient)
 	GetAssignmentAudits(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) ([]*dto.ExamAuditResponse, error)
 	CreateSchedule(ctx context.Context, teacherID string, classroomID uint, req dto.CreateScheduleRequest) (*dto.CalendarResponse, error)
 	GetCalendar(ctx context.Context, userID string, classroomID uint, query dto.CalendarQuery) ([]*dto.CalendarResponse, error)
@@ -57,10 +61,15 @@ type Service interface {
 }
 
 type service struct {
-	repo        *repository.Repository
-	cfg         *classroomsConfig.AppConfig
-	usersClient usersClient.UserServiceClient
-	examsClient examsClient.ExamServiceClient
+	repo                *repository.Repository
+	cfg                 *classroomsConfig.AppConfig
+	usersClient         usersClient.UserServiceClient
+	examsClient         examsClient.ExamServiceClient
+	notificationsClient notificationsClient.NotificationServiceClient
+}
+
+func (s *service) SetNotificationClient(client notificationsClient.NotificationServiceClient) {
+	s.notificationsClient = client
 }
 
 func New(repo *repository.Repository, appConfig *classroomsConfig.AppConfig, usersServiceClient usersClient.UserServiceClient, examsServiceClient examsClient.ExamServiceClient) Service {
@@ -493,6 +502,12 @@ func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req d
 			usersByID := dto.ToUserInfoMap(usersResp.Users)
 			response.User = usersByID[existing.UserID]
 			response.Classroom.Teacher = usersByID[classroom.TeacherID]
+			if err := createNotificationOutbox(ctx, repo,
+				fmt.Sprintf("classroom:%d:join-request:%d:%d", classroom.ID, existing.ID, existing.UpdatedAt.UnixNano()),
+				[]string{classroom.TeacherID}, "New join request", "A student requested to join "+classroom.Name,
+				"CLASSROOM", classroom.ID, 0, time.Time{}); err != nil {
+				return err
+			}
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -517,6 +532,12 @@ func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req d
 		usersByID := dto.ToUserInfoMap(usersResp.Users)
 		response.User = usersByID[member.UserID]
 		response.Classroom.Teacher = usersByID[classroom.TeacherID]
+		if err := createNotificationOutbox(ctx, repo,
+			fmt.Sprintf("classroom:%d:join-request:%d:%d", classroom.ID, member.ID, member.UpdatedAt.UnixNano()),
+			[]string{classroom.TeacherID}, "New join request", "A student requested to join "+classroom.Name,
+			"CLASSROOM", classroom.ID, 0, time.Time{}); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -606,6 +627,11 @@ func (s *service) ApproveMember(ctx context.Context, teacherID string, classroom
 		usersByID := dto.ToUserInfoMap(usersResp.Users)
 		response.User = usersByID[member.UserID]
 		response.Classroom.Teacher = usersByID[member.Classroom.TeacherID]
+		if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("classroom:%d:member:%d:approved", classroomID, member.ID),
+			[]string{userID}, "Join request approved", "You are now a member of "+classroom.Name,
+			"CLASSROOM", classroomID, 0, time.Time{}); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -646,6 +672,12 @@ func (s *service) RejectMember(ctx context.Context, teacherID string, classroomI
 		usersByID := dto.ToUserInfoMap(usersResp.Users)
 		response.User = usersByID[member.UserID]
 		response.Classroom.Teacher = usersByID[member.Classroom.TeacherID]
+		if err := createNotificationOutbox(ctx, repo,
+			fmt.Sprintf("classroom:%d:member:%d:rejected:%d", classroomID, member.ID, member.UpdatedAt.UnixNano()),
+			[]string{userID}, "Join request declined", "Your request to join "+classroom.Name+" was declined",
+			"CLASSROOM", classroomID, 0, time.Time{}); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -692,7 +724,15 @@ func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomI
 		}
 		return err
 	}
-	return s.repo.DeleteMember(ctx, member)
+	return s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		if err := repo.DeleteMember(ctx, member); err != nil {
+			return err
+		}
+		return createNotificationOutbox(ctx, repo,
+			fmt.Sprintf("classroom:%d:member:%d:removed:%d", classroomID, member.ID, time.Now().UnixNano()),
+			[]string{userID}, "Removed from classroom", "You were removed from "+classroom.Name,
+			"CLASSROOM", classroomID, 0, time.Time{})
+	})
 }
 
 func (s *service) CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, error) {
@@ -772,6 +812,28 @@ func (s *service) CreateAssignments(ctx context.Context, teacherID string, req d
 		if err := repo.CreateAssignments(ctx, assignments); err != nil {
 			return err
 		}
+		for _, assignment := range assignments {
+			members, err := repo.GetApprovedMembersByClassroom(ctx, assignment.ClassroomID)
+			if err != nil {
+				return err
+			}
+			recipients := make([]string, len(members))
+			for i, member := range members {
+				recipients[i] = member.UserID
+			}
+			if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("assignment:%d:created", assignment.ID), recipients,
+				"New assignment", assignment.Title, "ASSIGNMENT", assignment.ID, assignment.ClassroomID, time.Time{}); err != nil {
+				return err
+			}
+			reminderAt := assignment.DueAt.Add(-24 * time.Hour)
+			if reminderAt.Before(time.Now()) {
+				reminderAt = time.Now()
+			}
+			if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("assignment:%d:due-reminder", assignment.ID), recipients,
+				"Assignment due soon", assignment.Title+" is due soon", "ASSIGNMENT", assignment.ID, assignment.ClassroomID, reminderAt); err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		// Classrooms không thể rollback transaction của Exams, vì vậy phải gọi RPC bù để xóa Exam vừa tạo.
@@ -844,7 +906,32 @@ func (s *service) AssignExistingExam(ctx context.Context, teacherID string, clas
 				Active:      true,
 			})
 		}
-		return repo.CreateAssignments(ctx, assignments)
+		if err := repo.CreateAssignments(ctx, assignments); err != nil {
+			return err
+		}
+		for _, assignment := range assignments {
+			members, err := repo.GetApprovedMembersByClassroom(ctx, assignment.ClassroomID)
+			if err != nil {
+				return err
+			}
+			recipients := make([]string, len(members))
+			for i, member := range members {
+				recipients[i] = member.UserID
+			}
+			if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("assignment:%d:created", assignment.ID), recipients,
+				"New assignment", assignment.Title, "ASSIGNMENT", assignment.ID, assignment.ClassroomID, time.Time{}); err != nil {
+				return err
+			}
+			reminderAt := assignment.DueAt.Add(-24 * time.Hour)
+			if reminderAt.Before(time.Now()) {
+				reminderAt = time.Now()
+			}
+			if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("assignment:%d:due-reminder", assignment.ID), recipients,
+				"Assignment due soon", assignment.Title+" is due soon", "ASSIGNMENT", assignment.ID, assignment.ClassroomID, reminderAt); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -891,6 +978,27 @@ func (s *service) UpdateAssignmentSchedule(ctx context.Context, teacherID string
 		assignment.DueAt = req.DueAt
 		if err := repo.UpdateAssignment(ctx, assignment); err != nil {
 			return err
+		}
+		if err := repo.CancelNotificationOutbox(ctx, fmt.Sprintf("assignment:%d:due-reminder", assignment.ID)); err != nil {
+			return err
+		}
+		members, err := repo.GetApprovedMembersByClassroom(ctx, assignment.ClassroomID)
+		if err != nil {
+			return err
+		}
+		recipients := make([]string, len(members))
+		for i, member := range members {
+			recipients[i] = member.UserID
+		}
+		reminderAt := assignment.DueAt.Add(-24 * time.Hour)
+		if reminderAt.Before(time.Now()) {
+			reminderAt = time.Now()
+		}
+		if assignment.Active {
+			if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("assignment:%d:due-reminder:%d", assignment.ID, assignment.UpdatedAt.UnixNano()), recipients,
+				"Assignment due soon", assignment.Title+" is due soon", "ASSIGNMENT", assignment.ID, assignment.ClassroomID, reminderAt); err != nil {
+				return err
+			}
 		}
 		response = dto.ToAssignmentResponse(assignment, time.Now(), "", true, nil)
 		return nil
@@ -946,6 +1054,28 @@ func (s *service) SetAssignmentActive(ctx context.Context, teacherID string, cla
 		assignment.Active = active
 		if err := repo.UpdateAssignment(ctx, assignment); err != nil {
 			return err
+		}
+		if !active {
+			if err := repo.CancelNotificationOutbox(ctx, fmt.Sprintf("assignment:%d:due-reminder", assignment.ID)); err != nil {
+				return err
+			}
+		} else {
+			members, err := repo.GetApprovedMembersByClassroom(ctx, assignment.ClassroomID)
+			if err != nil {
+				return err
+			}
+			recipients := make([]string, len(members))
+			for i, member := range members {
+				recipients[i] = member.UserID
+			}
+			reminderAt := assignment.DueAt.Add(-24 * time.Hour)
+			if reminderAt.Before(time.Now()) {
+				reminderAt = time.Now()
+			}
+			if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("assignment:%d:due-reminder:%d", assignment.ID, assignment.UpdatedAt.UnixNano()), recipients,
+				"Assignment due soon", assignment.Title+" is due soon", "ASSIGNMENT", assignment.ID, assignment.ClassroomID, reminderAt); err != nil {
+				return err
+			}
 		}
 		response = dto.ToAssignmentResponse(assignment, time.Now(), "", true, nil)
 		return nil

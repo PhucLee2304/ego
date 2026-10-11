@@ -4,6 +4,7 @@ import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
 	examsClient "ego/api/gen/go/exams"
+	notificationsClient "ego/api/gen/go/notifications"
 	tokenClient "ego/api/gen/go/token"
 	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
@@ -16,6 +17,7 @@ import (
 	"ego/services/classrooms/internal/repository"
 	"ego/services/classrooms/internal/service"
 	classroomsRpc "ego/services/classrooms/rpc"
+	"ego/services/classrooms/workers"
 	"fmt"
 	"net"
 	"net/http"
@@ -53,6 +55,8 @@ func main() {
 			logger.Log.Fatal().Str("panic", fmt.Sprint(r)).Bytes("stack", debug.Stack()).Msg("[CRITICAL] Application panicked")
 		}
 	}()
+	appCtx, stopApp := context.WithCancel(context.Background())
+	defer stopApp()
 
 	appConfig, err := classroomsConfig.LoadAppConfig()
 	if err != nil {
@@ -98,6 +102,13 @@ func main() {
 	defer examsConn.Close()
 	examsServiceClient := examsClient.NewExamServiceClient(examsConn)
 
+	notificationsConn, err := grpc.NewClient(appConfig.NotificationsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to notifications service")
+	}
+	defer notificationsConn.Close()
+	notificationsServiceClient := notificationsClient.NewNotificationServiceClient(notificationsConn)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +135,8 @@ func main() {
 
 	repo := repository.NewRepository(db)
 	service := service.New(repo, appConfig, usersServiceClient, examsServiceClient)
+	service.SetNotificationClient(notificationsServiceClient)
+	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
 	handler := handler.New(service)
 	socketServer := platformsocket.NewServer(tokenServiceClient)
 
@@ -161,6 +174,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	stopApp()
 
 	logger.Log.Info().Msg("[SHUTDOWN] Shutting down classrooms server")
 	grpcServer.GracefulStop()

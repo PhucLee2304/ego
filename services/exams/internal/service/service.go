@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
+	notificationsClient "ego/api/gen/go/notifications"
 	platformdb "ego/platform/db"
 	"ego/platform/httpx"
 	"ego/platform/logger"
@@ -12,6 +13,7 @@ import (
 	"ego/services/exams/internal/repository"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,6 +44,8 @@ type Service interface {
 	ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error
 	ProcessOutboxEvents(ctx context.Context, limit int) (int, error)
 	GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, error)
+	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
+	SetNotificationClient(notificationsClient.NotificationServiceClient)
 	ReconcileClassroomAssignmentSubmissions(ctx context.Context, limit int) (int, error)
 	ReconcileAssignmentSubmissions(ctx context.Context, assignmentID uint) (int, error)
 	SubmitStudentAssignmentAttempts(ctx context.Context, studentID string, assignmentIDs []uint) (int, error)
@@ -55,10 +59,15 @@ func (s *service) GetAssignmentQuestionAnalytics(ctx context.Context, assignment
 }
 
 type service struct {
-	repo             *repository.Repository
-	classroomsClient classroomsClient.ClassroomServiceClient
-	reconcileCursor  atomic.Uint64
-	attemptPublisher func(userID string, payload any)
+	repo                *repository.Repository
+	classroomsClient    classroomsClient.ClassroomServiceClient
+	notificationsClient notificationsClient.NotificationServiceClient
+	reconcileCursor     atomic.Uint64
+	attemptPublisher    func(userID string, payload any)
+}
+
+func (s *service) SetNotificationClient(client notificationsClient.NotificationServiceClient) {
+	s.notificationsClient = client
 }
 
 func (s *service) SetAttemptEventPublisher(publisher func(userID string, payload any)) {
@@ -248,6 +257,7 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 				return err
 			}
 			scoreChanges := make([]model.ExamAuditScoreChange, 0, len(attempts))
+			regradedAt := time.Now()
 			for _, attempt := range attempts {
 				var beforeScore *float64
 				if attempt.Score != nil {
@@ -290,6 +300,11 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 				if err := repo.UpdateAttempt(ctx, attempt); err != nil {
 					return err
 				}
+				if err := createNotificationOutbox(ctx, repo,
+					fmt.Sprintf("exam:%d:regrade:attempt:%d:%d", id, attempt.ID, regradedAt.UnixNano()),
+					attempt.UserID, "Score updated", "Your exam score has been recalculated", "ATTEMPT", attempt.ID); err != nil {
+					return err
+				}
 				data, err := dto.MarshalAttemptHistory(attempt)
 				if err != nil {
 					return err
@@ -315,12 +330,11 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 			if err != nil {
 				return err
 			}
-			now := time.Now()
 			changes, err := json.Marshal(scoreChanges)
 			if err != nil {
 				return err
 			}
-			return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON(changes), RegradedAt: &now})
+			return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON(changes), RegradedAt: &regradedAt})
 		}
 		optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
 		questions := make([]model.Question, len(req.Questions))
@@ -1090,6 +1104,10 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 				Payload:       payload,
 				NextAttemptAt: time.Now(),
 			}); err != nil {
+				return err
+			}
+			if err := createNotificationOutbox(ctx, repo, fmt.Sprintf("attempt:%d:submitted", attempt.ID), userID,
+				"Assignment graded", "Your assignment was submitted and graded", "ATTEMPT", attempt.ID); err != nil {
 				return err
 			}
 		}
