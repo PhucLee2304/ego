@@ -213,21 +213,48 @@ const (
 )
 
 type CalendarResponse struct {
-	ID                  uint         `json:"id"`
-	ClassroomID         uint         `json:"classroomId"`
-	CalendarType        CalendarType `json:"calendarType"`
-	Title               string       `json:"title"`
-	Description         *string      `json:"description,omitempty"`
-	StartsAt            time.Time    `json:"startsAt"`
-	EndsAt              *time.Time   `json:"endsAt,omitempty"`
-	RelatedAssignmentID *uint        `json:"relatedAssignmentId,omitempty"`
-	Editable            bool         `json:"editable"`
-	CreatedAt           *time.Time   `json:"createdAt,omitempty"`
-	UpdatedAt           *time.Time   `json:"updatedAt,omitempty"`
+	ID                  uint          `json:"id"`
+	ClassroomID         uint          `json:"classroomId"`
+	CalendarType        CalendarType  `json:"calendarType"`
+	Title               string        `json:"title"`
+	Description         *string       `json:"description,omitempty"`
+	StartsAt            time.Time     `json:"startsAt"`
+	EndsAt              *time.Time    `json:"endsAt,omitempty"`
+	RelatedAssignmentID *uint         `json:"relatedAssignmentId,omitempty"`
+	Editable            bool          `json:"editable"`
+	CreatedAt           *time.Time    `json:"createdAt,omitempty"`
+	UpdatedAt           *time.Time    `json:"updatedAt,omitempty"`
+	Room                *RoomResponse `json:"room,omitempty"`
+}
+
+type RoomResponse struct {
+	ID          uint             `json:"id"`
+	ClassroomID uint             `json:"classroomId"`
+	ScheduleID  uint             `json:"scheduleId"`
+	Status      model.RoomStatus `json:"status"`
+	StartedAt   *time.Time       `json:"startedAt,omitempty"`
+	EndedAt     *time.Time       `json:"endedAt,omitempty"`
+	StartsAt    time.Time        `json:"startsAt"`
+	EndsAt      time.Time        `json:"endsAt"`
+	IsHost      bool             `json:"isHost"`
+}
+
+type JoinRoomResponse struct {
+	Room  *RoomResponse `json:"room"`
+	URL   string        `json:"url"`
+	Token string        `json:"token"`
+}
+
+type AttendanceSessionResponse struct {
+	ID       uint                      `json:"id"`
+	User     *UserInfo                 `json:"user,omitempty"`
+	Role     model.RoomParticipantRole `json:"role"`
+	JoinedAt time.Time                 `json:"joinedAt"`
+	LeftAt   *time.Time                `json:"leftAt,omitempty"`
 }
 
 func ToCalendarResponse(schedule *model.Schedule) *CalendarResponse {
-	return &CalendarResponse{
+	response := &CalendarResponse{
 		ID:           schedule.ID,
 		ClassroomID:  schedule.ClassroomID,
 		CalendarType: CalendarTypeClassSchedule,
@@ -239,6 +266,16 @@ func ToCalendarResponse(schedule *model.Schedule) *CalendarResponse {
 		CreatedAt:    &schedule.CreatedAt,
 		UpdatedAt:    &schedule.UpdatedAt,
 	}
+	if schedule.Room != nil {
+		response.Room = ToRoomResponse(schedule.Room, false)
+	}
+	return response
+}
+
+func ToRoomResponse(room *model.Room, isHost bool) *RoomResponse {
+	return &RoomResponse{ID: room.ID, ClassroomID: room.Schedule.ClassroomID, ScheduleID: room.ScheduleID,
+		Status: room.Status, StartedAt: room.StartedAt, EndedAt: room.EndedAt,
+		StartsAt: room.Schedule.StartsAt, EndsAt: room.Schedule.EndsAt, IsHost: isHost}
 }
 
 type ExamAuditResponse struct {

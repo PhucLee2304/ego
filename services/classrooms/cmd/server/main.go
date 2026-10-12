@@ -14,6 +14,7 @@ import (
 	classroomsConfig "ego/services/classrooms/config"
 	"ego/services/classrooms/database"
 	"ego/services/classrooms/internal/handler"
+	"ego/services/classrooms/internal/media"
 	"ego/services/classrooms/internal/repository"
 	"ego/services/classrooms/internal/service"
 	classroomsRpc "ego/services/classrooms/rpc"
@@ -134,14 +135,22 @@ func main() {
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
 	repo := repository.NewRepository(db)
+
 	service := service.New(repo, appConfig, usersServiceClient, examsServiceClient)
 	service.SetNotificationClient(notificationsServiceClient)
-	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
-	handler := handler.New(service)
-	socketServer := platformsocket.NewServer(tokenServiceClient)
+	service.SetMediaClient(media.New(appConfig.LiveKitURL, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret))
 
-	handler.RegisterRoutes(api, authMiddleware, roleMiddleware)
+	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
+	workers.StartRoomLifecycle(appCtx, service, 15*time.Second)
+
+	socketServer := platformsocket.NewServer(tokenServiceClient)
+	service.SetRoomEventPublisher(socketServer.BroadcastToUser)
+
+	httpHandler := handler.New(service)
+	httpHandler.RegisterRoutes(api, authMiddleware, roleMiddleware)
+
 	api.Handle("/ws/classrooms", socketServer)
+	api.HandleFunc("POST /livekit/webhook", handler.LiveKitWebhook(service, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret))
 
 	server := &http.Server{
 		Addr:    ":" + appConfig.Port,

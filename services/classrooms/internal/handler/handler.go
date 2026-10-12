@@ -45,6 +45,11 @@ type Handler interface {
 	GetCalendar(w http.ResponseWriter, r *http.Request)
 	UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	DeleteSchedule(w http.ResponseWriter, r *http.Request)
+	GetRoom(w http.ResponseWriter, r *http.Request)
+	StartRoom(w http.ResponseWriter, r *http.Request)
+	JoinRoom(w http.ResponseWriter, r *http.Request)
+	EndRoom(w http.ResponseWriter, r *http.Request)
+	GetRoomAttendance(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -87,6 +92,11 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("GET /classrooms/{id}/calendar", mw.Handle(h.GetCalendar))
 	mux.HandleFunc("PATCH /classrooms/{id}/schedules/{scheduleId}", mw.Handle(h.UpdateSchedule))
 	mux.HandleFunc("DELETE /classrooms/{id}/schedules/{scheduleId}", mw.Handle(h.DeleteSchedule))
+	mux.HandleFunc("GET /classrooms/{id}/rooms/{roomId}", mw.Handle(h.GetRoom))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/start", mw.Handle(h.StartRoom))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/join", mw.Handle(h.JoinRoom))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/end", mw.Handle(h.EndRoom))
+	mux.HandleFunc("GET /classrooms/{id}/rooms/{roomId}/attendance", mw.Handle(h.GetRoomAttendance))
 }
 
 func (h *handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {

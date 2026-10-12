@@ -12,6 +12,7 @@ import (
 	"ego/platform/valuex"
 	classroomsConfig "ego/services/classrooms/config"
 	"ego/services/classrooms/internal/dto"
+	"ego/services/classrooms/internal/media"
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
 	"errors"
@@ -58,6 +59,16 @@ type Service interface {
 	GetCalendar(ctx context.Context, userID string, classroomID uint, query dto.CalendarQuery) ([]*dto.CalendarResponse, error)
 	UpdateSchedule(ctx context.Context, teacherID string, scheduleID uint, req dto.UpdateScheduleRequest) (*dto.CalendarResponse, error)
 	DeleteSchedule(ctx context.Context, teacherID string, scheduleID uint) error
+	GetRoom(ctx context.Context, userID string, roomID uint) (*dto.RoomResponse, error)
+	StartRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error)
+	JoinRoom(ctx context.Context, userID string, roomID uint) (*dto.JoinRoomResponse, error)
+	EndRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error)
+	GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, error)
+	HandleParticipantJoined(ctx context.Context, roomName, userID string, joinedAt time.Time) error
+	HandleParticipantLeft(ctx context.Context, roomName, userID string, leftAt time.Time) error
+	ProcessRoomLifecycle(ctx context.Context) (int, error)
+	SetMediaClient(media.Client)
+	SetRoomEventPublisher(func(string, any))
 }
 
 type service struct {
@@ -66,11 +77,15 @@ type service struct {
 	usersClient         usersClient.UserServiceClient
 	examsClient         examsClient.ExamServiceClient
 	notificationsClient notificationsClient.NotificationServiceClient
+	mediaClient         media.Client
+	roomPublisher       func(string, any)
 }
 
 func (s *service) SetNotificationClient(client notificationsClient.NotificationServiceClient) {
 	s.notificationsClient = client
 }
+func (s *service) SetMediaClient(client media.Client)                { s.mediaClient = client }
+func (s *service) SetRoomEventPublisher(publisher func(string, any)) { s.roomPublisher = publisher }
 
 func New(repo *repository.Repository, appConfig *classroomsConfig.AppConfig, usersServiceClient usersClient.UserServiceClient, examsServiceClient examsClient.ExamServiceClient) Service {
 	return &service{
@@ -94,6 +109,11 @@ var (
 	ErrAssignmentContentConfirmation  = errors.New("[CONFIRMATION_REQUIRED] This exam already has attempts; confirm to submit active attempts and pause all related assignments")
 	ErrScheduleInvalidTime            = errors.New("[ERROR] Schedule end time must be after start time")
 	ErrCalendarInvalidRange           = errors.New("[ERROR] Calendar range must be valid and no longer than 366 days")
+	ErrRoomLive                       = errors.New("[CONFLICT] The room is currently live")
+	ErrRoomNotLive                    = errors.New("[ERROR] This session has not started yet")
+	ErrRoomEnded                      = errors.New("[ERROR] This session has ended")
+	ErrRoomTooEarly                   = errors.New("[ERROR] The room can only be started up to 30 minutes before the scheduled time")
+	ErrMediaUnavailable               = errors.New("[UNAVAILABLE] The media server is temporarily unavailable")
 )
 
 func (s *service) CreateSchedule(ctx context.Context, teacherID string, classroomID uint, req dto.CreateScheduleRequest) (*dto.CalendarResponse, error) {
@@ -115,7 +135,17 @@ func (s *service) CreateSchedule(ctx context.Context, teacherID string, classroo
 		value := strings.TrimSpace(*schedule.Description)
 		schedule.Description = &value
 	}
-	if err := s.repo.CreateSchedule(ctx, schedule); err != nil {
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		if err := repo.CreateSchedule(ctx, schedule); err != nil {
+			return err
+		}
+		room := &model.Room{ScheduleID: schedule.ID, Status: model.RoomStatusScheduled, Schedule: *schedule}
+		if err := repo.CreateRoom(ctx, room); err != nil {
+			return err
+		}
+		schedule.Room = room
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return dto.ToCalendarResponse(schedule), nil
@@ -208,7 +238,17 @@ func (s *service) DeleteSchedule(ctx context.Context, teacherID string, schedule
 	if !classroom.Active {
 		return ErrClassroomNotActive
 	}
-	return s.repo.DeleteSchedule(ctx, schedule)
+	if schedule.Room != nil && schedule.Room.Status == model.RoomStatusLive {
+		return ErrRoomLive
+	}
+	return s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		if schedule.Room != nil {
+			if err := repo.DeleteRoom(ctx, schedule.Room); err != nil {
+				return err
+			}
+		}
+		return repo.DeleteSchedule(ctx, schedule)
+	})
 }
 
 func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, error) {
@@ -445,6 +485,13 @@ func (s *service) ArchiveClassroom(ctx context.Context, teacherID string, id uin
 		}
 		if classroom.TeacherID != teacherID {
 			return ErrClassroomForbidden
+		}
+		live, err := repo.HasLiveRoomByClassroom(ctx, id)
+		if err != nil {
+			return err
+		}
+		if live {
+			return ErrRoomLive
 		}
 		classroom.Active = false
 		if err := repo.UpdateClassroom(ctx, classroom); err != nil {
@@ -723,6 +770,15 @@ func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomI
 			return errors.Join(err, rollbackErr)
 		}
 		return err
+	}
+	if s.mediaClient != nil {
+		rooms, err := s.repo.GetLiveRoomsByClassroom(ctx, classroomID)
+		if err != nil {
+			return err
+		}
+		for _, room := range rooms {
+			_ = s.mediaClient.RemoveParticipant(ctx, media.RoomName(room.ID), userID)
+		}
 	}
 	return s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		if err := repo.DeleteMember(ctx, member); err != nil {

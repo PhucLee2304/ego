@@ -233,6 +233,11 @@ services:
       target: server
     env_file:
       - ./services/classrooms/.env
+    environment:
+      LIVEKIT_URL: ${LIVEKIT_INTERNAL_URL}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
     depends_on:
       classrooms-db:
         condition: service_healthy
@@ -243,6 +248,8 @@ services:
       exams:
         condition: service_healthy
       notifications:
+        condition: service_healthy
+      livekit:
         condition: service_healthy
 
   classrooms-db:
@@ -262,6 +269,37 @@ services:
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${CLASSROOMS_DB_USER:-postgres}"]
       interval: 5s
+      timeout: 5s
+      retries: 5
+
+  livekit:
+    image: livekit/livekit-server:v1.9.10
+    container_name: livekit
+    restart: unless-stopped
+    environment:
+      LIVEKIT_CONFIG: |
+        port: ${LIVEKIT_PORT}
+        bind_addresses:
+          - "${LIVEKIT_BIND_ADDRESS}"
+        rtc:
+          tcp_port: ${LIVEKIT_RTC_TCP_PORT}
+          port_range_start: ${LIVEKIT_RTC_PORT_RANGE_START}
+          port_range_end: ${LIVEKIT_RTC_PORT_RANGE_END}
+          use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP}
+        webhook:
+          api_key: ${LIVEKIT_API_KEY}
+          urls:
+            - ${LIVEKIT_WEBHOOK_URL}
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "${LIVEKIT_PORT}:${LIVEKIT_PORT}"
+      - "${LIVEKIT_RTC_TCP_PORT}:${LIVEKIT_RTC_TCP_PORT}"
+      - "${LIVEKIT_RTC_PORT_RANGE_START}-${LIVEKIT_RTC_PORT_RANGE_END}:${LIVEKIT_RTC_PORT_RANGE_START}-${LIVEKIT_RTC_PORT_RANGE_END}/udp"
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:7880/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
