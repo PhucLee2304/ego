@@ -7,6 +7,7 @@ import (
 	"time"
 
 	usersClient "ego/api/gen/go/users"
+	"ego/platform/logger"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/media"
 	"ego/services/classrooms/internal/model"
@@ -169,7 +170,7 @@ func (s *service) finishRoom(ctx context.Context, room *model.Room) error {
 			return err
 		}
 		if locked.Status == model.RoomStatusEnded {
-			room = locked
+			*room = *locked
 			return nil
 		}
 		locked.Status, locked.EndedAt, locked.HostAbsentSince = model.RoomStatusEnded, &now, nil
@@ -179,7 +180,7 @@ func (s *service) finishRoom(ctx context.Context, room *model.Room) error {
 		if err := repo.CloseAllParticipantSessions(ctx, locked.ID, now); err != nil {
 			return err
 		}
-		room = locked
+		*room = *locked
 		return nil
 	}); err != nil {
 		return err
@@ -271,7 +272,25 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 	for _, room := range rooms {
 		// Đối chiếu trạng thái media để tự sửa dữ liệu khi webhook join/leave bị thất lạc.
 		if room.Status == model.RoomStatusLive && s.mediaClient != nil {
-			identities, mediaErr := s.mediaClient.ListParticipants(ctx, media.RoomName(room.ID))
+			var identities []string
+			var mediaErr error
+			for attempt := 1; attempt <= 3; attempt++ {
+				identities, mediaErr = s.mediaClient.ListParticipants(ctx, media.RoomName(room.ID))
+				if mediaErr == nil {
+					if attempt > 1 {
+						logger.Log.Info().Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Participant reconcile recovered")
+					}
+					break
+				}
+				logger.Log.Warn().Err(mediaErr).Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Participant reconcile failed")
+				if attempt < 3 {
+					select {
+					case <-ctx.Done():
+						return processed, ctx.Err()
+					case <-time.After(300 * time.Millisecond):
+					}
+				}
+			}
 			if mediaErr == nil {
 				connected := make(map[string]struct{}, len(identities))
 				for _, identity := range identities {
@@ -312,7 +331,24 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 			continue
 		}
 		if room.Status == model.RoomStatusLive && s.mediaClient != nil {
-			_ = s.mediaClient.DeleteRoom(ctx, media.RoomName(room.ID))
+			var deleteErr error
+			for attempt := 1; attempt <= 3; attempt++ {
+				deleteErr = s.mediaClient.DeleteRoom(ctx, media.RoomName(room.ID))
+				if deleteErr == nil {
+					break
+				}
+				logger.Log.Warn().Err(deleteErr).Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Automatic media room deletion failed")
+				if attempt < 3 {
+					select {
+					case <-ctx.Done():
+						return processed, ctx.Err()
+					case <-time.After(300 * time.Millisecond):
+					}
+				}
+			}
+			if deleteErr != nil {
+				return processed, errors.Join(ErrMediaUnavailable, deleteErr)
+			}
 		}
 		if err := s.finishRoom(ctx, room); err != nil {
 			return processed, err
