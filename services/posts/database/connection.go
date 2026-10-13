@@ -33,6 +33,8 @@ func Migrate(db *gorm.DB) error {
 		&model.CommentLike{},
 		&model.PostModerationAudit{},
 		&model.NotificationOutbox{},
+		&model.PostUploadIntent{},
+		&model.PostAttachment{},
 	); err != nil {
 		return err
 	}

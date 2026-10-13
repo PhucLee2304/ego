@@ -61,6 +61,21 @@ func (s *server) DeleteFolder(ctx context.Context, req *storageClient.DeleteFold
 	}, nil
 }
 
+func (s *server) GetObjectMetadata(ctx context.Context, req *storageClient.GetObjectMetadataRequest) (*storageClient.GetObjectMetadataResponse, error) {
+	size, contentType, err := s.minioClient.GetObjectMetadata(ctx, toBucketFolders(req.Folders), req.FileName)
+	if err != nil {
+		return nil, err
+	}
+	return &storageClient.GetObjectMetadataResponse{Size: size, ContentType: contentType}, nil
+}
+
+func (s *server) DeleteObject(ctx context.Context, req *storageClient.DeleteObjectRequest) (*storageClient.DeleteObjectResponse, error) {
+	if err := s.minioClient.DeleteObject(ctx, toBucketFolders(req.Folders), req.FileName); err != nil {
+		return nil, err
+	}
+	return &storageClient.DeleteObjectResponse{}, nil
+}
+
 func toBucketFolders(folders []string) []minio.BucketFolder {
 	result := make([]minio.BucketFolder, len(folders))
 	for i, f := range folders {

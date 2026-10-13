@@ -94,6 +94,68 @@ func (r *Repository) DeletePost(ctx context.Context, post *model.Post) error {
 	return r.db.WithContext(ctx).Delete(post).Error
 }
 
+func (r *Repository) CreateUploadIntent(ctx context.Context, intent *model.PostUploadIntent) error {
+	return r.db.WithContext(ctx).Create(intent).Error
+}
+
+func (r *Repository) GetUploadIntentForUpdate(ctx context.Context, id uint) (*model.PostUploadIntent, error) {
+	var intent model.PostUploadIntent
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&intent, id).Error
+	return &intent, err
+}
+
+func (r *Repository) SaveUploadIntent(ctx context.Context, intent *model.PostUploadIntent) error {
+	return r.db.WithContext(ctx).Save(intent).Error
+}
+
+func (r *Repository) CreateAttachment(ctx context.Context, attachment *model.PostAttachment) error {
+	return r.db.WithContext(ctx).Create(attachment).Error
+}
+
+func (r *Repository) GetAttachment(ctx context.Context, id uint) (*model.PostAttachment, error) {
+	var attachment model.PostAttachment
+	err := r.db.WithContext(ctx).First(&attachment, id).Error
+	return &attachment, err
+}
+
+func (r *Repository) AttachToPost(ctx context.Context, ids []uint, userID string, postID uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	result := r.db.WithContext(ctx).Model(&model.PostAttachment{}).
+		Where("id IN ? AND user_id = ? AND post_id IS NULL", ids, userID).
+		Updates(map[string]any{"post_id": postID})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != int64(len(ids)) {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *Repository) ListAttachments(ctx context.Context, postID uint) ([]*model.PostAttachment, error) {
+	var attachments []*model.PostAttachment
+	err := r.db.WithContext(ctx).Where("post_id = ?", postID).Order("sort_order ASC, id ASC").Find(&attachments).Error
+	return attachments, err
+}
+
+func (r *Repository) ListExpiredUploadIntents(ctx context.Context, now time.Time, limit int) ([]*model.PostUploadIntent, error) {
+	var intents []*model.PostUploadIntent
+	err := r.db.WithContext(ctx).Where("status = ? AND expires_at < ?", model.UploadStatusPending, now).Limit(limit).Find(&intents).Error
+	return intents, err
+}
+
+func (r *Repository) ListOrphanAttachments(ctx context.Context, before time.Time, limit int) ([]*model.PostAttachment, error) {
+	var attachments []*model.PostAttachment
+	err := r.db.WithContext(ctx).Where("post_id IS NULL AND created_at < ?", before).Limit(limit).Find(&attachments).Error
+	return attachments, err
+}
+
+func (r *Repository) DeleteAttachmentPermanently(ctx context.Context, attachment *model.PostAttachment) error {
+	return r.db.WithContext(ctx).Unscoped().Delete(attachment).Error
+}
+
 func (r *Repository) CreateComment(ctx context.Context, comment *model.PostComment) error {
 	return r.db.WithContext(ctx).Create(comment).Error
 }

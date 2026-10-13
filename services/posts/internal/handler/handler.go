@@ -23,6 +23,10 @@ func New(postService *service.Service) *Handler {
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMiddleware *jwt.AuthMiddleware, roleMiddleware *jwt.RoleMiddleware) {
 	mux.HandleFunc("GET /posts", authMiddleware.Handle(h.ListCommunityPosts))
+	mux.HandleFunc("GET /post-uploads/config", authMiddleware.Handle(h.GetUploadLimits))
+	mux.HandleFunc("POST /post-uploads", authMiddleware.Handle(h.CreateUploadIntent))
+	mux.HandleFunc("POST /post-uploads/{id}/complete", authMiddleware.Handle(h.CompleteUpload))
+	mux.HandleFunc("DELETE /post-uploads/{id}", authMiddleware.Handle(h.CancelUpload))
 	mux.HandleFunc("GET /posts/me", authMiddleware.Handle(h.ListMyCommunityPosts))
 	mux.HandleFunc("POST /posts", authMiddleware.Handle(h.CreateCommunityPost))
 	mux.HandleFunc("GET /posts/{id}", authMiddleware.Handle(h.GetPost))
@@ -46,6 +50,73 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMiddleware *jwt.AuthMid
 	mux.HandleFunc("DELETE /admin/posts/{id}/hide", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.UnhidePost)))
 	mux.HandleFunc("DELETE /admin/posts/{id}", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.DeletePostAsAdmin)))
 	mux.HandleFunc("GET /admin/posts/{id}/audits", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.GetPostModerationAudits)))
+}
+
+func (h *Handler) GetUploadLimits(w http.ResponseWriter, _ *http.Request) {
+	httpx.JSON(w, http.StatusOK, h.service.UploadLimits())
+}
+
+func (h *Handler) CreateUploadIntent(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwt.GetUserID(r.Context())
+	var request dto.CreateUploadIntentRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	response, err := h.service.CreateUploadIntent(r.Context(), userID, request)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidAttachment) {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, response)
+}
+
+func (h *Handler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwt.GetUserID(r.Context())
+	id, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid ID")
+		return
+	}
+	response, err := h.service.CompleteUpload(r.Context(), userID, id)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		case errors.Is(err, service.ErrForbidden):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, service.ErrInvalidAttachment), errors.Is(err, service.ErrUploadExpired):
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+		default:
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) CancelUpload(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwt.GetUserID(r.Context())
+	id, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid ID")
+		return
+	}
+	if err := h.service.CancelUpload(r.Context(), userID, id); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			httpx.Error(w, http.StatusForbidden, err.Error())
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) ListCommunityPosts(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +172,7 @@ func (h *Handler) CreateCommunityPost(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
 		case errors.Is(err, service.ErrForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
-		case errors.Is(err, service.ErrClassroomReadOnly), errors.Is(err, service.ErrCommentsDisabled), errors.Is(err, service.ErrInvalidReply):
+		case errors.Is(err, service.ErrClassroomReadOnly), errors.Is(err, service.ErrCommentsDisabled), errors.Is(err, service.ErrInvalidReply), errors.Is(err, service.ErrPostEmpty), errors.Is(err, service.ErrInvalidAttachment):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 		default:
 			httpx.Error(w, http.StatusInternalServerError, err.Error())
@@ -188,7 +259,7 @@ func (h *Handler) CreateClassroomPost(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
 		case errors.Is(err, service.ErrForbidden):
 			httpx.Error(w, http.StatusForbidden, err.Error())
-		case errors.Is(err, service.ErrClassroomReadOnly), errors.Is(err, service.ErrCommentsDisabled), errors.Is(err, service.ErrInvalidReply):
+		case errors.Is(err, service.ErrClassroomReadOnly), errors.Is(err, service.ErrCommentsDisabled), errors.Is(err, service.ErrInvalidReply), errors.Is(err, service.ErrPostEmpty), errors.Is(err, service.ErrInvalidAttachment):
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 		default:
 			httpx.Error(w, http.StatusInternalServerError, err.Error())

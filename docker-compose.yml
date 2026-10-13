@@ -360,6 +360,8 @@ services:
         condition: service_healthy
       notifications:
         condition: service_healthy
+      storage:
+        condition: service_healthy
 
   posts-db:
     image: postgres:15.8-alpine

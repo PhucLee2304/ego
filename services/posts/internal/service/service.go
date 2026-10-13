@@ -5,16 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
+	"strings"
 	"time"
 
 	classrooms "ego/api/gen/go/classrooms"
 	notifications "ego/api/gen/go/notifications"
+	storage "ego/api/gen/go/storage"
 	users "ego/api/gen/go/users"
-	"ego/platform/httpx"
+	postsConfig "ego/services/posts/config"
 	"ego/services/posts/internal/dto"
 	"ego/services/posts/internal/model"
 	"ego/services/posts/internal/repository"
 
+	"github.com/google/uuid"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -24,6 +28,9 @@ var (
 	ErrClassroomReadOnly = errors.New("[ERROR] Archived classroom posts are read-only")
 	ErrCommentsDisabled  = errors.New("[ERROR] Comments are disabled")
 	ErrInvalidReply      = errors.New("[ERROR] Invalid reply target")
+	ErrInvalidAttachment = errors.New("[ERROR] Invalid attachment")
+	ErrUploadExpired     = errors.New("[ERROR] Upload has expired")
+	ErrPostEmpty         = errors.New("[ERROR] Post content or attachment is required")
 )
 
 type Service struct {
@@ -31,15 +38,168 @@ type Service struct {
 	classrooms    classrooms.ClassroomServiceClient
 	users         users.UserServiceClient
 	notifications notifications.NotificationServiceClient
+	storage       storage.StorageServiceClient
+	cfg           *postsConfig.AppConfig
 }
 
-func New(repo *repository.Repository, classroomsClient classrooms.ClassroomServiceClient, usersClient users.UserServiceClient, notificationsClient notifications.NotificationServiceClient) *Service {
+func New(
+	repo *repository.Repository,
+	appConfig *postsConfig.AppConfig,
+	classroomsClient classrooms.ClassroomServiceClient,
+	usersClient users.UserServiceClient,
+	notificationsClient notifications.NotificationServiceClient,
+	storageClient storage.StorageServiceClient,
+) *Service {
 	return &Service{
 		repo:          repo,
 		classrooms:    classroomsClient,
 		users:         usersClient,
 		notifications: notificationsClient,
+		storage:       storageClient,
+		cfg:           appConfig,
 	}
+}
+
+var imageContentTypes = map[string]bool{"image/jpeg": true, "image/png": true, "image/webp": true}
+var fileContentTypes = map[string]bool{
+	"application/pdf":    true,
+	"text/plain":         true,
+	"application/msword": true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
+	"application/vnd.ms-excel": true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
+	"application/vnd.ms-powerpoint":                                             true,
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
+}
+
+func (s *Service) UploadLimits() *dto.UploadLimitsResponse {
+	return dto.ToUploadLimitsResponse(s.cfg, imageContentTypes, fileContentTypes)
+}
+
+func (s *Service) CreateUploadIntent(ctx context.Context, userID string, req dto.CreateUploadIntentRequest) (*dto.UploadIntentResponse, error) {
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(req.ContentType, ";")[0]))
+	mediaType := model.AttachmentTypeFile
+	maxSize := s.cfg.FileMaxBytes
+	if imageContentTypes[contentType] {
+		mediaType = model.AttachmentTypeImage
+		maxSize = s.cfg.ImageMaxBytes
+	} else if !fileContentTypes[contentType] {
+		return nil, ErrInvalidAttachment
+	}
+	if req.Size > maxSize {
+		return nil, ErrInvalidAttachment
+	}
+	ext := strings.ToLower(filepath.Ext(req.OriginalName))
+	fileName := uuid.NewString() + ext
+	folder := "posts/uploads/" + userID
+	response, err := s.storage.GeneratePresignedUploadURL(ctx, &storage.GeneratePresignedUploadURLRequest{Folders: strings.Split(folder, "/"), FileName: fileName, ContentType: contentType})
+	if err != nil {
+		return nil, err
+	}
+	intent := &model.PostUploadIntent{UserID: userID, Folder: folder, FileName: fileName, OriginalName: req.OriginalName, ContentType: contentType, DeclaredSize: req.Size, MediaType: mediaType, Status: model.UploadStatusPending, ExpiresAt: time.Now().Add(s.cfg.UploadIntentTTL)}
+	if err := s.repo.CreateUploadIntent(ctx, intent); err != nil {
+		return nil, err
+	}
+	return &dto.UploadIntentResponse{ID: intent.ID, UploadURL: response.Url, ContentType: contentType, ExpiresAt: intent.ExpiresAt}, nil
+}
+
+func (s *Service) CompleteUpload(ctx context.Context, userID string, id uint) (*dto.AttachmentResponse, error) {
+	var result *model.PostAttachment
+	err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		intent, err := repo.GetUploadIntentForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if intent.UserID != userID {
+			return ErrForbidden
+		}
+		if intent.Status == model.UploadStatusCompleted && intent.AttachmentID != nil {
+			result, err = repo.GetAttachment(ctx, *intent.AttachmentID)
+			return err
+		}
+		if intent.Status != model.UploadStatusPending || time.Now().After(intent.ExpiresAt) {
+			return ErrUploadExpired
+		}
+		meta, err := s.storage.GetObjectMetadata(ctx, &storage.GetObjectMetadataRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName})
+		if err != nil {
+			return err
+		}
+		maxSize := s.cfg.FileMaxBytes
+		if intent.MediaType == model.AttachmentTypeImage {
+			maxSize = s.cfg.ImageMaxBytes
+		}
+		if meta.Size <= 0 || meta.Size > maxSize || meta.Size != intent.DeclaredSize || !strings.EqualFold(strings.Split(meta.ContentType, ";")[0], intent.ContentType) {
+			return ErrInvalidAttachment
+		}
+		publicURL, err := s.storage.GetPublicURL(ctx, &storage.GetPublicURLRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName})
+		if err != nil {
+			return err
+		}
+		result = &model.PostAttachment{UserID: userID, URL: publicURL.Url, ObjectKey: intent.Folder + "/" + intent.FileName, MediaType: intent.MediaType, OriginalName: intent.OriginalName, ContentType: intent.ContentType, Size: meta.Size}
+		if err := repo.CreateAttachment(ctx, result); err != nil {
+			return err
+		}
+		intent.Status, intent.AttachmentID = model.UploadStatusCompleted, &result.ID
+		return repo.SaveUploadIntent(ctx, intent)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dto.ToAttachmentResponse(result), nil
+}
+
+func (s *Service) CancelUpload(ctx context.Context, userID string, id uint) error {
+	return s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		intent, err := repo.GetUploadIntentForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if intent.UserID != userID {
+			return ErrForbidden
+		}
+		if intent.Status != model.UploadStatusPending {
+			return nil
+		}
+		if _, err := s.storage.DeleteObject(ctx, &storage.DeleteObjectRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName}); err != nil {
+			return err
+		}
+		intent.Status = model.UploadStatusCancelled
+		return repo.SaveUploadIntent(ctx, intent)
+	})
+}
+
+func (s *Service) CleanupExpiredUploads(ctx context.Context, limit int) (int, error) {
+	intents, err := s.repo.ListExpiredUploadIntents(ctx, time.Now(), limit)
+	if err != nil {
+		return 0, err
+	}
+	cleaned := 0
+	for _, intent := range intents {
+		if _, err := s.storage.DeleteObject(ctx, &storage.DeleteObjectRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName}); err != nil {
+			continue
+		}
+		intent.Status = model.UploadStatusCancelled
+		if err := s.repo.SaveUploadIntent(ctx, intent); err == nil {
+			cleaned++
+		}
+	}
+	orphans, err := s.repo.ListOrphanAttachments(ctx, time.Now().Add(-s.cfg.UploadIntentTTL), limit)
+	if err != nil {
+		return cleaned, err
+	}
+	for _, attachment := range orphans {
+		parts := strings.Split(strings.Trim(attachment.ObjectKey, "/"), "/")
+		if len(parts) < 2 {
+			continue
+		}
+		if _, err := s.storage.DeleteObject(ctx, &storage.DeleteObjectRequest{Folders: parts[:len(parts)-1], FileName: parts[len(parts)-1]}); err != nil {
+			continue
+		}
+		if err := s.repo.DeleteAttachmentPermanently(ctx, attachment); err == nil {
+			cleaned++
+		}
+	}
+	return cleaned, nil
 }
 
 func (s *Service) classroomAccess(ctx context.Context, classroomID uint, userID string) (*classrooms.GetClassroomPostAccessResponse, error) {
@@ -54,13 +214,6 @@ func (s *Service) classroomAccess(ctx context.Context, classroomID uint, userID 
 		return nil, ErrForbidden
 	}
 	return access, nil
-}
-
-func allowComments(v *bool) bool {
-	if v == nil {
-		return true
-	}
-	return *v
 }
 
 func createInteractionOutbox(ctx context.Context, repo *repository.Repository, eventKey, recipient, title, body, dataType string, postID uint, commentID *uint, classroomID *uint) error {
@@ -85,20 +238,31 @@ func createInteractionOutbox(ctx context.Context, repo *repository.Repository, e
 }
 
 func (s *Service) CreateCommunityPost(ctx context.Context, userID string, req dto.CreatePostRequest) (*dto.PostResponse, error) {
+	if strings.TrimSpace(req.Content) == "" && len(req.AttachmentIDs) == 0 {
+		return nil, ErrPostEmpty
+	}
 	post := &model.Post{
 		AuthorID:      userID,
 		Scope:         model.PostScopeCommunity,
 		Content:       req.Content,
 		Status:        model.PostStatusPublished,
-		AllowComments: allowComments(req.AllowComments),
+		AllowComments: req.CommentsAllowed(),
 	}
-	if err := s.repo.CreatePost(ctx, post); err != nil {
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		if err := repo.CreatePost(ctx, post); err != nil {
+			return err
+		}
+		return s.attachToPost(ctx, repo, userID, post.ID, req.AttachmentIDs)
+	}); err != nil {
 		return nil, err
 	}
 	return s.toPostResponse(ctx, post, userID, false), nil
 }
 
 func (s *Service) CreateClassroomPost(ctx context.Context, userID string, classroomID uint, req dto.CreatePostRequest) (*dto.PostResponse, error) {
+	if strings.TrimSpace(req.Content) == "" && len(req.AttachmentIDs) == 0 {
+		return nil, ErrPostEmpty
+	}
 	access, err := s.classroomAccess(ctx, classroomID, userID)
 	if err != nil {
 		return nil, err
@@ -115,10 +279,13 @@ func (s *Service) CreateClassroomPost(ctx context.Context, userID string, classr
 		ClassroomID:   &classroomID,
 		Content:       req.Content,
 		Status:        model.PostStatusPublished,
-		AllowComments: allowComments(req.AllowComments),
+		AllowComments: req.CommentsAllowed(),
 	}
 	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		if err := repo.CreatePost(ctx, post); err != nil {
+			return err
+		}
+		if err := s.attachToPost(ctx, repo, userID, post.ID, req.AttachmentIDs); err != nil {
 			return err
 		}
 		if len(access.ApprovedStudentIds) == 0 {
@@ -141,6 +308,27 @@ func (s *Service) CreateClassroomPost(ctx context.Context, userID string, classr
 		return nil, err
 	}
 	return s.toPostResponse(ctx, post, userID, true), nil
+}
+
+func (s *Service) attachToPost(ctx context.Context, repo *repository.Repository, userID string, postID uint, ids []uint) error {
+	if len(ids) > s.cfg.MaxAttachments {
+		return ErrInvalidAttachment
+	}
+	if err := repo.AttachToPost(ctx, ids, userID, postID); err != nil {
+		return ErrInvalidAttachment
+	}
+	attachments, err := repo.ListAttachments(ctx, postID)
+	if err != nil {
+		return err
+	}
+	var total int64
+	for _, attachment := range attachments {
+		total += attachment.Size
+	}
+	if total > s.cfg.PostMaxBytes {
+		return ErrInvalidAttachment
+	}
+	return nil
 }
 func (s *Service) ListCommunityPosts(ctx context.Context, userID string, q dto.PostsQuery) (*dto.PostsResponse, error) {
 	q.Normalize()
@@ -362,7 +550,7 @@ func (s *Service) ListPostComments(ctx context.Context, userID string, postID ui
 	out := make([]*dto.CommentResponse, 0, len(items))
 	for _, c := range items {
 		likes, liked, _ := s.repo.CommentStats(ctx, c.ID, userID)
-		out = append(out, &dto.CommentResponse{ID: c.ID, PostID: c.PostID, UserID: c.UserID, Content: c.Content, ParentID: c.ParentID, ReplyToUserID: c.ReplyToUserID, LikeCount: likes, Liked: liked, CanEdit: c.UserID == userID, CanDelete: c.UserID == userID || teacher, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt})
+		out = append(out, dto.ToCommentResponse(c, userID, teacher, likes, liked))
 	}
 	s.enrichComments(ctx, out)
 	return &dto.CommentsResponse{Comments: out}, nil
@@ -422,18 +610,7 @@ func (s *Service) CreatePostComment(ctx context.Context, userID string, postID u
 	}); err != nil {
 		return nil, err
 	}
-	return &dto.CommentResponse{
-		ID:            c.ID,
-		PostID:        c.PostID,
-		UserID:        c.UserID,
-		Content:       c.Content,
-		ParentID:      c.ParentID,
-		ReplyToUserID: c.ReplyToUserID,
-		CanEdit:       true,
-		CanDelete:     true,
-		CreatedAt:     c.CreatedAt,
-		UpdatedAt:     c.UpdatedAt,
-	}, nil
+	return dto.ToCommentResponse(c, userID, false, 0, false), nil
 }
 func (s *Service) UpdatePostComment(ctx context.Context, userID string, id uint, req dto.UpdateCommentRequest) (*dto.CommentResponse, error) {
 	c, err := s.repo.GetComment(ctx, id)
@@ -460,7 +637,7 @@ func (s *Service) UpdatePostComment(ctx context.Context, userID string, id uint,
 	if err := s.repo.SaveComment(ctx, c); err != nil {
 		return nil, err
 	}
-	return &dto.CommentResponse{ID: c.ID, PostID: c.PostID, UserID: c.UserID, Content: c.Content, ParentID: c.ParentID, ReplyToUserID: c.ReplyToUserID, CanEdit: true, CanDelete: true, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}, nil
+	return dto.ToCommentResponse(c, userID, false, 0, false), nil
 }
 func (s *Service) DeletePostComment(ctx context.Context, userID string, id uint) error {
 	c, err := s.repo.GetComment(ctx, id)
@@ -563,15 +740,11 @@ func (s *Service) GetPostModerationAudits(ctx context.Context, id uint) ([]*dto.
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*dto.AuditResponse, len(items))
-	for i, a := range items {
-		out[i] = &dto.AuditResponse{ID: a.ID, PostID: a.PostID, AdminUserID: a.AdminUserID, Action: a.Action, Reason: a.Reason, CreatedAt: a.CreatedAt}
-	}
-	return out, nil
+	return dto.ToAuditResponses(items), nil
 }
 func (s *Service) toPostResponse(ctx context.Context, p *model.Post, user string, teacher bool) *dto.PostResponse {
 	likes, comments, liked, _ := s.repo.PostStats(ctx, p.ID, user)
-	r := &dto.PostResponse{ID: p.ID, AuthorID: p.AuthorID, Scope: p.Scope, ClassroomID: p.ClassroomID, Content: p.Content, Status: p.Status, Pinned: p.Pinned, AllowComments: p.AllowComments, LikeCount: likes, CommentCount: comments, Liked: liked, CanEdit: p.AuthorID == user, CanDelete: p.AuthorID == user, CanPin: teacher, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
+	r := dto.ToPostResponse(p, user, teacher, likes, comments, liked, s.postAttachments(ctx, p.ID))
 	s.enrichPosts(ctx, []*dto.PostResponse{r})
 	return r
 }
@@ -579,10 +752,17 @@ func (s *Service) toPostsResponse(ctx context.Context, items []*model.Post, user
 	out := make([]*dto.PostResponse, len(items))
 	for i, p := range items {
 		likes, comments, liked, _ := s.repo.PostStats(ctx, p.ID, user)
-		out[i] = &dto.PostResponse{ID: p.ID, AuthorID: p.AuthorID, Scope: p.Scope, ClassroomID: p.ClassroomID, Content: p.Content, Status: p.Status, Pinned: p.Pinned, AllowComments: p.AllowComments, LikeCount: likes, CommentCount: comments, Liked: liked, CanEdit: p.AuthorID == user, CanDelete: p.AuthorID == user, CanPin: teacher, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
+		out[i] = dto.ToPostResponse(p, user, teacher, likes, comments, liked, s.postAttachments(ctx, p.ID))
 	}
 	s.enrichPosts(ctx, out)
-	return &dto.PostsResponse{Posts: out, Page: page, PageCount: httpx.ToPageCounts(total, int32(size))}
+	return dto.ToPostsResponse(out, total, page, size)
+}
+func (s *Service) postAttachments(ctx context.Context, postID uint) []*dto.AttachmentResponse {
+	items, err := s.repo.ListAttachments(ctx, postID)
+	if err != nil {
+		return []*dto.AttachmentResponse{}
+	}
+	return dto.ToAttachmentResponses(items)
 }
 func (s *Service) enrichPosts(ctx context.Context, items []*dto.PostResponse) {
 	ids := make([]string, 0, len(items))
@@ -611,22 +791,14 @@ func (s *Service) enrichComments(ctx context.Context, items []*dto.CommentRespon
 	}
 }
 func (s *Service) getUsersByID(ctx context.Context, ids []string) map[string]*dto.UserInfo {
-	out := map[string]*dto.UserInfo{}
 	if len(ids) == 0 {
-		return out
+		return map[string]*dto.UserInfo{}
 	}
 	r, err := s.users.GetUsersInfo(ctx, &users.GetUsersInfoRequest{Ids: ids})
 	if err != nil {
-		return out
+		return map[string]*dto.UserInfo{}
 	}
-	for _, u := range r.Users {
-		var avatar *string
-		if u.Avatar != "" {
-			avatar = &u.Avatar
-		}
-		out[u.Id] = &dto.UserInfo{ID: u.Id, Name: u.Name, Email: u.Email, Avatar: avatar}
-	}
-	return out
+	return dto.ToUserInfoMap(r.Users)
 }
 func (s *Service) ProcessNotificationOutbox(ctx context.Context, limit int) (int, error) {
 	if s.notifications == nil {

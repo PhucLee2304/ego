@@ -11,6 +11,7 @@ import (
 
 	classroomsClient "ego/api/gen/go/classrooms"
 	notificationsClient "ego/api/gen/go/notifications"
+	storageClient "ego/api/gen/go/storage"
 	tokenClient "ego/api/gen/go/token"
 	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
@@ -88,6 +89,16 @@ func main() {
 	}
 	defer notificationsConn.Close()
 
+	storageConn, err := grpc.NewClient(
+		appConfig.StorageServiceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(rpcTimeout)),
+	)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create storage client")
+	}
+	defer storageConn.Close()
+
 	usersServiceClient := usersClient.NewUserServiceClient(usersConn)
 	authMiddleware := jwt.NewAuthMiddleware(tokenClient.NewTokenServiceClient(authConn))
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
@@ -101,14 +112,17 @@ func main() {
 	repo := repository.NewRepository(db)
 	service := service.New(
 		repo,
+		appConfig,
 		classroomsClient.NewClassroomServiceClient(classroomsConn),
 		usersServiceClient,
 		notificationsClient.NewNotificationServiceClient(notificationsConn),
+		storageClient.NewStorageServiceClient(storageConn),
 	)
 
 	appCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
+	workers.StartUploadCleanup(appCtx, service, 5*time.Minute, 100)
 
 	api := http.NewServeMux()
 	httpHandler := handler.New(service)

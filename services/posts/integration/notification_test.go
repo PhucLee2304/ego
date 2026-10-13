@@ -9,6 +9,7 @@ import (
 	"time"
 
 	classrooms "ego/api/gen/go/classrooms"
+	"ego/services/posts/config"
 	"ego/services/posts/internal/dto"
 	"ego/services/posts/internal/model"
 	"ego/services/posts/internal/service"
@@ -36,7 +37,7 @@ func (classroomClient) GetAssignmentSubmissionSyncStatus(context.Context, *class
 func TestInteractionAndPinNotificationsUseDirectOwner(t *testing.T) {
 	ctx := context.Background()
 	repo := testRepository(t)
-	svc := service.New(repo, classroomClient{}, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, classroomClient{}, nil, nil, nil)
 
 	post := &model.Post{AuthorID: "author-b", Scope: model.PostScopeCommunity, Content: "Post", Status: model.PostStatusPublished, AllowComments: true}
 	if err := repo.CreatePost(ctx, post); err != nil {
@@ -96,7 +97,7 @@ func TestInteractionAndPinNotificationsUseDirectOwner(t *testing.T) {
 func TestUnlikeAndUnpinDoNotCreateNotifications(t *testing.T) {
 	ctx := context.Background()
 	repo := testRepository(t)
-	svc := service.New(repo, classroomClient{}, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, classroomClient{}, nil, nil, nil)
 	classroomID := uint(9)
 	post := &model.Post{AuthorID: "teacher", Scope: model.PostScopeClassroom, ClassroomID: &classroomID, Content: "Post", Status: model.PostStatusPublished, AllowComments: true, Pinned: true}
 	if err := repo.CreatePost(ctx, post); err != nil {
