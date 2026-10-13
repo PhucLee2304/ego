@@ -52,6 +52,8 @@ services:
         condition: service_healthy
       notifications:
         condition: service_healthy
+      posts:
+        condition: service_healthy
     networks:
       - ego-network
 
@@ -335,6 +337,46 @@ services:
       - ego-network
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${NOTIFICATIONS_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  posts:
+    <<: *go-service
+    container_name: posts
+    build:
+      context: .
+      dockerfile: services/posts/Dockerfile
+    env_file:
+      - ./services/posts/.env
+    depends_on:
+      posts-db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      users:
+        condition: service_healthy
+      classrooms:
+        condition: service_healthy
+      notifications:
+        condition: service_healthy
+
+  posts-db:
+    image: postgres:15.8-alpine
+    container_name: posts-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTS_DB_USER}
+      POSTGRES_PASSWORD: ${POSTS_DB_PASSWORD}
+      POSTGRES_DB: ${POSTS_DB_NAME}
+    ports:
+      - "${POSTS_DB_PORT}:5432"
+    volumes:
+      - ./data/posts-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTS_DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5

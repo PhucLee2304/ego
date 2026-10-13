@@ -38,6 +38,42 @@ var (
 	errInvalidSubmissionScore = errors.New("[ERROR] Invalid submission score")
 )
 
+func (s *server) GetClassroomPostAccess(ctx context.Context, req *classrooms.GetClassroomPostAccessRequest) (*classrooms.GetClassroomPostAccessResponse, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, uint(req.ClassroomId))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, status.Error(codes.NotFound, "[ERROR] Classroom not found")
+		}
+		return nil, toStatusError(err)
+	}
+
+	isTeacher := classroom.TeacherID == req.UserId
+	isApproved := false
+	if !isTeacher && req.UserId != "" {
+		isApproved, err = s.repo.IsStudentApprovedInClassroom(ctx, classroom.ID, req.UserId)
+		if err != nil {
+			return nil, toStatusError(err)
+		}
+	}
+
+	studentIDs := make([]string, 0, len(classroom.Members))
+	for _, member := range classroom.Members {
+		if member.UserID != classroom.TeacherID {
+			studentIDs = append(studentIDs, member.UserID)
+		}
+	}
+
+	return &classrooms.GetClassroomPostAccessResponse{
+		ClassroomId:        uint64(classroom.ID),
+		ClassroomName:      classroom.Name,
+		TeacherId:          classroom.TeacherID,
+		Active:             classroom.Active,
+		IsTeacher:          isTeacher,
+		IsApprovedMember:   isApproved,
+		ApprovedStudentIds: studentIDs,
+	}, nil
+}
+
 func (s *server) ValidateAssignmentAttempt(ctx context.Context, req *classrooms.ValidateAssignmentAttemptRequest) (*classrooms.ValidateAssignmentAttemptResponse, error) {
 	assignment, err := s.repo.GetAssignmentForAttemptValidation(ctx, uint(req.AssignmentId))
 	if err != nil {
