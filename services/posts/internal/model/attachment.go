@@ -8,10 +8,16 @@ import (
 
 type AttachmentType string
 type UploadStatus string
+type ProcessingStatus string
 
 const (
 	AttachmentTypeImage AttachmentType = "IMAGE"
 	AttachmentTypeFile  AttachmentType = "FILE"
+	AttachmentTypeVideo AttachmentType = "VIDEO"
+
+	ProcessingStatusReady      ProcessingStatus = "READY"
+	ProcessingStatusProcessing ProcessingStatus = "PROCESSING"
+	ProcessingStatusFailed     ProcessingStatus = "FAILED"
 
 	UploadStatusPending   UploadStatus = "PENDING"
 	UploadStatusCompleted UploadStatus = "COMPLETED"
@@ -34,13 +40,19 @@ type PostUploadIntent struct {
 
 type PostAttachment struct {
 	gorm.Model
-	PostID       *uint          `gorm:"index"`
-	UserID       string         `gorm:"type:text;not null;index"`
-	URL          string         `gorm:"type:text;not null"`
-	ObjectKey    string         `gorm:"type:text;not null;uniqueIndex"`
-	MediaType    AttachmentType `gorm:"type:text;not null"`
-	OriginalName string         `gorm:"type:text;not null"`
-	ContentType  string         `gorm:"type:text;not null"`
-	Size         int64          `gorm:"not null"`
-	SortOrder    int            `gorm:"not null;default:0"`
+	PostID             *uint          `gorm:"index"`
+	UserID             string         `gorm:"type:text;not null;index"`
+	URL                string         `gorm:"type:text;not null"`
+	ObjectKey          string         `gorm:"type:text;not null;uniqueIndex"`
+	MediaType          AttachmentType `gorm:"type:text;not null"`
+	OriginalName       string         `gorm:"type:text;not null"`
+	ContentType        string         `gorm:"type:text;not null"`
+	Size               int64          `gorm:"not null"`
+	SortOrder          int            `gorm:"not null;default:0"`
+	Width              *int
+	Height             *int
+	DurationSeconds    *float64
+	ThumbnailURL       *string          `gorm:"type:text"`
+	ProcessingStatus   ProcessingStatus `gorm:"type:text;not null;default:READY;index"`
+	ProcessingAttempts int              `gorm:"not null;default:0"`
 }

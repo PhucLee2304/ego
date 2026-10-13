@@ -26,6 +26,7 @@ type AppConfig struct {
 
 	ImageMaxBytes   int64
 	FileMaxBytes    int64
+	VideoMaxBytes   int64
 	PostMaxBytes    int64
 	MaxAttachments  int
 	UploadIntentTTL time.Duration
@@ -49,6 +50,7 @@ func LoadAppConfig() (*AppConfig, error) {
 		StorageServiceAddr:       getEnv("STORAGE_SERVICE_ADDR", "storage:50055"),
 		ImageMaxBytes:            getEnvInt64("POST_IMAGE_MAX_BYTES", 5*1024*1024),
 		FileMaxBytes:             getEnvInt64("POST_FILE_MAX_BYTES", 10*1024*1024),
+		VideoMaxBytes:            getEnvInt64("POST_VIDEO_MAX_BYTES", 20*1024*1024),
 		PostMaxBytes:             getEnvInt64("POST_TOTAL_MAX_BYTES", 50*1024*1024),
 		MaxAttachments:           int(getEnvInt64("POST_MAX_ATTACHMENTS", 10)),
 		UploadIntentTTL:          time.Duration(getEnvInt64("POST_UPLOAD_TTL_MINUTES", 60)) * time.Minute,

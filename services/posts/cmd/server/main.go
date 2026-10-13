@@ -110,19 +110,21 @@ func main() {
 	})
 
 	repo := repository.NewRepository(db)
+	storageServiceClient := storageClient.NewStorageServiceClient(storageConn)
 	service := service.New(
 		repo,
 		appConfig,
 		classroomsClient.NewClassroomServiceClient(classroomsConn),
 		usersServiceClient,
 		notificationsClient.NewNotificationServiceClient(notificationsConn),
-		storageClient.NewStorageServiceClient(storageConn),
+		storageServiceClient,
 	)
 
 	appCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
 	workers.StartUploadCleanup(appCtx, service, 5*time.Minute, 100)
+	workers.StartVideoProcessor(appCtx, repo, storageServiceClient, 2*time.Second)
 
 	api := http.NewServeMux()
 	httpHandler := handler.New(service)

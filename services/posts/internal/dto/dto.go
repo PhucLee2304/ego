@@ -43,20 +43,24 @@ type CreateUploadIntentRequest struct {
 type UploadLimitsResponse struct {
 	ImageMaxBytes  int64    `json:"imageMaxBytes"`
 	FileMaxBytes   int64    `json:"fileMaxBytes"`
+	VideoMaxBytes  int64    `json:"videoMaxBytes"`
 	PostMaxBytes   int64    `json:"postMaxBytes"`
 	MaxAttachments int      `json:"maxAttachments"`
 	ImageTypes     []string `json:"imageTypes"`
 	FileTypes      []string `json:"fileTypes"`
+	VideoTypes     []string `json:"videoTypes"`
 }
 
-func ToUploadLimitsResponse(cfg *postsConfig.AppConfig, imageTypes, fileTypes map[string]bool) *UploadLimitsResponse {
+func ToUploadLimitsResponse(cfg *postsConfig.AppConfig, imageTypes, fileTypes, videoTypes map[string]bool) *UploadLimitsResponse {
 	return &UploadLimitsResponse{
 		ImageMaxBytes:  cfg.ImageMaxBytes,
 		FileMaxBytes:   cfg.FileMaxBytes,
+		VideoMaxBytes:  cfg.VideoMaxBytes,
 		PostMaxBytes:   cfg.PostMaxBytes,
 		MaxAttachments: cfg.MaxAttachments,
 		ImageTypes:     contentTypes(imageTypes),
 		FileTypes:      contentTypes(fileTypes),
+		VideoTypes:     contentTypes(videoTypes),
 	}
 }
 
@@ -77,13 +81,18 @@ type UploadIntentResponse struct {
 }
 
 type AttachmentResponse struct {
-	ID           uint                 `json:"id"`
-	URL          string               `json:"url"`
-	MediaType    model.AttachmentType `json:"mediaType"`
-	OriginalName string               `json:"originalName"`
-	ContentType  string               `json:"contentType"`
-	Size         int64                `json:"size"`
-	SortOrder    int                  `json:"sortOrder"`
+	ID               uint                   `json:"id"`
+	URL              string                 `json:"url"`
+	MediaType        model.AttachmentType   `json:"mediaType"`
+	OriginalName     string                 `json:"originalName"`
+	ContentType      string                 `json:"contentType"`
+	Size             int64                  `json:"size"`
+	SortOrder        int                    `json:"sortOrder"`
+	Width            *int                   `json:"width,omitempty"`
+	Height           *int                   `json:"height,omitempty"`
+	DurationSeconds  *float64               `json:"durationSeconds,omitempty"`
+	ThumbnailURL     *string                `json:"thumbnailUrl,omitempty"`
+	ProcessingStatus model.ProcessingStatus `json:"processingStatus"`
 }
 
 func ToAttachmentResponse(attachment *model.PostAttachment) *AttachmentResponse {
@@ -95,6 +104,8 @@ func ToAttachmentResponse(attachment *model.PostAttachment) *AttachmentResponse 
 		ContentType:  attachment.ContentType,
 		Size:         attachment.Size,
 		SortOrder:    attachment.SortOrder,
+		Width:        attachment.Width, Height: attachment.Height, DurationSeconds: attachment.DurationSeconds,
+		ThumbnailURL: attachment.ThumbnailURL, ProcessingStatus: attachment.ProcessingStatus,
 	}
 }
 

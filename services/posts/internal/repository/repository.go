@@ -156,6 +156,17 @@ func (r *Repository) DeleteAttachmentPermanently(ctx context.Context, attachment
 	return r.db.WithContext(ctx).Unscoped().Delete(attachment).Error
 }
 
+func (r *Repository) ListVideoAttachmentsForProcessing(ctx context.Context, limit int) ([]*model.PostAttachment, error) {
+	var attachments []*model.PostAttachment
+	err := r.db.WithContext(ctx).Where("media_type = ? AND processing_status = ? AND processing_attempts < 3", model.AttachmentTypeVideo, model.ProcessingStatusProcessing).
+		Order("id ASC").Limit(limit).Find(&attachments).Error
+	return attachments, err
+}
+
+func (r *Repository) SaveAttachment(ctx context.Context, attachment *model.PostAttachment) error {
+	return r.db.WithContext(ctx).Save(attachment).Error
+}
+
 func (r *Repository) CreateComment(ctx context.Context, comment *model.PostComment) error {
 	return r.db.WithContext(ctx).Create(comment).Error
 }

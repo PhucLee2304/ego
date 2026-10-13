@@ -61,6 +61,7 @@ func New(
 }
 
 var imageContentTypes = map[string]bool{"image/jpeg": true, "image/png": true, "image/webp": true}
+var videoContentTypes = map[string]bool{"video/mp4": true, "video/quicktime": true}
 var fileContentTypes = map[string]bool{
 	"application/pdf":    true,
 	"text/plain":         true,
@@ -73,7 +74,7 @@ var fileContentTypes = map[string]bool{
 }
 
 func (s *Service) UploadLimits() *dto.UploadLimitsResponse {
-	return dto.ToUploadLimitsResponse(s.cfg, imageContentTypes, fileContentTypes)
+	return dto.ToUploadLimitsResponse(s.cfg, imageContentTypes, fileContentTypes, videoContentTypes)
 }
 
 func (s *Service) CreateUploadIntent(ctx context.Context, userID string, req dto.CreateUploadIntentRequest) (*dto.UploadIntentResponse, error) {
@@ -83,6 +84,8 @@ func (s *Service) CreateUploadIntent(ctx context.Context, userID string, req dto
 	if imageContentTypes[contentType] {
 		mediaType = model.AttachmentTypeImage
 		maxSize = s.cfg.ImageMaxBytes
+	} else if videoContentTypes[contentType] {
+		mediaType, maxSize = model.AttachmentTypeVideo, s.cfg.VideoMaxBytes
 	} else if !fileContentTypes[contentType] {
 		return nil, ErrInvalidAttachment
 	}
@@ -127,6 +130,8 @@ func (s *Service) CompleteUpload(ctx context.Context, userID string, id uint) (*
 		maxSize := s.cfg.FileMaxBytes
 		if intent.MediaType == model.AttachmentTypeImage {
 			maxSize = s.cfg.ImageMaxBytes
+		} else if intent.MediaType == model.AttachmentTypeVideo {
+			maxSize = s.cfg.VideoMaxBytes
 		}
 		if meta.Size <= 0 || meta.Size > maxSize || meta.Size != intent.DeclaredSize || !strings.EqualFold(strings.Split(meta.ContentType, ";")[0], intent.ContentType) {
 			return ErrInvalidAttachment
@@ -135,7 +140,11 @@ func (s *Service) CompleteUpload(ctx context.Context, userID string, id uint) (*
 		if err != nil {
 			return err
 		}
-		result = &model.PostAttachment{UserID: userID, URL: publicURL.Url, ObjectKey: intent.Folder + "/" + intent.FileName, MediaType: intent.MediaType, OriginalName: intent.OriginalName, ContentType: intent.ContentType, Size: meta.Size}
+		status := model.ProcessingStatusReady
+		if intent.MediaType == model.AttachmentTypeVideo {
+			status = model.ProcessingStatusProcessing
+		}
+		result = &model.PostAttachment{UserID: userID, URL: publicURL.Url, ObjectKey: intent.Folder + "/" + intent.FileName, MediaType: intent.MediaType, OriginalName: intent.OriginalName, ContentType: intent.ContentType, Size: meta.Size, ProcessingStatus: status}
 		if err := repo.CreateAttachment(ctx, result); err != nil {
 			return err
 		}
@@ -322,10 +331,14 @@ func (s *Service) attachToPost(ctx context.Context, repo *repository.Repository,
 		return err
 	}
 	var total int64
+	videoCount := 0
 	for _, attachment := range attachments {
 		total += attachment.Size
+		if attachment.MediaType == model.AttachmentTypeVideo {
+			videoCount++
+		}
 	}
-	if total > s.cfg.PostMaxBytes {
+	if total > s.cfg.PostMaxBytes || videoCount > 1 {
 		return ErrInvalidAttachment
 	}
 	return nil
