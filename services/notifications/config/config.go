@@ -7,6 +7,7 @@ import (
 
 type AppConfig struct {
 	Port                    string
+	GRPCPort                string
 	DBHost                  string
 	DBPort                  string
 	DBUser                  string
@@ -20,6 +21,7 @@ type AppConfig struct {
 func LoadAppConfig() *AppConfig {
 	cfg := &AppConfig{
 		Port:                    getEnv("APP_PORT", "8080"),
+		GRPCPort:                getEnv("GRPC_PORT", "50058"),
 		DBHost:                  getEnv("DB_HOST", "notifications-db"),
 		DBPort:                  getEnv("DB_PORT", "5432"),
 		DBUser:                  getEnv("DB_USER", "postgres"),

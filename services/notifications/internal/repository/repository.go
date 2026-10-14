@@ -41,8 +41,8 @@ func (r *Repository) GetNotifications(ctx context.Context, userID string, read *
 
 func (r *Repository) UpsertDeviceToken(ctx context.Context, token *model.DeviceToken) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "token"}},
-		DoUpdates: clause.AssignmentColumns([]string{"user_id", "platform"}),
+		Columns:   []clause.Column{{Name: "device_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"user_id", "token", "platform"}),
 	}).Create(token).Error
 }
 
@@ -79,5 +79,16 @@ func (r *Repository) CreateNotifications(ctx context.Context, notifications []*m
 	if len(notifications) == 0 {
 		return nil
 	}
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&notifications).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, notification := range notifications {
+			result := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(notification)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				notification.ID = 0
+			}
+		}
+		return nil
+	})
 }

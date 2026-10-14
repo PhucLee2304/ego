@@ -130,6 +130,30 @@ func (c *Client) GetPublicURL(folders []BucketFolder, fileName string) (*string,
 	return &url, nil
 }
 
+func (c *Client) GetObjectMetadata(ctx context.Context, folders []BucketFolder, fileName string) (int64, string, error) {
+	objectKey := BuildObjectKey(folders, fileName)
+	if objectKey == "" {
+		return 0, "", errors.New("[MINIO] Object key cannot be empty")
+	}
+	output, err := c.Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(c.Bucket),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	return aws.ToInt64(output.ContentLength), aws.ToString(output.ContentType), nil
+}
+
+func (c *Client) DeleteObject(ctx context.Context, folders []BucketFolder, fileName string) error {
+	objectKey := BuildObjectKey(folders, fileName)
+	if objectKey == "" {
+		return errors.New("[MINIO] Object key cannot be empty")
+	}
+	_, err := c.Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(c.Bucket), Key: aws.String(objectKey)})
+	return err
+}
+
 func (c *Client) DeleteFolder(ctx context.Context, folder string) (uint32, error) {
 	prefix := strings.Trim(folder, "/")
 	if prefix == "" {

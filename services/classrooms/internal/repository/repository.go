@@ -7,6 +7,7 @@ import (
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/model"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -258,9 +259,99 @@ func (r *Repository) CreateSchedule(ctx context.Context, schedule *model.Schedul
 	return r.db.WithContext(ctx).Create(schedule).Error
 }
 
+func (r *Repository) CreateRoom(ctx context.Context, room *model.Room) error {
+	return r.db.WithContext(ctx).Create(room).Error
+}
+
+func (r *Repository) GetRoomByID(ctx context.Context, id uint) (*model.Room, error) {
+	var room model.Room
+	if err := r.db.WithContext(ctx).Preload("Schedule").Preload("Schedule.Classroom").Where("id = ?", id).First(&room).Error; err != nil {
+		return nil, err
+	}
+	return &room, nil
+}
+
+func (r *Repository) GetRoomByIDForUpdate(ctx context.Context, id uint) (*model.Room, error) {
+	var room model.Room
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Schedule").Preload("Schedule.Classroom").Where("id = ?", id).First(&room).Error; err != nil {
+		return nil, err
+	}
+	return &room, nil
+}
+
+func (r *Repository) GetRoomByName(ctx context.Context, name string) (*model.Room, error) {
+	var id uint
+	if _, err := fmt.Sscanf(name, "classroom-room-%d", &id); err != nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return r.GetRoomByID(ctx, id)
+}
+
+func (r *Repository) UpdateRoom(ctx context.Context, room *model.Room) error {
+	return r.db.WithContext(ctx).Save(room).Error
+}
+func (r *Repository) DeleteRoom(ctx context.Context, room *model.Room) error {
+	return r.db.WithContext(ctx).Delete(room).Error
+}
+
+func (r *Repository) HasLiveRoomByClassroom(ctx context.Context, classroomID uint) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.Room{}).Joins("JOIN schedules ON schedules.id = rooms.schedule_id AND schedules.deleted_at IS NULL").
+		Where("schedules.classroom_id = ? AND rooms.status = ? AND rooms.deleted_at IS NULL", classroomID, model.RoomStatusLive).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *Repository) GetLiveRoomsByClassroom(ctx context.Context, classroomID uint) ([]*model.Room, error) {
+	var rooms []*model.Room
+	err := r.db.WithContext(ctx).Joins("JOIN schedules ON schedules.id = rooms.schedule_id AND schedules.deleted_at IS NULL").
+		Where("schedules.classroom_id = ? AND rooms.status = ? AND rooms.deleted_at IS NULL", classroomID, model.RoomStatusLive).Find(&rooms).Error
+	return rooms, err
+}
+
+func (r *Repository) GetRoomsForLifecycle(ctx context.Context, now time.Time) ([]*model.Room, error) {
+	var rooms []*model.Room
+	err := r.db.WithContext(ctx).Preload("Schedule").Where("status IN ?", []model.RoomStatus{model.RoomStatusScheduled, model.RoomStatusLive}).Find(&rooms).Error
+	return rooms, err
+}
+
+func (r *Repository) OpenParticipantSession(ctx context.Context, roomID uint, userID string, role model.RoomParticipantRole, joinedAt time.Time) error {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&model.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Create(&model.RoomParticipant{RoomID: roomID, UserID: userID, Role: role, JoinedAt: joinedAt}).Error
+}
+
+func (r *Repository) CloseParticipantSession(ctx context.Context, roomID uint, userID string, leftAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, userID).Update("left_at", leftAt).Error
+}
+
+func (r *Repository) CloseAllParticipantSessions(ctx context.Context, roomID uint, leftAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.RoomParticipant{}).Where("room_id = ? AND left_at IS NULL", roomID).Update("left_at", leftAt).Error
+}
+
+func (r *Repository) GetOpenParticipantSessions(ctx context.Context, roomID uint) ([]*model.RoomParticipant, error) {
+	var sessions []*model.RoomParticipant
+	err := r.db.WithContext(ctx).Where("room_id = ? AND left_at IS NULL", roomID).Find(&sessions).Error
+	return sessions, err
+}
+
+func (r *Repository) GetRoomAttendance(ctx context.Context, roomID uint, userID *string) ([]*model.RoomParticipant, error) {
+	var sessions []*model.RoomParticipant
+	query := r.db.WithContext(ctx).Where("room_id = ?", roomID)
+	if userID != nil {
+		query = query.Where("user_id = ?", *userID)
+	}
+	err := query.Order("joined_at ASC, id ASC").Find(&sessions).Error
+	return sessions, err
+}
+
 func (r *Repository) GetScheduleByID(ctx context.Context, id uint) (*model.Schedule, error) {
 	var schedule model.Schedule
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&schedule).Error; err != nil {
+	if err := r.db.WithContext(ctx).Preload("Room").Where("id = ?", id).First(&schedule).Error; err != nil {
 		return nil, err
 	}
 	return &schedule, nil
@@ -269,6 +360,7 @@ func (r *Repository) GetScheduleByID(ctx context.Context, id uint) (*model.Sched
 func (r *Repository) GetSchedulesByRange(ctx context.Context, classroomID uint, from time.Time, to time.Time) ([]*model.Schedule, error) {
 	var schedules []*model.Schedule
 	if err := r.db.WithContext(ctx).
+		Preload("Room").
 		Where("classroom_id = ? AND starts_at < ? AND COALESCE(ends_at, starts_at) >= ?", classroomID, to, from).
 		Order("starts_at ASC, id ASC").
 		Find(&schedules).Error; err != nil {
@@ -418,4 +510,46 @@ func (r *Repository) DeleteAssignmentSubmission(ctx context.Context, assignmentI
 	return r.db.WithContext(ctx).
 		Where("assignment_id = ? AND student_id = ?", assignmentID, studentID).
 		Delete(&model.AssignmentSubmission{}).Error
+}
+
+func (r *Repository) CreateNotificationOutbox(ctx context.Context, event *model.NotificationOutbox) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "event_key"}}, DoNothing: true}).Create(event).Error
+}
+
+func (r *Repository) ClaimNotificationOutbox(ctx context.Context, now time.Time, limit int) ([]*model.NotificationOutbox, error) {
+	var events []*model.NotificationOutbox
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("processed_at IS NULL AND next_attempt_at <= ?", now).
+			Order("id ASC").Limit(limit).Find(&events).Error; err != nil {
+			return err
+		}
+		if len(events) == 0 {
+			return nil
+		}
+		ids := make([]uint, len(events))
+		for i, event := range events {
+			ids[i] = event.ID
+		}
+		return tx.Model(&model.NotificationOutbox{}).Where("id IN ?", ids).
+			Updates(map[string]any{"next_attempt_at": now.Add(time.Minute)}).Error
+	})
+	return events, err
+}
+
+func (r *Repository) MarkNotificationOutboxProcessed(ctx context.Context, id uint, at time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.NotificationOutbox{}).Where("id = ?", id).
+		Updates(map[string]any{"processed_at": at, "last_error": nil}).Error
+}
+
+func (r *Repository) MarkNotificationOutboxFailed(ctx context.Context, id uint, attempts int, next time.Time, message string) error {
+	return r.db.WithContext(ctx).Model(&model.NotificationOutbox{}).Where("id = ?", id).
+		Updates(map[string]any{"attempts": attempts, "next_attempt_at": next, "last_error": message}).Error
+}
+
+func (r *Repository) CancelNotificationOutbox(ctx context.Context, eventKeyPrefix string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&model.NotificationOutbox{}).
+		Where("(event_key = ? OR event_key LIKE ?) AND processed_at IS NULL", eventKeyPrefix, eventKeyPrefix+":%").
+		Updates(map[string]any{"processed_at": now, "last_error": "cancelled"}).Error
 }

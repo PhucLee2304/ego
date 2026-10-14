@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"ego/platform/httpx"
@@ -12,7 +13,10 @@ import (
 	"ego/services/notifications/internal/repository"
 
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
+
+var ErrDeviceTokenConflict = errors.New("[CONFLICT] Device token belongs to another installation")
 
 type Service interface {
 	GetNotifications(context.Context, string, dto.NotificationsQuery) (*dto.NotificationsResponse, error)
@@ -45,7 +49,13 @@ func (s *service) GetNotifications(ctx context.Context, userID string, query dto
 }
 
 func (s *service) RegisterDeviceToken(ctx context.Context, userID string, req dto.RegisterDeviceTokenRequest) error {
-	return s.repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: userID, Token: req.Token, Platform: req.Platform})
+	err := s.repo.UpsertDeviceToken(ctx, &model.DeviceToken{
+		UserID: userID, DeviceID: req.DeviceID, Token: req.Token, Platform: req.Platform,
+	})
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return ErrDeviceTokenConflict
+	}
+	return err
 }
 
 func (s *service) DeleteDeviceToken(ctx context.Context, userID, token string) error {
@@ -73,7 +83,11 @@ func (s *service) CreateNotifications(ctx context.Context, requests []dto.Create
 	if s.sender == nil {
 		return nil
 	}
-	for _, req := range requests {
+	for i, req := range requests {
+		// OnConflict bỏ qua notification đã tồn tại; chỉ bản ghi vừa insert mới được gửi push.
+		if items[i].ID == 0 {
+			continue
+		}
 		pushRequest := req
 		pushRequest.Data = make(map[string]string, len(req.Data))
 		for key, value := range req.Data {

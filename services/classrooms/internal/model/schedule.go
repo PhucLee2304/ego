@@ -15,4 +15,5 @@ type Schedule struct {
 	Description *string   `gorm:"type:text"`
 	StartsAt    time.Time `gorm:"not null;index"`
 	EndsAt      time.Time `gorm:"not null;index"`
+	Room        *Room     `gorm:"foreignKey:ScheduleID;references:ID"`
 }

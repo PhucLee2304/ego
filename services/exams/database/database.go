@@ -36,6 +36,7 @@ func Migrate(db *gorm.DB) error {
 		&model.History{},
 		&model.OutboxEvent{},
 		&model.ExamAudit{},
+		&model.NotificationOutbox{},
 	)
 	if err != nil {
 		return err

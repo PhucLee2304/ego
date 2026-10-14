@@ -11,9 +11,10 @@ type Room struct {
 	ScheduleID uint     `gorm:"not null;uniqueIndex"`
 	Schedule   Schedule `gorm:"foreignKey:ScheduleID;references:ID;constraint:OnDelete:CASCADE"`
 
-	Status    RoomStatus `gorm:"type:text;not null;default:SCHEDULED;index"`
-	StartedAt *time.Time `gorm:"index"`
-	EndedAt   *time.Time `gorm:"index"`
+	Status          RoomStatus `gorm:"type:text;not null;default:SCHEDULED;index"`
+	StartedAt       *time.Time `gorm:"index"`
+	EndedAt         *time.Time `gorm:"index"`
+	HostAbsentSince *time.Time `gorm:"index"`
 
 	Participants []RoomParticipant `gorm:"foreignKey:RoomID;references:ID;constraint:OnDelete:CASCADE"`
 }

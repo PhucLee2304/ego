@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	notificationsClient "ego/api/gen/go/notifications"
 	tokenClient "ego/api/gen/go/token"
 	"ego/platform/jwt"
 	"ego/platform/logger"
@@ -18,6 +21,7 @@ import (
 	"ego/services/notifications/internal/push"
 	"ego/services/notifications/internal/repository"
 	"ego/services/notifications/internal/service"
+	notificationsRpc "ego/services/notifications/rpc"
 
 	firebasev4 "firebase.google.com/go/v4"
 	"google.golang.org/api/option"
@@ -84,9 +88,23 @@ func main() {
 			logger.Log.Fatal().Err(err).Msg("[NOTIFICATIONS] Server failed")
 		}
 	}()
+
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.GRPCPort))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[NOTIFICATIONS] Failed to listen for gRPC")
+	}
+	grpcServer := grpc.NewServer()
+	notificationsClient.RegisterNotificationServiceServer(grpcServer, notificationsRpc.New(svc))
+	go func() {
+		logger.Log.Info().Str("port", cfg.GRPCPort).Msg("[NOTIFICATIONS] gRPC server started")
+		if err := grpcServer.Serve(lis); err != nil {
+			logger.Log.Fatal().Err(err).Msg("[NOTIFICATIONS] gRPC server failed")
+		}
+	}()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	grpcServer.GracefulStop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)

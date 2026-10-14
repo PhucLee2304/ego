@@ -30,6 +30,7 @@ type NotificationsResponse struct {
 
 type RegisterDeviceTokenRequest struct {
 	Token    string              `json:"token" validate:"required,notblank"`
+	DeviceID string              `json:"deviceId" validate:"required,notblank"`
 	Platform model.TokenPlatform `json:"platform" validate:"required,oneof=WEB ANDROID IOS"`
 }
 

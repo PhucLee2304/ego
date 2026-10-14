@@ -7,6 +7,8 @@ option go_package = "ego/api/gen/go/classrooms";
 import "google/api/annotations.proto";
 
 service ClassroomService {
+  rpc GetClassroomPostAccess(GetClassroomPostAccessRequest)
+      returns (GetClassroomPostAccessResponse);
   rpc ValidateAssignmentAttempt(ValidateAssignmentAttemptRequest)
       returns (ValidateAssignmentAttemptResponse) {
     option (google.api.http) = {
@@ -33,6 +35,21 @@ service ClassroomService {
 
   rpc GetAssignmentSubmissionSyncStatus(GetAssignmentSubmissionSyncStatusRequest)
       returns (GetAssignmentSubmissionSyncStatusResponse);
+}
+
+message GetClassroomPostAccessRequest {
+  uint64 classroom_id = 1;
+  string user_id = 2;
+}
+
+message GetClassroomPostAccessResponse {
+  uint64 classroom_id = 1;
+  string classroom_name = 2;
+  string teacher_id = 3;
+  bool active = 4;
+  bool is_teacher = 5;
+  bool is_approved_member = 6;
+  repeated string approved_student_ids = 7;
 }
 
 message ValidateAssignmentAttemptRequest {

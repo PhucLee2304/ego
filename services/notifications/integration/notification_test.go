@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	notificationsClient "ego/api/gen/go/notifications"
 	"ego/services/notifications/database"
 	"ego/services/notifications/internal/dto"
 	"ego/services/notifications/internal/model"
 	"ego/services/notifications/internal/repository"
 	"ego/services/notifications/internal/service"
+	notificationsRpc "ego/services/notifications/rpc"
 
 	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
@@ -109,29 +111,49 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 func TestDeviceTokenUpsertAndScopedDelete(t *testing.T) {
 	repo, db := testRepository(t)
 	ctx := context.Background()
-	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", Token: "token", Platform: model.TokenPlatformWeb}); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", DeviceID: "browser-a", Token: "token-a", Platform: model.TokenPlatformWeb}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "2", Token: "token", Platform: model.TokenPlatformAndroid}); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", DeviceID: "browser-b", Token: "token-b", Platform: model.TokenPlatformWeb}); err != nil {
 		t.Fatal(err)
 	}
-	var token model.DeviceToken
-	if err := db.First(&token).Error; err != nil {
+	var count int64
+	if err := db.Model(&model.DeviceToken{}).Where("user_id = ? AND platform = ?", "1", model.TokenPlatformWeb).Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
-	if token.UserID != "2" || token.Platform != model.TokenPlatformAndroid {
-		t.Fatalf("upsert failed: %+v", token)
+	if count != 2 {
+		t.Fatalf("multiple web installations were not preserved: %d", count)
 	}
-	if err := repo.DeleteDeviceToken(ctx, "1", "token"); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "2", DeviceID: "browser-c", Token: "token-b", Platform: model.TokenPlatformWeb}); err == nil {
+		t.Fatal("expected a token assigned to another installation to be rejected")
+	}
+	var original model.DeviceToken
+	if err := db.Where("device_id = ?", "browser-b").First(&original).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.First(&token).Error; err != nil {
+	if original.UserID != "1" || original.Token != "token-b" {
+		t.Fatalf("conflicting registration changed the original installation: %+v", original)
+	}
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "2", DeviceID: "browser-a", Token: "token-c", Platform: model.TokenPlatformWeb}); err != nil {
+		t.Fatal(err)
+	}
+	var saved model.DeviceToken
+	if err := db.Where("device_id = ?", "browser-a").First(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.UserID != "2" || saved.Token != "token-c" {
+		t.Fatalf("installation was not transferred to the current user: %+v", saved)
+	}
+	if err := repo.DeleteDeviceToken(ctx, "1", "token-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("token = ?", "token-c").First(&model.DeviceToken{}).Error; err != nil {
 		t.Fatalf("wrong user deleted token: %v", err)
 	}
-	if err := repo.DeleteDeviceToken(ctx, "2", "token"); err != nil {
+	if err := repo.DeleteDeviceToken(ctx, "2", "token-c"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.First(&token).Error; err != gorm.ErrRecordNotFound {
+	if err := db.Where("token = ?", "token-c").First(&model.DeviceToken{}).Error; err != gorm.ErrRecordNotFound {
 		t.Fatalf("token was not hard deleted: %v", err)
 	}
 }
@@ -139,7 +161,7 @@ func TestDeviceTokenUpsertAndScopedDelete(t *testing.T) {
 func TestCreateNotificationCommitsBeforeBestEffortPush(t *testing.T) {
 	repo, db := testRepository(t)
 	ctx := context.Background()
-	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", Token: "invalid-token", Platform: model.TokenPlatformWeb}); err != nil {
+	if err := repo.UpsertDeviceToken(ctx, &model.DeviceToken{UserID: "1", DeviceID: "browser", Token: "invalid-token", Platform: model.TokenPlatformWeb}); err != nil {
 		t.Fatal(err)
 	}
 	sender := &fakeSender{called: make(chan struct{}), invalid: []string{"invalid-token"}}
@@ -173,5 +195,47 @@ func TestCreateNotificationCommitsBeforeBestEffortPush(t *testing.T) {
 			t.Fatal("invalid token was not deleted")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCreateNotificationsIsIdempotent(t *testing.T) {
+	repo, db := testRepository(t)
+	ctx := context.Background()
+	item := &model.Notification{UserID: "1", Title: "Once", Body: "Body", SourceService: "CLASSROOMS", IdempotencyKey: "assignment:1:user:1"}
+	if err := repo.CreateNotifications(ctx, []*model.Notification{item}); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := &model.Notification{UserID: "1", Title: "Duplicate", Body: "Body", SourceService: "CLASSROOMS", IdempotencyKey: item.IdempotencyKey}
+	if err := repo.CreateNotifications(ctx, []*model.Notification{duplicate}); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Where("idempotency_key = ?", item.IdempotencyKey).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one notification, got %d", count)
+	}
+}
+
+func TestCreateNotificationsRPCCommitsAndDeduplicates(t *testing.T) {
+	repo, db := testRepository(t)
+	server := notificationsRpc.New(service.New(repo, nil))
+	request := &notificationsClient.CreateNotificationsRequest{
+		Recipients: []string{"1", "2"}, Title: "Assignment", Body: "A new assignment is available",
+		SourceService: "CLASSROOMS", Data: map[string]string{"id": "9", "type": "ASSIGNMENT"}, IdempotencyKey: "assignment:9:created",
+	}
+	if _, err := server.CreateNotifications(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.CreateNotifications(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Where("idempotency_key LIKE ?", "assignment:9:created:user:%").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected one committed notification per recipient, got %d", count)
 	}
 }

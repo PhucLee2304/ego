@@ -36,6 +36,9 @@ service StorageService {
       delete: "/v1/storage/folder/{folder}"
     };
   }
+
+  rpc GetObjectMetadata(GetObjectMetadataRequest) returns (GetObjectMetadataResponse);
+  rpc DeleteObject(DeleteObjectRequest) returns (DeleteObjectResponse);
 }
 
 message GeneratePresignedUploadURLRequest {
@@ -73,3 +76,20 @@ message DeleteFolderRequest {
 message DeleteFolderResponse {
   uint32 deleted_count = 1;
 }
+
+message GetObjectMetadataRequest {
+  repeated string folders = 1;
+  string file_name = 2;
+}
+
+message GetObjectMetadataResponse {
+  int64 size = 1;
+  string content_type = 2;
+}
+
+message DeleteObjectRequest {
+  repeated string folders = 1;
+  string file_name = 2;
+}
+
+message DeleteObjectResponse {}
