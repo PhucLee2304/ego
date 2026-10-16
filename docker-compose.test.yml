@@ -1,4 +1,27 @@
 services:
+  livekit-test:
+    image: livekit/livekit-server:v1.9.10
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses:
+          - "0.0.0.0"
+        rtc:
+          tcp_port: 7881
+          port_range_start: 51200
+          port_range_end: 51200
+          use_external_ip: false
+      LIVEKIT_KEYS: "devkey: local-development-secret-key-000001"
+    ports:
+      - "17880:7880"
+      - "17881:7881"
+      - "51200:51200/udp"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:7880/ >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
   exams-test-db:
     image: postgres:17-alpine
     environment:

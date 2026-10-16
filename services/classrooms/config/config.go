@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 type AppConfig struct {
@@ -26,6 +27,7 @@ type AppConfig struct {
 	LiveKitPublicURL         string
 	LiveKitAPIKey            string
 	LiveKitAPISecret         string
+	LiveKitJoinTokenTTL      time.Duration
 
 	MaxStudentsPerClass int
 }
@@ -50,6 +52,7 @@ func LoadAppConfig() (*AppConfig, error) {
 		LiveKitPublicURL:         getEnv("LIVEKIT_PUBLIC_URL", "ws://localhost:7880"),
 		LiveKitAPIKey:            getEnv("LIVEKIT_API_KEY", "devkey"),
 		LiveKitAPISecret:         getEnv("LIVEKIT_API_SECRET", "local-development-secret-key-000001"),
+		LiveKitJoinTokenTTL:      getDurationEnv("LIVEKIT_JOIN_TOKEN_TTL", 5*time.Minute),
 
 		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
 	}
@@ -58,6 +61,18 @@ func LoadAppConfig() (*AppConfig, error) {
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 
 	return config, nil
+}
+
+func getDurationEnv(key string, fallback time.Duration) time.Duration {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func getEnv(key, fallback string) string {

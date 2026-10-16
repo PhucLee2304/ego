@@ -138,7 +138,7 @@ func main() {
 
 	service := service.New(repo, appConfig, usersServiceClient, examsServiceClient)
 	service.SetNotificationClient(notificationsServiceClient)
-	service.SetMediaClient(media.New(appConfig.LiveKitURL, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret))
+	service.SetMediaClient(media.New(appConfig.LiveKitURL, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret, appConfig.LiveKitJoinTokenTTL))
 
 	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
 	workers.StartRoomLifecycle(appCtx, service, 15*time.Second)

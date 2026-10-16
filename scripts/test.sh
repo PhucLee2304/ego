@@ -11,5 +11,8 @@ export EXAMS_TEST_DSN='host=localhost user=test password=test dbname=exams_test 
 export CLASSROOMS_TEST_DSN='host=localhost user=test password=test dbname=classrooms_test port=55436 sslmode=disable'
 export NOTIFICATIONS_TEST_DSN='host=localhost user=test password=test dbname=notifications_test port=55437 sslmode=disable'
 export POSTS_TEST_DSN='host=localhost user=test password=test dbname=posts_test port=55438 sslmode=disable'
+export LIVEKIT_TEST_URL='ws://localhost:17880'
+export LIVEKIT_TEST_API_KEY='devkey'
+export LIVEKIT_TEST_API_SECRET='local-development-secret-key-000001'
 go test ./...
 go test -tags=integration ./services/exams/integration/... ./services/classrooms/integration/... ./services/notifications/integration/... ./services/posts/integration/...

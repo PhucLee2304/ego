@@ -240,6 +240,7 @@ services:
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_JOIN_TOKEN_TTL: ${LIVEKIT_JOIN_TOKEN_TTL}
     depends_on:
       classrooms-db:
         condition: service_healthy

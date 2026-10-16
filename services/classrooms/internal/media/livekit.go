@@ -22,10 +22,11 @@ type LiveKitClient struct {
 	rooms     *lksdk.RoomServiceClient
 	apiKey    string
 	apiSecret string
+	tokenTTL  time.Duration
 }
 
-func New(url, apiKey, apiSecret string) *LiveKitClient {
-	return &LiveKitClient{rooms: lksdk.NewRoomServiceClient(url, apiKey, apiSecret), apiKey: apiKey, apiSecret: apiSecret}
+func New(url, apiKey, apiSecret string, tokenTTL time.Duration) *LiveKitClient {
+	return &LiveKitClient{rooms: lksdk.NewRoomServiceClient(url, apiKey, apiSecret), apiKey: apiKey, apiSecret: apiSecret, tokenTTL: tokenTTL}
 }
 
 func (c *LiveKitClient) CreateRoom(ctx context.Context, name string) error {
@@ -58,7 +59,7 @@ func (c *LiveKitClient) ListParticipants(ctx context.Context, room string) ([]st
 func (c *LiveKitClient) CreateJoinToken(room, identity, name string, host bool) (string, error) {
 	grant := &auth.VideoGrant{RoomJoin: true, Room: room, CanPublish: boolPtr(true), CanSubscribe: boolPtr(true), CanPublishData: boolPtr(false)}
 	return auth.NewAccessToken(c.apiKey, c.apiSecret).SetIdentity(identity).SetName(name).
-		SetValidFor(5 * time.Minute).SetVideoGrant(grant).SetMetadata(map[bool]string{true: "HOST", false: "PARTICIPANT"}[host]).ToJWT()
+		SetValidFor(c.tokenTTL).SetVideoGrant(grant).SetMetadata(map[bool]string{true: "HOST", false: "PARTICIPANT"}[host]).ToJWT()
 }
 
 func boolPtr(value bool) *bool { return &value }
