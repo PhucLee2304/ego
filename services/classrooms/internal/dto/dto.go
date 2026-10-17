@@ -249,6 +249,14 @@ type UpdateHandRequest struct {
 	Raised *bool `json:"raised" validate:"required"`
 }
 
+type MutedParticipantsResponse struct {
+	UserIDs []string `json:"userIds"`
+}
+
+type RemoveParticipantRequest struct {
+	Reason *string `json:"reason,omitempty" validate:"omitempty,max=500"`
+}
+
 type LoweredHandsResponse struct {
 	UserIDs []string `json:"userIds"`
 }

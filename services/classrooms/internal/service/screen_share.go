@@ -83,6 +83,9 @@ func (s *service) RequestScreenShare(ctx context.Context, userID string, classro
 	if err != nil {
 		return nil, err
 	}
+	if state.RemovedAt != nil {
+		return nil, ErrParticipantRemoved
+	}
 	// Gửi lại khi đang chờ hoặc đã được duyệt không tạo yêu cầu mới.
 	if state.ScreenShareRequestedAt == nil {
 		now := time.Now()
@@ -121,7 +124,7 @@ func (s *service) ApproveScreenShare(ctx context.Context, teacherID string, clas
 	}
 	// Cấp quyền ở LiveKit trước khi lưu: học sinh chỉ publish được screen
 	// share khi server cho phép, không dựa vào việc client tự kiểm tra.
-	if err := s.mediaClient.SetScreenSharePermission(ctx, media.RoomName(room.ID), userID, true); err != nil {
+	if err := s.mediaClient.SetPublishPermissions(ctx, media.RoomName(room.ID), userID, participantPermissions(state, true)); err != nil {
 		return nil, mediaError(err)
 	}
 	now := time.Now()
@@ -231,7 +234,11 @@ func (s *service) HandleScreenShareUnpublished(ctx context.Context, roomName, us
 		return nil
 	}
 	if userID != room.Schedule.Classroom.TeacherID && s.mediaClient != nil {
-		if err := s.mediaClient.SetScreenSharePermission(ctx, media.RoomName(room.ID), userID, false); err != nil && !errors.Is(err, media.ErrParticipantNotFound) {
+		state, err := s.repo.FindRoomParticipantState(ctx, room.ID, userID)
+		if err != nil {
+			return err
+		}
+		if err := s.mediaClient.SetPublishPermissions(ctx, media.RoomName(room.ID), userID, participantPermissions(state, false)); err != nil && !errors.Is(err, media.ErrParticipantNotFound) {
 			logger.Log.Warn().Err(err).Uint("room_id", room.ID).Str("user_id", userID).Msg("[ROOM] Failed to revoke screen share permission")
 		}
 	}
@@ -283,7 +290,7 @@ func (s *service) stopScreenShareMedia(ctx context.Context, room *model.Room, us
 	}
 	roomName := media.RoomName(room.ID)
 	// Participant đã rời phòng thì không còn track hay quyền để thu hồi.
-	if err := s.mediaClient.StopScreenShare(ctx, roomName, userID); err != nil {
+	if err := s.mediaClient.MuteTracks(ctx, roomName, userID, media.SourceScreenShare); err != nil {
 		if errors.Is(err, media.ErrParticipantNotFound) {
 			return nil
 		}
@@ -292,7 +299,12 @@ func (s *service) stopScreenShareMedia(ctx context.Context, room *model.Room, us
 	if userID == room.Schedule.Classroom.TeacherID {
 		return nil
 	}
-	if err := s.mediaClient.SetScreenSharePermission(ctx, roomName, userID, false); err != nil && !errors.Is(err, media.ErrParticipantNotFound) {
+	// Thu hồi screen share nhưng giữ nguyên quyền mic/camera hiện tại.
+	state, err := s.repo.FindRoomParticipantState(ctx, room.ID, userID)
+	if err != nil {
+		return err
+	}
+	if err := s.mediaClient.SetPublishPermissions(ctx, roomName, userID, participantPermissions(state, false)); err != nil && !errors.Is(err, media.ErrParticipantNotFound) {
 		return mediaError(err)
 	}
 	return nil

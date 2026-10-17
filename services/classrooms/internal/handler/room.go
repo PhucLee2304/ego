@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -36,7 +38,7 @@ func writeRoomError(w http.ResponseWriter, err error) {
 		httpx.Error(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
-	case errors.Is(err, service.ErrScreenShareNotApproved):
+	case errors.Is(err, service.ErrScreenShareNotApproved), errors.Is(err, service.ErrParticipantRemoved):
 		httpx.Error(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, service.ErrRoomLive), errors.Is(err, service.ErrScreenShareNotRequested), errors.Is(err, service.ErrParticipantNotConnected):
 		httpx.Error(w, http.StatusConflict, err.Error())
@@ -237,6 +239,71 @@ func (h *handler) LowerHands(w http.ResponseWriter, r *http.Request) {
 		target = &value
 	}
 	response, err := h.service.LowerHands(r.Context(), userID, classroomID, id, target)
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+type participantModeration func(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+
+func (h *handler) moderateParticipant(action func(service.Service) participantModeration) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, classroomID, id, ok := roomRequest(w, r)
+		if !ok {
+			return
+		}
+		response, err := action(h.service)(r.Context(), userID, classroomID, id, r.PathValue("userId"))
+		if err != nil {
+			writeRoomError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, response)
+	}
+}
+
+func (h *handler) MuteParticipant(w http.ResponseWriter, r *http.Request) {
+	h.moderateParticipant(func(s service.Service) participantModeration { return s.MuteParticipant })(w, r)
+}
+
+func (h *handler) AllowParticipantMicrophone(w http.ResponseWriter, r *http.Request) {
+	h.moderateParticipant(func(s service.Service) participantModeration { return s.AllowParticipantMicrophone })(w, r)
+}
+
+func (h *handler) DisableParticipantCamera(w http.ResponseWriter, r *http.Request) {
+	h.moderateParticipant(func(s service.Service) participantModeration { return s.DisableParticipantCamera })(w, r)
+}
+
+func (h *handler) AllowParticipantCamera(w http.ResponseWriter, r *http.Request) {
+	h.moderateParticipant(func(s service.Service) participantModeration { return s.AllowParticipantCamera })(w, r)
+}
+
+func (h *handler) MuteAllParticipants(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := h.service.MuteAllParticipants(r.Context(), userID, classroomID, id)
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+// RemoveParticipant nhận body tùy chọn {"reason": "..."}; body rỗng hợp lệ.
+func (h *handler) RemoveParticipant(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	var req dto.RemoveParticipantRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	response, err := h.service.RemoveParticipant(r.Context(), userID, classroomID, id, r.PathValue("userId"), req.Reason)
 	if err != nil {
 		writeRoomError(w, err)
 		return

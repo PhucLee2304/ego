@@ -153,15 +153,25 @@ func (s *service) JoinRoom(ctx context.Context, userID string, roomID uint) (*dt
 	if room.Status == model.RoomStatusEnded {
 		return nil, ErrRoomEnded
 	}
-	if _, err := s.repo.GetOrCreateRoomParticipantState(ctx, room.ID, userID); err != nil {
+	state, err := s.repo.GetOrCreateRoomParticipantState(ctx, room.ID, userID)
+	if err != nil {
 		return nil, err
+	}
+	// Học sinh bị giáo viên xóa khỏi phòng không được vào lại cho đến khi room
+	// kết thúc; state (cùng RemovedAt) chỉ bị xóa lúc đó.
+	if state.RemovedAt != nil {
+		return nil, ErrParticipantRemoved
+	}
+	permissions := media.HostPermissions()
+	if !isHost {
+		permissions = participantPermissions(state, false)
 	}
 	name := userID
 	users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{userID}})
 	if err == nil && len(users.Users) > 0 {
 		name = users.Users[0].Name
 	}
-	token, err := s.mediaClient.CreateJoinToken(media.RoomName(room.ID), userID, name, isHost)
+	token, err := s.mediaClient.CreateJoinToken(media.RoomName(room.ID), userID, name, isHost, permissions)
 	if err != nil {
 		return nil, errors.Join(ErrMediaUnavailable, err)
 	}
@@ -232,8 +242,7 @@ func (s *service) HandleParticipantJoined(ctx context.Context, roomName, userID 
 	role := model.RoomParticipantRoleParticipant
 	if userID == room.Schedule.Classroom.TeacherID {
 		role = model.RoomParticipantRoleHost
-		room.HostAbsentSince = nil
-		if err := s.repo.UpdateRoom(ctx, room); err != nil {
+		if err := s.repo.SetRoomHostAbsentSince(ctx, room.ID, nil); err != nil {
 			return err
 		}
 	}
@@ -255,9 +264,8 @@ func (s *service) HandleParticipantLeft(ctx context.Context, roomName, userID st
 	} else if changed {
 		s.publishRoomActivity(room, classroomsSocket.EventScreenShareStopped, userID)
 	}
-	if userID == room.Schedule.Classroom.TeacherID && room.Status == model.RoomStatusLive {
-		room.HostAbsentSince = &leftAt
-		return s.repo.UpdateRoom(ctx, room)
+	if userID == room.Schedule.Classroom.TeacherID {
+		return s.repo.SetRoomHostAbsentSince(ctx, room.ID, &leftAt)
 	}
 	return nil
 }

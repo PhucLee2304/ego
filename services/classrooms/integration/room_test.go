@@ -34,6 +34,11 @@ type fakeRoomMedia struct {
 	stopped               []string
 	screenSharePermission map[string]bool
 	disconnected          map[string]bool
+	// permissions là quyền publish hiện tại của phiên đang kết nối, tokens là
+	// quyền ghi trong join token gần nhất của mỗi identity.
+	permissions map[string]media.PublishPermissions
+	tokens      map[string]media.PublishPermissions
+	muted       []string
 }
 
 func (f *fakeRoomMedia) CreateRoom(_ context.Context, room string) error {
@@ -49,6 +54,9 @@ func (f *fakeRoomMedia) DeleteRoom(_ context.Context, room string) error {
 }
 
 func (f *fakeRoomMedia) RemoveParticipant(_ context.Context, room, identity string) error {
+	if f.disconnected[identity] {
+		return media.ErrParticipantNotFound
+	}
 	f.removed = append(f.removed, room+":"+identity)
 	return nil
 }
@@ -62,8 +70,12 @@ func (f *fakeRoomMedia) ListParticipants(_ context.Context, room string) ([]stri
 	return f.participants[room], nil
 }
 
-func (f *fakeRoomMedia) CreateJoinToken(room, identity, _ string, _ bool) (string, error) {
+func (f *fakeRoomMedia) CreateJoinToken(room, identity, _ string, _ bool, permissions media.PublishPermissions) (string, error) {
 	f.tokenCalls++
+	if f.tokens == nil {
+		f.tokens = map[string]media.PublishPermissions{}
+	}
+	f.tokens[identity] = permissions
 	return room + ":" + identity, nil
 }
 
@@ -71,31 +83,41 @@ func (f *fakeRoomMedia) ListScreenSharers(_ context.Context, room string) ([]str
 	return append([]string(nil), f.sharers[room]...), nil
 }
 
-func (f *fakeRoomMedia) StopScreenShare(_ context.Context, room, identity string) error {
+func (f *fakeRoomMedia) MuteTracks(_ context.Context, room, identity string, sources ...media.Source) error {
 	if f.disconnected[identity] {
 		return media.ErrParticipantNotFound
 	}
-	f.stopped = append(f.stopped, identity)
-	remaining := f.sharers[room][:0]
-	for _, sharer := range f.sharers[room] {
-		if sharer != identity {
-			remaining = append(remaining, sharer)
+	for _, source := range sources {
+		f.muted = append(f.muted, fmt.Sprintf("%s:%d", identity, source))
+		if source != media.SourceScreenShare {
+			continue
 		}
-	}
-	if f.sharers != nil {
-		f.sharers[room] = remaining
+		f.stopped = append(f.stopped, identity)
+		remaining := f.sharers[room][:0]
+		for _, sharer := range f.sharers[room] {
+			if sharer != identity {
+				remaining = append(remaining, sharer)
+			}
+		}
+		if f.sharers != nil {
+			f.sharers[room] = remaining
+		}
 	}
 	return nil
 }
 
-func (f *fakeRoomMedia) SetScreenSharePermission(_ context.Context, _ string, identity string, allowed bool) error {
+func (f *fakeRoomMedia) SetPublishPermissions(_ context.Context, _ string, identity string, permissions media.PublishPermissions) error {
 	if f.disconnected[identity] {
 		return media.ErrParticipantNotFound
 	}
 	if f.screenSharePermission == nil {
 		f.screenSharePermission = map[string]bool{}
 	}
-	f.screenSharePermission[identity] = allowed
+	if f.permissions == nil {
+		f.permissions = map[string]media.PublishPermissions{}
+	}
+	f.screenSharePermission[identity] = permissions.ScreenShare
+	f.permissions[identity] = permissions
 	return nil
 }
 

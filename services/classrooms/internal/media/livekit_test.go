@@ -25,7 +25,7 @@ func TestRoomName(t *testing.T) {
 func TestCreateJoinToken(t *testing.T) {
 	client := New("http://livekit:7880", testAPIKey, testAPISecret, testTokenTTL)
 	issuedAt := time.Now()
-	token, err := client.CreateJoinToken("classroom-room-7", "student-1", "Student One", false)
+	token, err := client.CreateJoinToken("classroom-room-7", "student-1", "Student One", false, PublishPermissions{Camera: true, Microphone: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,11 @@ func TestCreateJoinTokenLimitsScreenShareToHost(t *testing.T) {
 		{identity: "teacher", host: true, screenShare: true},
 		{identity: "student-1", host: false, screenShare: false},
 	} {
-		token, err := client.CreateJoinToken("classroom-room-7", tc.identity, tc.identity, tc.host)
+		permissions := PublishPermissions{Camera: true, Microphone: true}
+		if tc.host {
+			permissions = HostPermissions()
+		}
+		token, err := client.CreateJoinToken("classroom-room-7", tc.identity, tc.identity, tc.host, permissions)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,6 +91,39 @@ func TestCreateJoinTokenLimitsScreenShareToHost(t *testing.T) {
 	}
 }
 
+func TestCreateJoinTokenFollowsParticipantPermissions(t *testing.T) {
+	client := New("http://livekit:7880", testAPIKey, testAPISecret, testTokenTTL)
+	grantFor := func(permissions PublishPermissions) *auth.VideoGrant {
+		t.Helper()
+		token, err := client.CreateJoinToken("classroom-room-7", "student-1", "Student", false, permissions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier, err := auth.ParseAPIToken(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, grants, err := verifier.Verify(testAPISecret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return grants.Video
+	}
+
+	muted := grantFor(PublishPermissions{Camera: true})
+	if muted.GetCanPublishSource(livekit.TrackSource_MICROPHONE) || !muted.GetCanPublishSource(livekit.TrackSource_CAMERA) {
+		t.Fatalf("muted student grant = %#v", muted.CanPublishSources)
+	}
+	// LiveKit hiểu danh sách nguồn rỗng là mọi nguồn, nên phải tắt CanPublish.
+	none := grantFor(PublishPermissions{})
+	if none.GetCanPublish() || none.GetCanPublishSource(livekit.TrackSource_MICROPHONE) || none.GetCanPublishSource(livekit.TrackSource_CAMERA) {
+		t.Fatalf("a student without devices must not publish: canPublish=%v sources=%#v", none.GetCanPublish(), none.CanPublishSources)
+	}
+	if !none.GetCanPublishData() || !none.GetCanSubscribe() {
+		t.Fatal("a student without devices must still subscribe and send reactions")
+	}
+}
+
 func TestCreateJoinTokenRejectsExpiredAndTamperedTokens(t *testing.T) {
 	expired, err := signedToken(jwt.Claims{
 		Issuer:    testAPIKey,
@@ -106,7 +143,7 @@ func TestCreateJoinTokenRejectsExpiredAndTamperedTokens(t *testing.T) {
 	}
 
 	client := New("http://livekit:7880", testAPIKey, testAPISecret, testTokenTTL)
-	valid, err := client.CreateJoinToken("classroom-room-7", "student-1", "Student One", false)
+	valid, err := client.CreateJoinToken("classroom-room-7", "student-1", "Student One", false, PublishPermissions{Camera: true, Microphone: true})
 	if err != nil {
 		t.Fatal(err)
 	}

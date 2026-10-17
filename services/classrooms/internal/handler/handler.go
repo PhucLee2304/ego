@@ -58,6 +58,12 @@ type Handler interface {
 	StopScreenShare(w http.ResponseWriter, r *http.Request)
 	SetHandRaised(w http.ResponseWriter, r *http.Request)
 	LowerHands(w http.ResponseWriter, r *http.Request)
+	MuteParticipant(w http.ResponseWriter, r *http.Request)
+	AllowParticipantMicrophone(w http.ResponseWriter, r *http.Request)
+	DisableParticipantCamera(w http.ResponseWriter, r *http.Request)
+	AllowParticipantCamera(w http.ResponseWriter, r *http.Request)
+	MuteAllParticipants(w http.ResponseWriter, r *http.Request)
+	RemoveParticipant(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -114,6 +120,12 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("PATCH /classrooms/{id}/rooms/{roomId}/hand", mw.Handle(h.SetHandRaised))
 	mux.HandleFunc("DELETE /classrooms/{id}/rooms/{roomId}/hands", mw.Handle(h.LowerHands))
 	mux.HandleFunc("DELETE /classrooms/{id}/rooms/{roomId}/hands/{userId}", mw.Handle(h.LowerHands))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/mute-all", mw.Handle(h.MuteAllParticipants))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/mute", mw.Handle(h.MuteParticipant))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/allow-microphone", mw.Handle(h.AllowParticipantMicrophone))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/disable-camera", mw.Handle(h.DisableParticipantCamera))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/allow-camera", mw.Handle(h.AllowParticipantCamera))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/remove", mw.Handle(h.RemoveParticipant))
 }
 
 func (h *handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {

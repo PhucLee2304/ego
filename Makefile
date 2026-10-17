@@ -61,6 +61,7 @@ endif
 build:
 	docker compose stop $(filter-out $@,$(MAKECMDGOALS))
 	docker compose up -d --build $(filter-out $@,$(MAKECMDGOALS))
+	docker compose restart nginx
 
 %:
 	@:

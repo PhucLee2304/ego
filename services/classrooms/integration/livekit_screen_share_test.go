@@ -35,7 +35,7 @@ func TestLiveKitScreenSharePermissionUpdates(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.DeleteRoom(context.Background(), roomName) })
 
-	token, err := client.CreateJoinToken(roomName, "student-1", "Student One", false)
+	token, err := client.CreateJoinToken(roomName, "student-1", "Student One", false, media.PublishPermissions{Camera: true, Microphone: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestLiveKitScreenSharePermissionUpdates(t *testing.T) {
 	if canShare() {
 		t.Fatal("a student token must not allow screen sharing before approval")
 	}
-	if err := client.SetScreenSharePermission(ctx, roomName, "student-1", true); err != nil {
+	if err := client.SetPublishPermissions(ctx, roomName, "student-1", media.PublishPermissions{Camera: true, Microphone: true, ScreenShare: true}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor("approval to reach the participant", canShare)
@@ -77,18 +77,41 @@ func TestLiveKitScreenSharePermissionUpdates(t *testing.T) {
 	if sharers, err := client.ListScreenSharers(ctx, roomName); err != nil || len(sharers) != 0 {
 		t.Fatalf("sharers = %v, err=%v", sharers, err)
 	}
-	if err := client.StopScreenShare(ctx, roomName, "student-1"); err != nil {
+	if err := client.MuteTracks(ctx, roomName, "student-1", media.SourceScreenShare); err != nil {
 		t.Fatalf("stopping a participant without a screen share must succeed: %v", err)
 	}
-	if err := client.SetScreenSharePermission(ctx, roomName, "student-1", false); err != nil {
+	if err := client.SetPublishPermissions(ctx, roomName, "student-1", media.PublishPermissions{Camera: true, Microphone: true}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor("revocation to reach the participant", func() bool { return !canShare() })
 
-	if err := client.SetScreenSharePermission(ctx, roomName, "ghost", true); !errors.Is(err, media.ErrParticipantNotFound) {
+	// Tắt cả mic lẫn camera: không được để LiveKit hiểu thành "mọi nguồn".
+	if err := client.SetPublishPermissions(ctx, roomName, "student-1", media.PublishPermissions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("all publishing to be revoked", func() bool {
+		permission := room.LocalParticipant.Permissions()
+		return !permission.GetCanPublish() && permission.GetCanSubscribe() && permission.GetCanPublishData()
+	})
+
+	if err := client.RemoveParticipant(ctx, roomName, "student-1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("removed participant to leave the room", func() bool {
+		identities, err := client.ListParticipants(ctx, roomName)
+		return err == nil && !slices.Contains(identities, "student-1")
+	})
+	if err := client.RemoveParticipant(ctx, roomName, "student-1"); !errors.Is(err, media.ErrParticipantNotFound) {
+		t.Fatalf("removing a participant twice = %v, want ErrParticipantNotFound", err)
+	}
+
+	if err := client.SetPublishPermissions(ctx, roomName, "ghost", media.HostPermissions()); !errors.Is(err, media.ErrParticipantNotFound) {
 		t.Fatalf("permission for a missing participant = %v, want ErrParticipantNotFound", err)
 	}
-	if err := client.StopScreenShare(ctx, roomName, "ghost"); !errors.Is(err, media.ErrParticipantNotFound) {
+	if err := client.DeleteRoom(ctx, "missing-"+roomName); err != nil {
+		t.Fatalf("deleting a room that no longer exists must succeed: %v", err)
+	}
+	if err := client.MuteTracks(ctx, roomName, "ghost", media.SourceScreenShare); !errors.Is(err, media.ErrParticipantNotFound) {
 		t.Fatalf("stop for a missing participant = %v, want ErrParticipantNotFound", err)
 	}
 }

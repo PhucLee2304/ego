@@ -356,6 +356,15 @@ func (r *Repository) GetRoomByName(ctx context.Context, name string) (*model.Roo
 	return r.GetRoomByID(ctx, id)
 }
 
+// SetRoomHostAbsentSince chỉ ghi cột host_absent_since khi room còn LIVE.
+// Webhook join/leave chạy song song với EndRoom nên không được Save cả dòng:
+// bản ghi nạp trước khi room kết thúc sẽ ghi đè status ENDED thành LIVE.
+func (r *Repository) SetRoomHostAbsentSince(ctx context.Context, roomID uint, absentSince *time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.Room{}).
+		Where("id = ? AND status = ?", roomID, model.RoomStatusLive).
+		Update("host_absent_since", absentSince).Error
+}
+
 func (r *Repository) UpdateRoom(ctx context.Context, room *model.Room) error {
 	return r.db.WithContext(ctx).Save(room).Error
 }
