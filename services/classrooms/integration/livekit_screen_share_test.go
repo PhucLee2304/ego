@@ -70,8 +70,8 @@ func TestLiveKitScreenSharePermissionUpdates(t *testing.T) {
 	if !slices.Contains(sources, livekit.TrackSource_CAMERA) || !slices.Contains(sources, livekit.TrackSource_MICROPHONE) {
 		t.Fatalf("approval must keep camera and microphone: %v", sources)
 	}
-	if room.LocalParticipant.Permissions().GetCanPublishData() {
-		t.Fatal("approval must not grant data publishing")
+	if !room.LocalParticipant.Permissions().GetCanPublishData() {
+		t.Fatal("approval must keep data publishing for reactions")
 	}
 
 	if sharers, err := client.ListScreenSharers(ctx, roomName); err != nil || len(sharers) != 0 {

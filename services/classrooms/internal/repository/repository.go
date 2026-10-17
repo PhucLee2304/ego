@@ -292,6 +292,26 @@ func (r *Repository) UpdateRoomParticipantState(ctx context.Context, state *mode
 	return r.db.WithContext(ctx).Save(state).Error
 }
 
+// LowerRoomHands hạ tay trong room (chỉ [userID] nếu khác nil) và trả về user
+// đã được hạ theo thứ tự giơ tay.
+func (r *Repository) LowerRoomHands(ctx context.Context, roomID uint, userID *string) ([]string, error) {
+	lowered := []string{}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&model.RoomParticipantState{}).Where("room_id = ? AND hand_raised_at IS NOT NULL", roomID)
+		if userID != nil {
+			query = query.Where("user_id = ?", *userID)
+		}
+		if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Order("hand_raised_at ASC").Pluck("user_id", &lowered).Error; err != nil {
+			return err
+		}
+		if len(lowered) == 0 {
+			return nil
+		}
+		return tx.Model(&model.RoomParticipantState{}).Where("room_id = ? AND user_id IN ?", roomID, lowered).Update("hand_raised_at", nil).Error
+	})
+	return lowered, err
+}
+
 func (r *Repository) GetRoomParticipantStates(ctx context.Context, roomID uint) ([]*model.RoomParticipantState, error) {
 	var states []*model.RoomParticipantState
 	err := r.db.WithContext(ctx).Where("room_id = ?", roomID).Order("user_id ASC").Find(&states).Error

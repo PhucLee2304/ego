@@ -56,6 +56,8 @@ type Handler interface {
 	RejectScreenShare(w http.ResponseWriter, r *http.Request)
 	StartScreenShare(w http.ResponseWriter, r *http.Request)
 	StopScreenShare(w http.ResponseWriter, r *http.Request)
+	SetHandRaised(w http.ResponseWriter, r *http.Request)
+	LowerHands(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -109,6 +111,9 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/approve", mw.Handle(h.ApproveScreenShare))
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/reject", mw.Handle(h.RejectScreenShare))
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/stop", mw.Handle(h.StopScreenShare))
+	mux.HandleFunc("PATCH /classrooms/{id}/rooms/{roomId}/hand", mw.Handle(h.SetHandRaised))
+	mux.HandleFunc("DELETE /classrooms/{id}/rooms/{roomId}/hands", mw.Handle(h.LowerHands))
+	mux.HandleFunc("DELETE /classrooms/{id}/rooms/{roomId}/hands/{userId}", mw.Handle(h.LowerHands))
 }
 
 func (h *handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {

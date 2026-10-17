@@ -45,7 +45,7 @@ func TestCreateJoinToken(t *testing.T) {
 		t.Fatalf("unexpected participant claims: %#v", grants)
 	}
 	if grants.Video == nil || !grants.Video.RoomJoin || grants.Video.Room != "classroom-room-7" ||
-		!grants.Video.GetCanPublish() || !grants.Video.GetCanSubscribe() || grants.Video.GetCanPublishData() {
+		!grants.Video.GetCanPublish() || !grants.Video.GetCanSubscribe() || !grants.Video.GetCanPublishData() {
 		t.Fatalf("unexpected video grant: %#v", grants.Video)
 	}
 	validUntil := claims.Expiry.Time()

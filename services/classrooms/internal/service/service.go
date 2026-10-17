@@ -68,6 +68,8 @@ type Service interface {
 	HandleParticipantJoined(ctx context.Context, roomName, userID string, joinedAt time.Time) error
 	HandleParticipantLeft(ctx context.Context, roomName, userID string, leftAt time.Time) error
 	RequestScreenShare(ctx context.Context, userID string, classroomID, roomID uint) (*dto.RoomParticipantStateResponse, error)
+	SetHandRaised(ctx context.Context, userID string, classroomID, roomID uint, raised bool) (*dto.RoomParticipantStateResponse, error)
+	LowerHands(ctx context.Context, teacherID string, classroomID, roomID uint, userID *string) (*dto.LoweredHandsResponse, error)
 	ApproveScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
 	RejectScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
 	StartScreenShare(ctx context.Context, userID string, classroomID, roomID uint) error

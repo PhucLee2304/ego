@@ -132,14 +132,15 @@ func (c *LiveKitClient) StopScreenShare(ctx context.Context, room, identity stri
 
 func (c *LiveKitClient) SetScreenSharePermission(ctx context.Context, room, identity string, allowed bool) error {
 	// UpdateParticipant thay thế toàn bộ permission nên phải gửi lại đủ các
-	// quyền đang cấp trong join token.
+	// quyền đang cấp trong join token. Data channel chỉ dùng cho reaction tạm
+	// thời; backend không tin data packet cho thao tác quản trị.
 	_, err := c.rooms.UpdateParticipant(ctx, &livekit.UpdateParticipantRequest{
 		Room:     room,
 		Identity: identity,
 		Permission: &livekit.ParticipantPermission{
 			CanSubscribe:      true,
 			CanPublish:        true,
-			CanPublishData:    false,
+			CanPublishData:    true,
 			CanPublishSources: PublishSources(allowed),
 		},
 	})
@@ -147,7 +148,7 @@ func (c *LiveKitClient) SetScreenSharePermission(ctx context.Context, room, iden
 }
 
 func (c *LiveKitClient) CreateJoinToken(room, identity, name string, host bool) (string, error) {
-	grant := &auth.VideoGrant{RoomJoin: true, Room: room, CanPublish: boolPtr(true), CanSubscribe: boolPtr(true), CanPublishData: boolPtr(false)}
+	grant := &auth.VideoGrant{RoomJoin: true, Room: room, CanPublish: boolPtr(true), CanSubscribe: boolPtr(true), CanPublishData: boolPtr(true)}
 	grant.SetCanPublishSources(PublishSources(host))
 	return auth.NewAccessToken(c.apiKey, c.apiSecret).SetIdentity(identity).SetName(name).
 		SetValidFor(c.tokenTTL).SetVideoGrant(grant).SetMetadata(map[bool]string{true: "HOST", false: "PARTICIPANT"}[host]).ToJWT()

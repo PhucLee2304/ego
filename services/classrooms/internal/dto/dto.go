@@ -245,6 +245,14 @@ type JoinRoomResponse struct {
 	Token string        `json:"token"`
 }
 
+type UpdateHandRequest struct {
+	Raised *bool `json:"raised" validate:"required"`
+}
+
+type LoweredHandsResponse struct {
+	UserIDs []string `json:"userIds"`
+}
+
 type RoomParticipantStateResponse struct {
 	UserID                 string     `json:"userId"`
 	MicrophoneAllowed      bool       `json:"microphoneAllowed"`

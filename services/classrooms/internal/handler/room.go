@@ -7,6 +7,7 @@ import (
 
 	"ego/platform/httpx"
 	"ego/platform/jwt"
+	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/service"
 
 	"github.com/livekit/protocol/auth"
@@ -40,7 +41,7 @@ func writeRoomError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrRoomLive), errors.Is(err, service.ErrScreenShareNotRequested), errors.Is(err, service.ErrParticipantNotConnected):
 		httpx.Error(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrRoomNotLive), errors.Is(err, service.ErrRoomEnded), errors.Is(err, service.ErrRoomTooEarly), errors.Is(err, service.ErrClassroomNotActive),
-		errors.Is(err, service.ErrScreenShareTeacherDirect), errors.Is(err, service.ErrRoomParticipantInvalid):
+		errors.Is(err, service.ErrScreenShareTeacherDirect), errors.Is(err, service.ErrRoomParticipantInvalid), errors.Is(err, service.ErrHandTeacher):
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrMediaUnavailable):
 		httpx.Error(w, http.StatusServiceUnavailable, err.Error())
@@ -205,6 +206,42 @@ func (h *handler) StopScreenShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) SetHandRaised(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	var req dto.UpdateHandRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		return
+	}
+	response, err := h.service.SetHandRaised(r.Context(), userID, classroomID, id, *req.Raised)
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+// LowerHands hạ tay toàn bộ học sinh, hoặc một học sinh khi path có userId.
+func (h *handler) LowerHands(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	var target *string
+	if value := r.PathValue("userId"); value != "" {
+		target = &value
+	}
+	response, err := h.service.LowerHands(r.Context(), userID, classroomID, id, target)
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
 }
 
 func LiveKitWebhook(svc service.Service, apiKey, apiSecret string) http.HandlerFunc {
