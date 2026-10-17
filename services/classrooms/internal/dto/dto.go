@@ -245,6 +245,26 @@ type JoinRoomResponse struct {
 	Token string        `json:"token"`
 }
 
+type RoomParticipantStateResponse struct {
+	UserID                 string     `json:"userId"`
+	MicrophoneAllowed      bool       `json:"microphoneAllowed"`
+	CameraAllowed          bool       `json:"cameraAllowed"`
+	HandRaisedAt           *time.Time `json:"handRaisedAt,omitempty"`
+	RemovedAt              *time.Time `json:"removedAt,omitempty"`
+	ScreenShareRequestedAt *time.Time `json:"screenShareRequestedAt,omitempty"`
+	ScreenShareApprovedAt  *time.Time `json:"screenShareApprovedAt,omitempty"`
+	UpdatedAt              time.Time  `json:"updatedAt"`
+}
+
+type RoomActivityResponse struct {
+	RoomID       uint                            `json:"roomId"`
+	ClassroomID  uint                            `json:"classroomId"`
+	Status       model.RoomStatus                `json:"status"`
+	IsHost       bool                            `json:"isHost"`
+	Participants []*RoomParticipantStateResponse `json:"participants"`
+	UpdatedAt    time.Time                       `json:"updatedAt"`
+}
+
 type AttendanceSessionResponse struct {
 	ID       uint                      `json:"id"`
 	User     *UserInfo                 `json:"user,omitempty"`
@@ -276,6 +296,37 @@ func ToRoomResponse(room *model.Room, isHost bool) *RoomResponse {
 	return &RoomResponse{ID: room.ID, ClassroomID: room.Schedule.ClassroomID, ScheduleID: room.ScheduleID,
 		Status: room.Status, StartedAt: room.StartedAt, EndedAt: room.EndedAt,
 		StartsAt: room.Schedule.StartsAt, EndsAt: room.Schedule.EndsAt, IsHost: isHost}
+}
+
+func ToRoomActivityResponse(room *model.Room, states []*model.RoomParticipantState, userID string, isHost bool) *RoomActivityResponse {
+	participants := make([]*RoomParticipantStateResponse, 0, len(states))
+	updatedAt := room.UpdatedAt
+	for _, state := range states {
+		if !isHost && state.UserID != userID {
+			continue
+		}
+		participants = append(participants, &RoomParticipantStateResponse{
+			UserID:                 state.UserID,
+			MicrophoneAllowed:      state.MicrophoneAllowed,
+			CameraAllowed:          state.CameraAllowed,
+			HandRaisedAt:           state.HandRaisedAt,
+			RemovedAt:              state.RemovedAt,
+			ScreenShareRequestedAt: state.ScreenShareRequestedAt,
+			ScreenShareApprovedAt:  state.ScreenShareApprovedAt,
+			UpdatedAt:              state.UpdatedAt,
+		})
+		if state.UpdatedAt.After(updatedAt) {
+			updatedAt = state.UpdatedAt
+		}
+	}
+	return &RoomActivityResponse{
+		RoomID:       room.ID,
+		ClassroomID:  room.Schedule.ClassroomID,
+		Status:       room.Status,
+		IsHost:       isHost,
+		Participants: participants,
+		UpdatedAt:    updatedAt,
+	}
 }
 
 type ExamAuditResponse struct {

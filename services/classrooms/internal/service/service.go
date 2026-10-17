@@ -60,6 +60,7 @@ type Service interface {
 	UpdateSchedule(ctx context.Context, teacherID string, scheduleID uint, req dto.UpdateScheduleRequest) (*dto.CalendarResponse, error)
 	DeleteSchedule(ctx context.Context, teacherID string, scheduleID uint) error
 	GetRoom(ctx context.Context, userID string, roomID uint) (*dto.RoomResponse, error)
+	GetRoomActivity(ctx context.Context, userID string, classroomID uint, roomID uint) (*dto.RoomActivityResponse, error)
 	StartRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error)
 	JoinRoom(ctx context.Context, userID string, roomID uint) (*dto.JoinRoomResponse, error)
 	EndRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error)

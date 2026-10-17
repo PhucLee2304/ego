@@ -12,6 +12,7 @@ import (
 	"ego/services/classrooms/internal/media"
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
+	classroomsSocket "ego/services/classrooms/internal/socket"
 )
 
 func (s *service) GetRoom(ctx context.Context, userID string, roomID uint) (*dto.RoomResponse, error) {
@@ -30,6 +31,34 @@ func (s *service) GetRoom(ctx context.Context, userID string, roomID uint) (*dto
 		}
 	}
 	return dto.ToRoomResponse(room, isHost), nil
+}
+
+func (s *service) GetRoomActivity(ctx context.Context, userID string, classroomID uint, roomID uint) (*dto.RoomActivityResponse, error) {
+	room, err := s.repo.GetRoomByID(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	if room.Schedule.ClassroomID != classroomID {
+		return nil, ErrClassroomForbidden
+	}
+	isHost := room.Schedule.Classroom.TeacherID == userID
+	if !isHost {
+		approved, err := s.repo.IsStudentApprovedInClassroom(ctx, classroomID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !approved {
+			return nil, ErrClassroomForbidden
+		}
+	}
+	if room.Status == model.RoomStatusEnded {
+		return nil, ErrRoomEnded
+	}
+	states, err := s.repo.GetRoomParticipantStates(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	return dto.ToRoomActivityResponse(room, states, userID, isHost), nil
 }
 
 func (s *service) StartRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error) {
@@ -124,6 +153,9 @@ func (s *service) JoinRoom(ctx context.Context, userID string, roomID uint) (*dt
 	if room.Status == model.RoomStatusEnded {
 		return nil, ErrRoomEnded
 	}
+	if _, err := s.repo.GetOrCreateRoomParticipantState(ctx, room.ID, userID); err != nil {
+		return nil, err
+	}
 	name := userID
 	users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{userID}})
 	if err == nil && len(users.Users) > 0 {
@@ -178,6 +210,9 @@ func (s *service) finishRoom(ctx context.Context, room *model.Room) error {
 			return err
 		}
 		if err := repo.CloseAllParticipantSessions(ctx, locked.ID, now); err != nil {
+			return err
+		}
+		if err := repo.DeleteRoomParticipantStates(ctx, locked.ID); err != nil {
 			return err
 		}
 		*room = *locked
@@ -366,7 +401,7 @@ func (s *service) publishRoomState(ctx context.Context, room *model.Room, eventT
 	if err != nil {
 		return
 	}
-	payload := map[string]any{"type": eventType, "payload": dto.ToRoomResponse(room, false)}
+	payload := classroomsSocket.NewRoomEvent(eventType, room.ID, dto.ToRoomResponse(room, false))
 	s.roomPublisher(room.Schedule.Classroom.TeacherID, payload)
 	for _, member := range members {
 		s.roomPublisher(member.UserID, payload)

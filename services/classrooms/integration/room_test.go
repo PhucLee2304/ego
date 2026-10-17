@@ -128,6 +128,10 @@ func TestRoomLifecycleAndPermissions(t *testing.T) {
 	if err != nil || connection.Token == "" || connection.URL != "ws://localhost:7880" {
 		t.Fatalf("join room: response=%#v err=%v", connection, err)
 	}
+	state, err := repo.GetOrCreateRoomParticipantState(ctx, roomID, "student")
+	if err != nil || !state.MicrophoneAllowed || !state.CameraAllowed {
+		t.Fatalf("default participant state = %#v, err=%v", state, err)
+	}
 
 	roomName := "classroom-room-" + fmt.Sprint(roomID)
 	joined := now.Add(15 * time.Minute)
@@ -212,6 +216,115 @@ func TestCreateScheduleAndRoomAreAtomic(t *testing.T) {
 	}
 	if schedules != 0 || rooms != 0 {
 		t.Fatalf("transaction left partial data: schedules=%d rooms=%d", schedules, rooms)
+	}
+}
+
+func TestRoomActivityPermissionsAndCleanup(t *testing.T) {
+	dsn := os.Getenv("CLASSROOMS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CLASSROOMS_TEST_DSN is not configured")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, now := context.Background(), time.Now()
+	classroom := &model.Classroom{Code: "ACTIVE01", Name: "Activity class", TeacherID: "teacher", Active: true}
+	if err := db.Create(classroom).Error; err != nil {
+		t.Fatal(err)
+	}
+	approved, joinedAt := true, now
+	if err := db.Create(&model.Member{ClassroomID: classroom.ID, UserID: "student", Approved: &approved, JoinedAt: &joinedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	repo := repository.NewRepository(db)
+	usersClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{}, usersClient, examsClient)
+	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}
+	svc.SetMediaClient(mediaClient)
+	created, err := svc.CreateSchedule(ctx, "teacher", classroom.ID, dto.CreateScheduleRequest{
+		Title: "Activity", StartsAt: now.Add(-time.Minute), EndsAt: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roomID := created.Room.ID
+	if _, err := svc.StartRoom(ctx, "teacher", roomID); err != nil {
+		t.Fatal(err)
+	}
+
+	handRaisedAt := now
+	approvedAt := now.Add(time.Second)
+	studentState, err := repo.GetOrCreateRoomParticipantState(ctx, roomID, "student")
+	if err != nil {
+		t.Fatal(err)
+	}
+	studentState.HandRaisedAt = &handRaisedAt
+	studentState.MicrophoneAllowed = false
+	studentState.ScreenShareRequestedAt = &handRaisedAt
+	studentState.ScreenShareApprovedAt = &approvedAt
+	if err := repo.UpdateRoomParticipantState(ctx, studentState); err != nil {
+		t.Fatal(err)
+	}
+	otherState, err := repo.GetOrCreateRoomParticipantState(ctx, roomID, "another-student")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherState.HandRaisedAt = &handRaisedAt
+	if err := repo.UpdateRoomParticipantState(ctx, otherState); err != nil {
+		t.Fatal(err)
+	}
+	audit := &model.RoomModerationAudit{
+		RoomID: roomID, ActorUserID: "teacher", TargetUserID: "student", Action: model.RoomModerationAuditActionMute,
+	}
+	if err := repo.CreateRoomModerationAudit(ctx, audit); err != nil {
+		t.Fatal(err)
+	}
+	if audits, err := repo.GetRoomModerationAudits(ctx, roomID); err != nil || len(audits) != 1 {
+		t.Fatalf("moderation audits = %#v, err=%v", audits, err)
+	}
+
+	hostActivity, err := svc.GetRoomActivity(ctx, "teacher", classroom.ID, roomID)
+	if err != nil || !hostActivity.IsHost || len(hostActivity.Participants) != 2 {
+		t.Fatalf("host activity = %#v, err=%v", hostActivity, err)
+	}
+	studentActivity, err := svc.GetRoomActivity(ctx, "student", classroom.ID, roomID)
+	if err != nil || studentActivity.IsHost || len(studentActivity.Participants) != 1 || studentActivity.Participants[0].UserID != "student" {
+		t.Fatalf("student activity = %#v, err=%v", studentActivity, err)
+	}
+	if studentActivity.Participants[0].MicrophoneAllowed || !studentActivity.Participants[0].CameraAllowed || studentActivity.Participants[0].ScreenShareApprovedAt == nil {
+		t.Fatalf("unexpected student permissions: %#v", studentActivity.Participants[0])
+	}
+	if _, err := svc.GetRoomActivity(ctx, "outsider", classroom.ID, roomID); !errors.Is(err, service.ErrClassroomForbidden) {
+		t.Fatalf("outsider activity error = %v, want forbidden", err)
+	}
+	if _, err := svc.GetRoomActivity(ctx, "teacher", classroom.ID+1, roomID); !errors.Is(err, service.ErrClassroomForbidden) {
+		t.Fatalf("mismatched classroom error = %v, want forbidden", err)
+	}
+
+	if _, err := svc.EndRoom(ctx, "teacher", roomID); err != nil {
+		t.Fatal(err)
+	}
+	var stateCount, auditCount int64
+	if err := db.Model(&model.RoomParticipantState{}).Where("room_id = ?", roomID).Count(&stateCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.RoomModerationAudit{}).Where("room_id = ?", roomID).Count(&auditCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stateCount != 0 || auditCount != 1 {
+		t.Fatalf("cleanup counts: states=%d audits=%d", stateCount, auditCount)
+	}
+	if _, err := svc.GetRoomActivity(ctx, "student", classroom.ID, roomID); !errors.Is(err, service.ErrRoomEnded) {
+		t.Fatalf("ended room activity error = %v, want ended", err)
 	}
 }
 

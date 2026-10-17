@@ -263,6 +263,42 @@ func (r *Repository) CreateRoom(ctx context.Context, room *model.Room) error {
 	return r.db.WithContext(ctx).Create(room).Error
 }
 
+func (r *Repository) GetOrCreateRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error) {
+	candidate := &model.RoomParticipantState{RoomID: roomID, UserID: userID, MicrophoneAllowed: true, CameraAllowed: true}
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(candidate).Error; err != nil {
+		return nil, err
+	}
+	var state model.RoomParticipantState
+	if err := r.db.WithContext(ctx).Where("room_id = ? AND user_id = ?", roomID, userID).First(&state).Error; err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+func (r *Repository) UpdateRoomParticipantState(ctx context.Context, state *model.RoomParticipantState) error {
+	return r.db.WithContext(ctx).Save(state).Error
+}
+
+func (r *Repository) GetRoomParticipantStates(ctx context.Context, roomID uint) ([]*model.RoomParticipantState, error) {
+	var states []*model.RoomParticipantState
+	err := r.db.WithContext(ctx).Where("room_id = ?", roomID).Order("user_id ASC").Find(&states).Error
+	return states, err
+}
+
+func (r *Repository) DeleteRoomParticipantStates(ctx context.Context, roomID uint) error {
+	return r.db.WithContext(ctx).Unscoped().Where("room_id = ?", roomID).Delete(&model.RoomParticipantState{}).Error
+}
+
+func (r *Repository) CreateRoomModerationAudit(ctx context.Context, audit *model.RoomModerationAudit) error {
+	return r.db.WithContext(ctx).Create(audit).Error
+}
+
+func (r *Repository) GetRoomModerationAudits(ctx context.Context, roomID uint) ([]*model.RoomModerationAudit, error) {
+	var audits []*model.RoomModerationAudit
+	err := r.db.WithContext(ctx).Where("room_id = ?", roomID).Order("created_at ASC, id ASC").Find(&audits).Error
+	return audits, err
+}
+
 func (r *Repository) GetRoomByID(ctx context.Context, id uint) (*model.Room, error) {
 	var room model.Room
 	if err := r.db.WithContext(ctx).Preload("Schedule").Preload("Schedule.Classroom").Where("id = ?", id).First(&room).Error; err != nil {

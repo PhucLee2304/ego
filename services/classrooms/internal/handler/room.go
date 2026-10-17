@@ -57,6 +57,24 @@ func (h *handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, response)
 }
+
+func (h *handler) GetRoomActivity(w http.ResponseWriter, r *http.Request) {
+	userID, id, ok := roomID(w, r)
+	if !ok {
+		return
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return
+	}
+	response, err := h.service.GetRoomActivity(r.Context(), userID, classroomID, id)
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
 func (h *handler) StartRoom(w http.ResponseWriter, r *http.Request) {
 	userID, id, ok := roomID(w, r)
 	if !ok {
