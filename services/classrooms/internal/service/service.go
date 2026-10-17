@@ -67,6 +67,13 @@ type Service interface {
 	GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, error)
 	HandleParticipantJoined(ctx context.Context, roomName, userID string, joinedAt time.Time) error
 	HandleParticipantLeft(ctx context.Context, roomName, userID string, leftAt time.Time) error
+	RequestScreenShare(ctx context.Context, userID string, classroomID, roomID uint) (*dto.RoomParticipantStateResponse, error)
+	ApproveScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	RejectScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	StartScreenShare(ctx context.Context, userID string, classroomID, roomID uint) error
+	StopScreenShare(ctx context.Context, actorID string, classroomID, roomID uint, userID string) error
+	HandleScreenSharePublished(ctx context.Context, roomName, userID string) error
+	HandleScreenShareUnpublished(ctx context.Context, roomName, userID string) error
 	ProcessRoomLifecycle(ctx context.Context) (int, error)
 	SetMediaClient(media.Client)
 	SetRoomEventPublisher(func(string, any))

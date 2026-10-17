@@ -39,6 +39,12 @@ func NewRoomEvent(eventType string, roomID uint, payload any) RoomEvent {
 	}
 }
 
+// ParticipantActivityPayload cho biết participant nào bị tác động; client tải
+// lại activity để lấy trạng thái đầy đủ.
+type ParticipantActivityPayload struct {
+	UserID string `json:"userId"`
+}
+
 type GradebookUpdatedEvent struct {
 	Type    string                  `json:"type"`
 	Payload GradebookUpdatedPayload `json:"payload"`

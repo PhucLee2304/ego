@@ -10,6 +10,7 @@ import (
 	"ego/services/classrooms/internal/service"
 
 	"github.com/livekit/protocol/auth"
+	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/webhook"
 	"gorm.io/gorm"
 )
@@ -34,9 +35,12 @@ func writeRoomError(w http.ResponseWriter, err error) {
 		httpx.Error(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		httpx.Error(w, http.StatusNotFound, "[ERROR] Resource not found")
-	case errors.Is(err, service.ErrRoomLive):
+	case errors.Is(err, service.ErrScreenShareNotApproved):
+		httpx.Error(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrRoomLive), errors.Is(err, service.ErrScreenShareNotRequested), errors.Is(err, service.ErrParticipantNotConnected):
 		httpx.Error(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrRoomNotLive), errors.Is(err, service.ErrRoomEnded), errors.Is(err, service.ErrRoomTooEarly), errors.Is(err, service.ErrClassroomNotActive):
+	case errors.Is(err, service.ErrRoomNotLive), errors.Is(err, service.ErrRoomEnded), errors.Is(err, service.ErrRoomTooEarly), errors.Is(err, service.ErrClassroomNotActive),
+		errors.Is(err, service.ErrScreenShareTeacherDirect), errors.Is(err, service.ErrRoomParticipantInvalid):
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrMediaUnavailable):
 		httpx.Error(w, http.StatusServiceUnavailable, err.Error())
@@ -124,6 +128,85 @@ func (h *handler) GetRoomAttendance(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, response)
 }
 
+// roomRequest đọc user từ JWT cùng classroom/room ID trên path. userId trên
+// path chỉ là participant bị tác động; danh tính người gọi luôn lấy từ JWT.
+func roomRequest(w http.ResponseWriter, r *http.Request) (string, uint, uint, bool) {
+	userID, id, ok := roomID(w, r)
+	if !ok {
+		return "", 0, 0, false
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid classroom ID")
+		return "", 0, 0, false
+	}
+	return userID, classroomID, id, true
+}
+
+func (h *handler) RequestScreenShare(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := h.service.RequestScreenShare(r.Context(), userID, classroomID, id)
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *handler) ApproveScreenShare(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := h.service.ApproveScreenShare(r.Context(), userID, classroomID, id, r.PathValue("userId"))
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *handler) RejectScreenShare(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := h.service.RejectScreenShare(r.Context(), userID, classroomID, id, r.PathValue("userId"))
+	if err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
+// StartScreenShare được client gọi ngay trước khi publish screen share.
+func (h *handler) StartScreenShare(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	if err := h.service.StartScreenShare(r.Context(), userID, classroomID, id); err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) StopScreenShare(w http.ResponseWriter, r *http.Request) {
+	userID, classroomID, id, ok := roomRequest(w, r)
+	if !ok {
+		return
+	}
+	if err := h.service.StopScreenShare(r.Context(), userID, classroomID, id, r.PathValue("userId")); err != nil {
+		writeRoomError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func LiveKitWebhook(svc service.Service, apiKey, apiSecret string) http.HandlerFunc {
 	provider := auth.NewSimpleKeyProvider(apiKey, apiSecret)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -141,6 +224,14 @@ func LiveKitWebhook(svc service.Service, apiKey, apiSecret string) http.HandlerF
 		case "participant_left":
 			if event.Room != nil && event.Participant != nil {
 				err = svc.HandleParticipantLeft(r.Context(), event.Room.Name, event.Participant.Identity, when)
+			}
+		case "track_published", "track_unpublished":
+			if event.Room != nil && event.Participant != nil && event.Track != nil && event.Track.Source == livekit.TrackSource_SCREEN_SHARE {
+				if event.Event == "track_published" {
+					err = svc.HandleScreenSharePublished(r.Context(), event.Room.Name, event.Participant.Identity)
+				} else {
+					err = svc.HandleScreenShareUnpublished(r.Context(), event.Room.Name, event.Participant.Identity)
+				}
 			}
 		}
 		if err != nil {

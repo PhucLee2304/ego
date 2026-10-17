@@ -11,6 +11,7 @@ import (
 	"ego/services/classrooms/config"
 	"ego/services/classrooms/database"
 	"ego/services/classrooms/internal/dto"
+	"ego/services/classrooms/internal/media"
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
 	"ego/services/classrooms/internal/service"
@@ -28,6 +29,11 @@ type fakeRoomMedia struct {
 	tokenCalls   int
 	listFailures int
 	listCalls    int
+
+	sharers               map[string][]string
+	stopped               []string
+	screenSharePermission map[string]bool
+	disconnected          map[string]bool
 }
 
 func (f *fakeRoomMedia) CreateRoom(_ context.Context, room string) error {
@@ -59,6 +65,38 @@ func (f *fakeRoomMedia) ListParticipants(_ context.Context, room string) ([]stri
 func (f *fakeRoomMedia) CreateJoinToken(room, identity, _ string, _ bool) (string, error) {
 	f.tokenCalls++
 	return room + ":" + identity, nil
+}
+
+func (f *fakeRoomMedia) ListScreenSharers(_ context.Context, room string) ([]string, error) {
+	return append([]string(nil), f.sharers[room]...), nil
+}
+
+func (f *fakeRoomMedia) StopScreenShare(_ context.Context, room, identity string) error {
+	if f.disconnected[identity] {
+		return media.ErrParticipantNotFound
+	}
+	f.stopped = append(f.stopped, identity)
+	remaining := f.sharers[room][:0]
+	for _, sharer := range f.sharers[room] {
+		if sharer != identity {
+			remaining = append(remaining, sharer)
+		}
+	}
+	if f.sharers != nil {
+		f.sharers[room] = remaining
+	}
+	return nil
+}
+
+func (f *fakeRoomMedia) SetScreenSharePermission(_ context.Context, _ string, identity string, allowed bool) error {
+	if f.disconnected[identity] {
+		return media.ErrParticipantNotFound
+	}
+	if f.screenSharePermission == nil {
+		f.screenSharePermission = map[string]bool{}
+	}
+	f.screenSharePermission[identity] = allowed
+	return nil
 }
 
 func TestRoomLifecycleAndPermissions(t *testing.T) {

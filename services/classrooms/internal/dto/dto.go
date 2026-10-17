@@ -298,6 +298,19 @@ func ToRoomResponse(room *model.Room, isHost bool) *RoomResponse {
 		StartsAt: room.Schedule.StartsAt, EndsAt: room.Schedule.EndsAt, IsHost: isHost}
 }
 
+func ToRoomParticipantStateResponse(state *model.RoomParticipantState) *RoomParticipantStateResponse {
+	return &RoomParticipantStateResponse{
+		UserID:                 state.UserID,
+		MicrophoneAllowed:      state.MicrophoneAllowed,
+		CameraAllowed:          state.CameraAllowed,
+		HandRaisedAt:           state.HandRaisedAt,
+		RemovedAt:              state.RemovedAt,
+		ScreenShareRequestedAt: state.ScreenShareRequestedAt,
+		ScreenShareApprovedAt:  state.ScreenShareApprovedAt,
+		UpdatedAt:              state.UpdatedAt,
+	}
+}
+
 func ToRoomActivityResponse(room *model.Room, states []*model.RoomParticipantState, userID string, isHost bool) *RoomActivityResponse {
 	participants := make([]*RoomParticipantStateResponse, 0, len(states))
 	updatedAt := room.UpdatedAt
@@ -305,16 +318,7 @@ func ToRoomActivityResponse(room *model.Room, states []*model.RoomParticipantSta
 		if !isHost && state.UserID != userID {
 			continue
 		}
-		participants = append(participants, &RoomParticipantStateResponse{
-			UserID:                 state.UserID,
-			MicrophoneAllowed:      state.MicrophoneAllowed,
-			CameraAllowed:          state.CameraAllowed,
-			HandRaisedAt:           state.HandRaisedAt,
-			RemovedAt:              state.RemovedAt,
-			ScreenShareRequestedAt: state.ScreenShareRequestedAt,
-			ScreenShareApprovedAt:  state.ScreenShareApprovedAt,
-			UpdatedAt:              state.UpdatedAt,
-		})
+		participants = append(participants, ToRoomParticipantStateResponse(state))
 		if state.UpdatedAt.After(updatedAt) {
 			updatedAt = state.UpdatedAt
 		}

@@ -7,6 +7,7 @@ import (
 	"github.com/go-jose/go-jose/v3"
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/livekit/protocol/auth"
+	"github.com/livekit/protocol/livekit"
 )
 
 const (
@@ -50,6 +51,39 @@ func TestCreateJoinToken(t *testing.T) {
 	validUntil := claims.Expiry.Time()
 	if validUntil.Before(issuedAt.Add(testTokenTTL-time.Second)) || validUntil.After(time.Now().Add(testTokenTTL+time.Second)) {
 		t.Fatalf("unexpected expiry: %s", validUntil)
+	}
+}
+
+func TestCreateJoinTokenLimitsScreenShareToHost(t *testing.T) {
+	client := New("http://livekit:7880", testAPIKey, testAPISecret, testTokenTTL)
+	for _, tc := range []struct {
+		identity    string
+		host        bool
+		screenShare bool
+	}{
+		{identity: "teacher", host: true, screenShare: true},
+		{identity: "student-1", host: false, screenShare: false},
+	} {
+		token, err := client.CreateJoinToken("classroom-room-7", tc.identity, tc.identity, tc.host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier, err := auth.ParseAPIToken(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, grants, err := verifier.Verify(testAPISecret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		video := grants.Video
+		if !video.GetCanPublishSource(livekit.TrackSource_CAMERA) || !video.GetCanPublishSource(livekit.TrackSource_MICROPHONE) {
+			t.Fatalf("%s must publish camera and microphone: %#v", tc.identity, video.CanPublishSources)
+		}
+		if video.GetCanPublishSource(livekit.TrackSource_SCREEN_SHARE) != tc.screenShare ||
+			video.GetCanPublishSource(livekit.TrackSource_SCREEN_SHARE_AUDIO) != tc.screenShare {
+			t.Fatalf("%s screen share grant = %#v, want %v", tc.identity, video.CanPublishSources, tc.screenShare)
+		}
 	}
 }
 

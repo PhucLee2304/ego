@@ -248,6 +248,13 @@ func (s *service) HandleParticipantLeft(ctx context.Context, roomName, userID st
 	if err := s.repo.CloseParticipantSession(ctx, room.ID, userID, leftAt); err != nil {
 		return err
 	}
+	// Phê duyệt chia sẻ màn hình gắn với phiên đang kết nối; vào lại phòng
+	// bằng token mới thì phải xin lại.
+	if changed, err := s.clearScreenShareState(ctx, room.ID, userID); err != nil {
+		return err
+	} else if changed {
+		s.publishRoomActivity(room, classroomsSocket.EventScreenShareStopped, userID)
+	}
 	if userID == room.Schedule.Classroom.TeacherID && room.Status == model.RoomStatusLive {
 		room.HostAbsentSince = &leftAt
 		return s.repo.UpdateRoom(ctx, room)

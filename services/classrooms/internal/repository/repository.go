@@ -275,6 +275,19 @@ func (r *Repository) GetOrCreateRoomParticipantState(ctx context.Context, roomID
 	return &state, nil
 }
 
+// FindRoomParticipantState trả về nil khi participant chưa có state trong room.
+func (r *Repository) FindRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error) {
+	var state model.RoomParticipantState
+	err := r.db.WithContext(ctx).Where("room_id = ? AND user_id = ?", roomID, userID).First(&state).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
 func (r *Repository) UpdateRoomParticipantState(ctx context.Context, state *model.RoomParticipantState) error {
 	return r.db.WithContext(ctx).Save(state).Error
 }

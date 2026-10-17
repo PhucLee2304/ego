@@ -51,6 +51,11 @@ type Handler interface {
 	JoinRoom(w http.ResponseWriter, r *http.Request)
 	EndRoom(w http.ResponseWriter, r *http.Request)
 	GetRoomAttendance(w http.ResponseWriter, r *http.Request)
+	RequestScreenShare(w http.ResponseWriter, r *http.Request)
+	ApproveScreenShare(w http.ResponseWriter, r *http.Request)
+	RejectScreenShare(w http.ResponseWriter, r *http.Request)
+	StartScreenShare(w http.ResponseWriter, r *http.Request)
+	StopScreenShare(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -99,6 +104,11 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/join", mw.Handle(h.JoinRoom))
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/end", mw.Handle(h.EndRoom))
 	mux.HandleFunc("GET /classrooms/{id}/rooms/{roomId}/attendance", mw.Handle(h.GetRoomAttendance))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/request", mw.Handle(h.RequestScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/start", mw.Handle(h.StartScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/approve", mw.Handle(h.ApproveScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/reject", mw.Handle(h.RejectScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/stop", mw.Handle(h.StopScreenShare))
 }
 
 func (h *handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
