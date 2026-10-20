@@ -5,16 +5,31 @@ import (
 	storageClient "ego/api/gen/go/storage"
 	"ego/platform/httpx"
 	"ego/services/identity/internal/dto"
+	"ego/services/identity/internal/model"
+	"errors"
 	"net/http"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 func (s *service) GetRole(ctx context.Context, userID string) (string, error) {
 	user, err := s.repo.GetByID(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", ErrUserNotFound
+	}
 	if err != nil {
 		return "", err
 	}
 	return string(user.Role), nil
+}
+
+func (s *service) GetUsersInfo(ctx context.Context, userIDs []string) ([]*model.User, error) {
+	return s.repo.GetByIDs(ctx, userIDs)
+}
+
+func (s *service) SearchUserIDsByName(ctx context.Context, query string) ([]string, error) {
+	return s.repo.SearchUserIDsByName(ctx, query)
 }
 
 func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, *httpx.HTTPError) {

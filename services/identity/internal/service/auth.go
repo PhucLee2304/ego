@@ -13,6 +13,10 @@ import (
 	"strings"
 )
 
+func (s *service) ValidateToken(ctx context.Context, tokenString string) (string, error) {
+	return s.jwtManager.Validate(ctx, tokenString)
+}
+
 func (s *service) Refresh(ctx context.Context, refreshToken string) (string, string, *httpx.HTTPError) {
 	userID, err := s.jwtManager.ValidateRefresh(ctx, refreshToken)
 	if err != nil {

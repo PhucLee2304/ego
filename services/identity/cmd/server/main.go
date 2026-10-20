@@ -91,7 +91,7 @@ func main() {
 	repo := repository.NewRepository(db)
 	svc := service.New(jwtManager, *firebaseClient, repo, storageServiceClient)
 
-	authMiddleware := jwt.NewAuthMiddlewareWithValidator(jwtManager.Validate)
+	authMiddleware := jwt.NewAuthMiddlewareWithValidator(svc.ValidateToken)
 	roleMiddleware := jwt.NewRoleMiddleware(svc.GetRole)
 
 	mux := http.NewServeMux()
@@ -130,8 +130,8 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start identity gRPC server")
 	}
 
-	rpcServer := identityRpc.New(jwtManager, repo)
-	grpcServer := grpc.NewServer()
+	rpcServer := identityRpc.New(svc)
+	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(platformRpc.ErrorInterceptor()))
 	identityClient.RegisterIdentityServiceServer(grpcServer, rpcServer)
 
 	logger.Log.Info().Str("IDENTITY_GRPC_PORT", appConfig.GRPCPort).Msg("[STARTUP] Starting identity gRPC server")

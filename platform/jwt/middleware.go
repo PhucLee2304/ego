@@ -20,6 +20,9 @@ const userIDKey contextKey = "userID"
 
 var ErrInvalidToken = errors.New("token is invalid")
 
+// ErrUserNotFound is returned by a RoleResolver when the user does not exist.
+var ErrUserNotFound = errors.New("user not found")
+
 // TokenValidator returns the user ID when the token is valid.
 type TokenValidator func(ctx context.Context, token string) (string, error)
 
@@ -123,7 +126,7 @@ func (m *RoleMiddleware) RequireRole(roles ...string) func(http.HandlerFunc) htt
 			}
 
 			role, err := m.roleResolver(r.Context(), userID)
-			if errors.Is(err, gorm.ErrRecordNotFound) || status.Code(err) == codes.NotFound {
+			if errors.Is(err, ErrUserNotFound) || errors.Is(err, gorm.ErrRecordNotFound) || status.Code(err) == codes.NotFound {
 				httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User not found", err))
 				return
 			}

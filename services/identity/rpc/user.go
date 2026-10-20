@@ -6,28 +6,28 @@ import (
 	"strconv"
 
 	identityClient "ego/api/gen/go/identity"
+	platformRpc "ego/platform/rpc"
+	"ego/services/identity/internal/service"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"gorm.io/gorm"
 )
 
 func (s *server) GetUserRole(ctx context.Context, req *identityClient.GetUserRoleRequest) (*identityClient.GetUserRoleResponse, error) {
-	user, err := s.repo.GetByID(ctx, req.Id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, status.Error(codes.NotFound, "user not found")
+	role, err := s.service.GetRole(ctx, req.Id)
+	if errors.Is(err, service.ErrUserNotFound) {
+		return nil, platformRpc.PublicError(codes.NotFound, "[ERROR] User not found")
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	return &identityClient.GetUserRoleResponse{
-		Role: string(user.Role),
+		Role: role,
 	}, nil
 }
 
 func (s *server) GetUsersInfo(ctx context.Context, req *identityClient.GetUsersInfoRequest) (*identityClient.GetUsersInfoResponse, error) {
-	users, err := s.repo.GetByIDs(ctx, req.Ids)
+	users, err := s.service.GetUsersInfo(ctx, req.Ids)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (s *server) GetUsersInfo(ctx context.Context, req *identityClient.GetUsersI
 }
 
 func (s *server) SearchUserIDsByName(ctx context.Context, req *identityClient.SearchUserIDsByNameRequest) (*identityClient.SearchUserIDsByNameResponse, error) {
-	ids, err := s.repo.SearchUserIDsByName(ctx, req.Query)
+	ids, err := s.service.SearchUserIDsByName(ctx, req.Query)
 	if err != nil {
 		return nil, err
 	}

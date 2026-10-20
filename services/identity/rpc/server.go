@@ -2,19 +2,14 @@ package rpc
 
 import (
 	identityClient "ego/api/gen/go/identity"
-	"ego/services/identity/internal/repository"
-	tokenManager "ego/services/identity/internal/token"
+	"ego/services/identity/internal/service"
 )
 
 type server struct {
 	identityClient.UnimplementedIdentityServiceServer
-	jwtManager tokenManager.Manager
-	repo       *repository.Repository
+	service service.Service
 }
 
-func New(jwtManager tokenManager.Manager, repo *repository.Repository) identityClient.IdentityServiceServer {
-	return &server{
-		jwtManager: jwtManager,
-		repo:       repo,
-	}
+func New(svc service.Service) identityClient.IdentityServiceServer {
+	return &server{service: svc}
 }
