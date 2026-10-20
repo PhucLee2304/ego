@@ -1,7 +1,6 @@
 package httpx
 
 import (
-	"ego/platform/logger"
 	"ego/platform/validatorx"
 	"encoding/json"
 	"net/http"
@@ -16,10 +15,6 @@ var (
 	queryEncoder = schema.NewEncoder()
 	validate     = validatorx.New()
 )
-
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
 
 type PaginatedResponse[T any] struct {
 	Data       []T `json:"data"`
@@ -67,15 +62,6 @@ func ToPaginatedResponse[T any](data []T, query PaginationQuery, pageCounts int)
 	}
 }
 
-func Error(w http.ResponseWriter, code int, message string) {
-	if code >= http.StatusInternalServerError {
-		logger.Log.Error().Int("code", code).Str("error", message).Msg("Internal server error")
-		message = "[ERROR] Internal server error"
-	}
-
-	JSON(w, code, ErrorResponse{Error: message})
-}
-
 func DecodeJSON(r *http.Request, v any) error {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		return err
@@ -102,17 +88,4 @@ func EncodeQuery(v any) (url.Values, error) {
 	values := url.Values{}
 	err := queryEncoder.Encode(v, values)
 	return values, err
-}
-
-func JSON(w http.ResponseWriter, code int, payload any) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		logger.Log.Error().Err(err).Msg("[INTERNAL_SERVER_ERROR] Error marshalling response")
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_, _ = w.Write(data)
 }

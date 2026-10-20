@@ -149,8 +149,8 @@ func TestRoomLifecycleAndPermissions(t *testing.T) {
 	}
 
 	repo := repository.NewRepository(db)
-	usersClient, examsClient := classroomTestClients(t)
-	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, usersClient, examsClient)
+	identityClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, identityClient, examsClient)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}
 	svc.SetMediaClient(mediaClient)
 
@@ -258,8 +258,8 @@ func TestCreateScheduleAndRoomAreAtomic(t *testing.T) {
 	}
 
 	repo := repository.NewRepository(db)
-	usersClient, examsClient := classroomTestClients(t)
-	svc := service.New(repo, &config.AppConfig{}, usersClient, examsClient)
+	identityClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{}, identityClient, examsClient)
 	now := time.Now()
 	_, err = svc.CreateSchedule(context.Background(), "teacher", classroom.ID, dto.CreateScheduleRequest{
 		Title: "Must roll back", StartsAt: now.Add(time.Hour), EndsAt: now.Add(2 * time.Hour),
@@ -306,8 +306,8 @@ func TestRoomActivityPermissionsAndCleanup(t *testing.T) {
 	}
 
 	repo := repository.NewRepository(db)
-	usersClient, examsClient := classroomTestClients(t)
-	svc := service.New(repo, &config.AppConfig{}, usersClient, examsClient)
+	identityClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{}, identityClient, examsClient)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}
 	svc.SetMediaClient(mediaClient)
 	created, err := svc.CreateSchedule(ctx, "teacher", classroom.ID, dto.CreateScheduleRequest{
@@ -429,8 +429,8 @@ func TestRoomPermissionsForMembershipAndArchivedClassroom(t *testing.T) {
 	}
 
 	repo := repository.NewRepository(db)
-	usersClient, examsClient := classroomTestClients(t)
-	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, usersClient, examsClient)
+	identityClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, identityClient, examsClient)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}
 	svc.SetMediaClient(mediaClient)
 
@@ -488,8 +488,8 @@ func TestRoomLifecycleWorkerAndReconcile(t *testing.T) {
 	}
 
 	repo := repository.NewRepository(db)
-	usersClient, examsClient := classroomTestClients(t)
-	svc := service.New(repo, &config.AppConfig{}, usersClient, examsClient)
+	identityClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{}, identityClient, examsClient)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}, listFailures: 2}
 	svc.SetMediaClient(mediaClient)
 

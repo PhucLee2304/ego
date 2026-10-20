@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	notificationsClient "ego/api/gen/go/notifications"
+	"ego/platform/httpx"
 	"ego/services/notifications/internal/dto"
 )
 
@@ -12,7 +13,7 @@ type fakeCreator struct {
 	requests []dto.CreateNotificationRequest
 }
 
-func (f *fakeCreator) CreateNotifications(_ context.Context, requests []dto.CreateNotificationRequest) error {
+func (f *fakeCreator) CreateNotifications(_ context.Context, requests []dto.CreateNotificationRequest) *httpx.HTTPError {
 	f.requests = requests
 	return nil
 }

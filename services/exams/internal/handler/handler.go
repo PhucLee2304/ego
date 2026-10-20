@@ -5,13 +5,7 @@ import (
 	"ego/platform/jwt"
 	"ego/services/exams/internal/dto"
 	"ego/services/exams/internal/service"
-	"errors"
 	"net/http"
-	"strings"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"gorm.io/gorm"
 )
 
 type Handler interface {
@@ -57,20 +51,20 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 // @Param        pageSize  query     int  false  "Page size"   default(10)
 // @Param        type      query     string  false  "Exam type" Enums(THPT, TOEIC) default(THPT)
 // @Success      200  {object}  httpx.PaginatedResponse[dto.GetExamsResponse]
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /exams [get]
 func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 	var query dto.GetExamsQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
 		return
 	}
 	query.Normalize()
 
-	exams, pageCounts, err := h.service.GetList(r.Context(), query)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	exams, pageCounts, httpErr := h.service.GetList(r.Context(), query)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -85,24 +79,20 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id   path      int  true  "Exam ID"
 // @Success      200  {object}  dto.GetExamResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      404  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /exams/{id} [get]
 func (h *handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid exam ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid exam ID", err))
 		return
 	}
 
-	resp, err := h.service.GetByID(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[ERROR] Exam not found")
-			return
-		}
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	resp, httpErr := h.service.GetByID(r.Context(), id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -118,65 +108,41 @@ func (h *handler) GetByID(w http.ResponseWriter, r *http.Request) {
 // @Param        id    path      int                       true  "Exam ID"
 // @Param        body  body      dto.CreateExamAttemptRequest  true  "Attempt payload"
 // @Success      201  {object}  dto.AttemptResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      401  {object}  httpx.ErrorResponse
-// @Failure      404  {object}  httpx.ErrorResponse
-// @Failure      409  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      409  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /exams/{id}/attempts [post]
 func (h *handler) CreateAttempt(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid exam ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid exam ID", err))
 		return
 	}
 
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
 		return
 	}
 
 	var body dto.CreateExamAttemptRequest
 	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
 	body.Normalize()
 
 	if err := body.Validate(); err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, err.Error(), err))
 		return
 	}
 
-	resp, err := h.service.CreateAttempt(r.Context(), userID, id, body)
-	if err != nil {
-		switch status.Code(err) {
-		case codes.PermissionDenied:
-			httpx.Error(w, http.StatusForbidden, err.Error())
-			return
-		case codes.NotFound:
-			httpx.Error(w, http.StatusNotFound, err.Error())
-			return
-		case codes.InvalidArgument, codes.FailedPrecondition:
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		switch {
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			httpx.Error(w, http.StatusNotFound, "[ERROR] Exam not found")
-			return
-		case strings.HasPrefix(err.Error(), "[CONFLICT]"):
-			httpx.Error(w, http.StatusConflict, err.Error())
-			return
-		case strings.HasPrefix(err.Error(), "[ERROR]"):
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return
-		default:
-			httpx.Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+	resp, httpErr := h.service.CreateAttempt(r.Context(), userID, id, body)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
+		return
 	}
 
 	httpx.JSON(w, http.StatusCreated, resp)
@@ -192,27 +158,27 @@ func (h *handler) CreateAttempt(w http.ResponseWriter, r *http.Request) {
 // @Param        pageSize  query     int     false  "Page size" default(10)
 // @Param        status    query     string  true   "Attempt status" Enums(ACTIVE, SUBMITTED, CANCELLED)
 // @Success      200  {object}  httpx.PaginatedResponse[dto.AttemptResponse]
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      401  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /attempts [get]
 func (h *handler) GetAttempts(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
 		return
 	}
 
 	var query dto.GetAttemptsQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
 		return
 	}
 	query.Normalize()
 
-	resp, pageCounts, err := h.service.GetAttempts(r.Context(), userID, query)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	resp, pageCounts, httpErr := h.service.GetAttempts(r.Context(), userID, query)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -227,35 +193,27 @@ func (h *handler) GetAttempts(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id   path      int  true  "Attempt ID"
 // @Success      200  {object}  dto.AttemptResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      401  {object}  httpx.ErrorResponse
-// @Failure      404  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /attempts/{id}/questions [get]
 func (h *handler) GetAttemptQuestions(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid attempt ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid attempt ID", err))
 		return
 	}
 
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
 		return
 	}
 
-	resp, err := h.service.GetAttemptQuestions(r.Context(), userID, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[ERROR] Attempt not found")
-			return
-		}
-		if strings.HasPrefix(err.Error(), "[ERROR]") {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	resp, httpErr := h.service.GetAttemptQuestions(r.Context(), userID, id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -271,49 +229,38 @@ func (h *handler) GetAttemptQuestions(w http.ResponseWriter, r *http.Request) {
 // @Param        id    path  int                       true  "Attempt ID"
 // @Param        body  body  dto.SubmitAttemptRequest  true  "Final answers"
 // @Success      200  {object}  dto.AttemptResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      401  {object}  httpx.ErrorResponse
-// @Failure      404  {object}  httpx.ErrorResponse
-// @Failure      409  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      409  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /attempts/{id}/submit [post]
 func (h *handler) SubmitAttempt(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid attempt ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid attempt ID", err))
 		return
 	}
 
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
 		return
 	}
 
 	var body dto.SubmitAttemptRequest
 	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
 	if err := body.Validate(); err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, err.Error(), err))
 		return
 	}
 
-	resp, err := h.service.SubmitAttempt(r.Context(), userID, id, body)
-	if err != nil {
-		switch {
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			httpx.Error(w, http.StatusNotFound, "[ERROR] Attempt not found")
-		case errors.Is(err, service.ErrAttemptCancelled), errors.Is(err, service.ErrAttemptAlreadySubmitted):
-			httpx.Error(w, http.StatusConflict, err.Error())
-		case errors.Is(err, service.ErrQuestionNotBelongToAttempt), errors.Is(err, service.ErrOptionNotBelongToQuestion):
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, service.ErrAttemptExpired):
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-		default:
-			httpx.Error(w, http.StatusInternalServerError, err.Error())
-		}
+	resp, httpErr := h.service.SubmitAttempt(r.Context(), userID, id, body)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -328,37 +275,28 @@ func (h *handler) SubmitAttempt(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id  path  int  true  "Attempt ID"
 // @Success      200  {object}  dto.AttemptResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      401  {object}  httpx.ErrorResponse
-// @Failure      404  {object}  httpx.ErrorResponse
-// @Failure      409  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      409  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /attempts/{id}/cancel [post]
 func (h *handler) CancelAttempt(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid attempt ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid attempt ID", err))
 		return
 	}
 
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
 		return
 	}
 
-	resp, err := h.service.CancelAttempt(r.Context(), userID, id)
-	if err != nil {
-		switch {
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			httpx.Error(w, http.StatusNotFound, "[ERROR] Attempt not found")
-		case errors.Is(err, service.ErrAttemptAlreadySubmitted), errors.Is(err, service.ErrAttemptCancelled):
-			httpx.Error(w, http.StatusConflict, err.Error())
-		case errors.Is(err, service.ErrAttemptNotActive), errors.Is(err, service.ErrAssignmentAttemptCancel):
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-		default:
-			httpx.Error(w, http.StatusInternalServerError, err.Error())
-		}
+	resp, httpErr := h.service.CancelAttempt(r.Context(), userID, id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -373,31 +311,27 @@ func (h *handler) CancelAttempt(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id  path  int  true  "Attempt ID"
 // @Success      200  {object}  dto.AttemptResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      401  {object}  httpx.ErrorResponse
-// @Failure      404  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /attempts/{id}/history [get]
 func (h *handler) GetAttemptHistory(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid attempt ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid attempt ID", err))
 		return
 	}
 
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
 		return
 	}
 
-	resp, err := h.service.GetAttemptHistory(r.Context(), userID, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[ERROR] Attempt history not found")
-			return
-		}
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	resp, httpErr := h.service.GetAttemptHistory(r.Context(), userID, id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -421,21 +355,21 @@ func (h *handler) GetAttemptHistory(w http.ResponseWriter, r *http.Request) {
 // @Param        nextAttemptFrom  query  string  false  "Next attempt from, RFC3339"
 // @Param        nextAttemptTo    query  string  false  "Next attempt to, RFC3339"
 // @Success      200  {object}  httpx.PaginatedResponse[dto.OutboxEventResponse]
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      401  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /outbox/events/pending [get]
 func (h *handler) GetPendingOutboxEvents(w http.ResponseWriter, r *http.Request) {
 	var query dto.GetPendingOutboxEventsQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
 		return
 	}
 	query.Normalize()
 
-	resp, pageCounts, err := h.service.GetPendingOutboxEvents(r.Context(), query)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	resp, pageCounts, httpErr := h.service.GetPendingOutboxEvents(r.Context(), query)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 

@@ -18,8 +18,7 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	UsersServiceAddr         string
-	AuthServiceAddr          string
+	IdentityServiceAddr      string
 	StorageServiceAddr       string
 	ClassroomsServiceAddr    string
 	NotificationsServiceAddr string
@@ -41,8 +40,7 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "examsdb"),
 
-		UsersServiceAddr:         getEnv("USERS_SERVICE_ADDR", "users:50052"),
-		AuthServiceAddr:          getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		IdentityServiceAddr:      getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
 		StorageServiceAddr:       getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
 		ClassroomsServiceAddr:    getEnv("CLASSROOMS_SERVICE_ADDR", "classrooms:50057"),
 		NotificationsServiceAddr: getEnv("NOTIFICATIONS_SERVICE_ADDR", "notifications:50058"),

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	usersClient "ego/api/gen/go/users"
+	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
 	"ego/services/classrooms/internal/model"
 )
@@ -414,7 +414,7 @@ type UserInfo struct {
 	Avatar string `json:"avatar"`
 }
 
-func ToUserInfoMap(users []*usersClient.UserInfo) map[string]*UserInfo {
+func ToUserInfoMap(users []*identityClient.UserInfo) map[string]*UserInfo {
 	usersByID := make(map[string]*UserInfo, len(users))
 	for _, user := range users {
 		usersByID[user.Id] = &UserInfo{
@@ -512,7 +512,7 @@ func ToClassroomResponse(classroom *model.Classroom) *ClassroomResponse {
 	}
 }
 
-func ToAssignmentResponse(assignment *model.Assignment, now time.Time, currentUserID string, includeSubmissions bool, users []*usersClient.UserInfo) *AssignmentResponse {
+func ToAssignmentResponse(assignment *model.Assignment, now time.Time, currentUserID string, includeSubmissions bool, users []*identityClient.UserInfo) *AssignmentResponse {
 	response := &AssignmentResponse{
 		ID:          assignment.ID,
 		ClassroomID: assignment.ClassroomID,
@@ -549,7 +549,7 @@ func ToAssignmentResponse(assignment *model.Assignment, now time.Time, currentUs
 	return response
 }
 
-func ToAssignmentResponses(assignments []*model.Assignment, now time.Time, currentUserID string, includeSubmissions bool, users []*usersClient.UserInfo) []*AssignmentResponse {
+func ToAssignmentResponses(assignments []*model.Assignment, now time.Time, currentUserID string, includeSubmissions bool, users []*identityClient.UserInfo) []*AssignmentResponse {
 	responses := make([]*AssignmentResponse, len(assignments))
 	for i, assignment := range assignments {
 		responses[i] = ToAssignmentResponse(assignment, now, currentUserID, includeSubmissions, users)
@@ -601,7 +601,7 @@ func ToAssignmentSubmissionResponse(submission *model.AssignmentSubmission, now 
 	}
 }
 
-func ToClassroomResponses(classrooms []*model.Classroom, users []*usersClient.UserInfo) []*ClassroomResponse {
+func ToClassroomResponses(classrooms []*model.Classroom, users []*identityClient.UserInfo) []*ClassroomResponse {
 	responses := make([]*ClassroomResponse, len(classrooms))
 	usersByID := ToUserInfoMap(users)
 	for i, classroom := range classrooms {

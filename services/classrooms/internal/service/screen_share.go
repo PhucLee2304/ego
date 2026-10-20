@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 
+	"ego/platform/httpx"
 	"ego/platform/logger"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/media"
@@ -13,11 +15,11 @@ import (
 )
 
 var (
-	ErrScreenShareTeacherDirect = errors.New("[ERROR] The teacher can share the screen directly without a request")
-	ErrScreenShareNotRequested  = errors.New("[CONFLICT] This participant has no screen share request")
-	ErrScreenShareNotApproved   = errors.New("[FORBIDDEN] Screen sharing has not been approved by the teacher")
-	ErrRoomParticipantInvalid   = errors.New("[ERROR] The user is not a student of this classroom")
-	ErrParticipantNotConnected  = errors.New("[CONFLICT] The participant is not connected to the room")
+	ErrScreenShareTeacherDirect = httpx.NewError(http.StatusBadRequest, "[ERROR] The teacher can share the screen directly without a request", nil)
+	ErrScreenShareNotRequested  = httpx.NewError(http.StatusConflict, "[CONFLICT] This participant has no screen share request", nil)
+	ErrScreenShareNotApproved   = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Screen sharing has not been approved by the teacher", nil)
+	ErrRoomParticipantInvalid   = httpx.NewError(http.StatusBadRequest, "[ERROR] The user is not a student of this classroom", nil)
+	ErrParticipantNotConnected  = httpx.NewError(http.StatusConflict, "[CONFLICT] The participant is not connected to the room", nil)
 )
 
 // liveRoomForUser trả về room đang LIVE của lớp cùng cờ host; người dùng phải

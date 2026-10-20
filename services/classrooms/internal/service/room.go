@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	usersClient "ego/api/gen/go/users"
+	identityClient "ego/api/gen/go/identity"
 	"ego/platform/logger"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/media"
@@ -167,9 +167,9 @@ func (s *service) JoinRoom(ctx context.Context, userID string, roomID uint) (*dt
 		permissions = participantPermissions(state, false)
 	}
 	name := userID
-	users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{userID}})
-	if err == nil && len(users.Users) > 0 {
-		name = users.Users[0].Name
+	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{userID}})
+	if err == nil && len(usersResp.Users) > 0 {
+		name = usersResp.Users[0].Name
 	}
 	token, err := s.mediaClient.CreateJoinToken(media.RoomName(room.ID), userID, name, isHost, permissions)
 	if err != nil {
@@ -297,13 +297,13 @@ func (s *service) GetRoomAttendance(ctx context.Context, userID string, roomID u
 	for _, session := range sessions {
 		ids = append(ids, session.UserID)
 	}
-	var userInfos []*usersClient.UserInfo
+	var userInfos []*identityClient.UserInfo
 	if len(ids) > 0 {
-		users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: ids})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
 		if err != nil {
 			return nil, err
 		}
-		userInfos = users.Users
+		userInfos = usersResp.Users
 	}
 	usersByID := dto.ToUserInfoMap(userInfos)
 	responses := make([]*dto.AttendanceSessionResponse, len(sessions))

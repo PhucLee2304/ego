@@ -2,14 +2,15 @@ package service
 
 import (
 	"context"
-	"errors"
+	"net/http"
 	"time"
 
+	"ego/platform/httpx"
 	"ego/services/classrooms/internal/dto"
 	classroomsSocket "ego/services/classrooms/internal/socket"
 )
 
-var ErrHandTeacher = errors.New("[ERROR] The teacher does not raise a hand in their own class")
+var ErrHandTeacher = httpx.NewError(http.StatusBadRequest, "[ERROR] The teacher does not raise a hand in their own class", nil)
 
 // SetHandRaised lưu trạng thái giơ tay trong suốt thời gian room LIVE để
 // refresh trang không làm mất tay; state bị xóa khi room kết thúc.

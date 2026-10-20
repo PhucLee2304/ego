@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 
 	"ego/platform/httpx"
@@ -16,15 +17,13 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrDeviceTokenConflict = errors.New("[CONFLICT] Device token belongs to another installation")
-
 type Service interface {
-	GetNotifications(context.Context, string, dto.NotificationsQuery) (*dto.NotificationsResponse, error)
-	RegisterDeviceToken(context.Context, string, dto.RegisterDeviceTokenRequest) error
-	DeleteDeviceToken(context.Context, string, string) error
-	MarkRead(context.Context, string, []uint) error
-	DeleteNotifications(context.Context, string, []uint) error
-	CreateNotifications(context.Context, []dto.CreateNotificationRequest) error
+	GetNotifications(context.Context, string, dto.NotificationsQuery) (*dto.NotificationsResponse, *httpx.HTTPError)
+	RegisterDeviceToken(context.Context, string, dto.RegisterDeviceTokenRequest) *httpx.HTTPError
+	DeleteDeviceToken(context.Context, string, string) *httpx.HTTPError
+	MarkRead(context.Context, string, []uint) *httpx.HTTPError
+	DeleteNotifications(context.Context, string, []uint) *httpx.HTTPError
+	CreateNotifications(context.Context, []dto.CreateNotificationRequest) *httpx.HTTPError
 }
 
 type service struct {
@@ -36,10 +35,10 @@ func New(repo *repository.Repository, sender push.Sender) Service {
 	return &service{repo: repo, sender: sender}
 }
 
-func (s *service) GetNotifications(ctx context.Context, userID string, query dto.NotificationsQuery) (*dto.NotificationsResponse, error) {
+func (s *service) GetNotifications(ctx context.Context, userID string, query dto.NotificationsQuery) (*dto.NotificationsResponse, *httpx.HTTPError) {
 	items, total, unread, err := s.repo.GetNotifications(ctx, userID, query.Read, int(query.Limit()), int(query.Offset()))
 	if err != nil {
-		return nil, err
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get notifications", err)
 	}
 	responses := make([]*dto.NotificationResponse, len(items))
 	for i, item := range items {
@@ -48,27 +47,39 @@ func (s *service) GetNotifications(ctx context.Context, userID string, query dto
 	return &dto.NotificationsResponse{Notifications: responses, Page: int(query.Page), PageCount: httpx.ToPageCounts(total, query.PageSize), UnreadCount: unread}, nil
 }
 
-func (s *service) RegisterDeviceToken(ctx context.Context, userID string, req dto.RegisterDeviceTokenRequest) error {
+func (s *service) RegisterDeviceToken(ctx context.Context, userID string, req dto.RegisterDeviceTokenRequest) *httpx.HTTPError {
 	err := s.repo.UpsertDeviceToken(ctx, &model.DeviceToken{
 		UserID: userID, DeviceID: req.DeviceID, Token: req.Token, Platform: req.Platform,
 	})
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return ErrDeviceTokenConflict
+		return httpx.NewError(http.StatusConflict, "[CONFLICT] Device token belongs to another installation", nil)
 	}
-	return err
+	if err != nil {
+		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to register device token", err)
+	}
+	return nil
 }
 
-func (s *service) DeleteDeviceToken(ctx context.Context, userID, token string) error {
-	return s.repo.DeleteDeviceToken(ctx, userID, token)
+func (s *service) DeleteDeviceToken(ctx context.Context, userID, token string) *httpx.HTTPError {
+	if err := s.repo.DeleteDeviceToken(ctx, userID, token); err != nil {
+		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to delete device token", err)
+	}
+	return nil
 }
-func (s *service) MarkRead(ctx context.Context, userID string, ids []uint) error {
-	return s.repo.MarkRead(ctx, userID, ids)
+func (s *service) MarkRead(ctx context.Context, userID string, ids []uint) *httpx.HTTPError {
+	if err := s.repo.MarkRead(ctx, userID, ids); err != nil {
+		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to mark notifications as read", err)
+	}
+	return nil
 }
-func (s *service) DeleteNotifications(ctx context.Context, userID string, ids []uint) error {
-	return s.repo.DeleteNotifications(ctx, userID, ids)
+func (s *service) DeleteNotifications(ctx context.Context, userID string, ids []uint) *httpx.HTTPError {
+	if err := s.repo.DeleteNotifications(ctx, userID, ids); err != nil {
+		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to delete notifications", err)
+	}
+	return nil
 }
 
-func (s *service) CreateNotifications(ctx context.Context, requests []dto.CreateNotificationRequest) error {
+func (s *service) CreateNotifications(ctx context.Context, requests []dto.CreateNotificationRequest) *httpx.HTTPError {
 	items := make([]*model.Notification, len(requests))
 	for i, req := range requests {
 		data := datatypes.JSONMap{}
@@ -78,7 +89,7 @@ func (s *service) CreateNotifications(ctx context.Context, requests []dto.Create
 		items[i] = &model.Notification{UserID: req.UserID, Title: req.Title, Body: req.Body, SourceService: req.SourceService, Data: data, IdempotencyKey: req.IdempotencyKey}
 	}
 	if err := s.repo.CreateNotifications(ctx, items); err != nil {
-		return err
+		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to create notifications", err)
 	}
 	if s.sender == nil {
 		return nil

@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
+	"ego/platform/httpx"
 	"ego/platform/logger"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/media"
@@ -14,7 +16,7 @@ import (
 	classroomsSocket "ego/services/classrooms/internal/socket"
 )
 
-var ErrParticipantRemoved = errors.New("[FORBIDDEN] You were removed from this session by the teacher")
+var ErrParticipantRemoved = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] You were removed from this session by the teacher", nil)
 
 // participantPermissions tính quyền publish của học sinh từ state; state nil
 // nghĩa là chưa bị giới hạn gì.

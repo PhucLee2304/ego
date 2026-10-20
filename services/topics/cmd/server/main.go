@@ -2,15 +2,15 @@ package main
 
 import (
 	"context"
-	tokenClient "ego/api/gen/go/token"
+	identityClient "ego/api/gen/go/identity"
 	"ego/platform/jwt"
 	"ego/platform/logger"
+	"ego/platform/rpc"
 	topicsConfig "ego/services/topics/config"
 	"ego/services/topics/database"
 	"ego/services/topics/internal/handler"
 	"ego/services/topics/internal/repository"
 	"ego/services/topics/internal/service"
-	"ego/platform/rpc"
 	"net/http"
 	"os"
 	"os/signal"
@@ -60,14 +60,14 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
-	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	identityConn, err := grpc.NewClient(appConfig.IdentityServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to identity service")
 	}
-	defer tokenConn.Close()
+	defer identityConn.Close()
 
-	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
-	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 	_ = authMiddleware
 
 	mux := http.NewServeMux()

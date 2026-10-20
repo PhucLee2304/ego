@@ -33,19 +33,19 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 // @Security BearerAuth
 // @Param request body dto.PresignUploadRequest true "Request Body"
 // @Success 200 {object} dto.PresignUploadResponse
-// @Failure 400 {object} httpx.ErrorResponse
-// @Failure 500 {object} httpx.ErrorResponse
+// @Failure 400 {object} httpx.HTTPError
+// @Failure 500 {object} httpx.HTTPError
 // @Router /presign/upload [post]
 func (h *handler) PresignUploadURL(w http.ResponseWriter, r *http.Request) {
 	var req dto.PresignUploadRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
 
-	resp, err := h.svc.GeneratePresignUploadURL(r.Context(), req)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	resp, httpErr := h.svc.GeneratePresignUploadURL(r.Context(), req)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 

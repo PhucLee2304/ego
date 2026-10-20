@@ -19,8 +19,7 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr          string
-	UsersServiceAddr         string
+	IdentityServiceAddr      string
 	ExamsServiceAddr         string
 	NotificationsServiceAddr string
 	LiveKitURL               string
@@ -44,8 +43,7 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "classroomsdb"),
 
-		AuthServiceAddr:          getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		UsersServiceAddr:         getEnv("USERS_SERVICE_ADDR", "users:50052"),
+		IdentityServiceAddr:      getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
 		ExamsServiceAddr:         getEnv("EXAMS_SERVICE_ADDR", "exams:50056"),
 		NotificationsServiceAddr: getEnv("NOTIFICATIONS_SERVICE_ADDR", "notifications:50058"),
 		LiveKitURL:               getEnv("LIVEKIT_URL", "http://livekit:7880"),

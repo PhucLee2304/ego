@@ -4,9 +4,8 @@ import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
 	examsClient "ego/api/gen/go/exams"
+	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
-	tokenClient "ego/api/gen/go/token"
-	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -73,27 +72,20 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
-	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	identityConn, err := grpc.NewClient(appConfig.IdentityServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to identity service")
 	}
-	defer tokenConn.Close()
+	defer identityConn.Close()
 
-	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
-	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
-
-	usersConn, err := grpc.NewClient(appConfig.UsersServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to users service")
-	}
-	defer usersConn.Close()
-	usersServiceClient := usersClient.NewUserServiceClient(usersConn)
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
-		resp, err := usersServiceClient.GetUserRole(ctx, &usersClient.GetUserRoleRequest{Id: userID})
+		userResp, err := identityServiceClient.GetUserRole(ctx, &identityClient.GetUserRoleRequest{Id: userID})
 		if err != nil {
 			return "", err
 		}
-		return resp.Role, nil
+		return userResp.Role, nil
 	})
 
 	examsConn, err := grpc.NewClient(appConfig.ExamsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
@@ -136,14 +128,14 @@ func main() {
 
 	repo := repository.NewRepository(db)
 
-	service := service.New(repo, appConfig, usersServiceClient, examsServiceClient)
+	service := service.New(repo, appConfig, identityServiceClient, examsServiceClient)
 	service.SetNotificationClient(notificationsServiceClient)
 	service.SetMediaClient(media.New(appConfig.LiveKitURL, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret, appConfig.LiveKitJoinTokenTTL))
 
 	workers.StartNotificationOutbox(appCtx, service, 2*time.Second, 100)
 	workers.StartRoomLifecycle(appCtx, service, 15*time.Second)
 
-	socketServer := platformsocket.NewServer(tokenServiceClient)
+	socketServer := platformsocket.NewServer(identityServiceClient)
 	service.SetRoomEventPublisher(socketServer.BroadcastToUser)
 
 	httpHandler := handler.New(service)

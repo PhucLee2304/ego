@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	examsClient "ego/api/gen/go/exams"
-	usersClient "ego/api/gen/go/users"
+	identityClient "ego/api/gen/go/identity"
 	"ego/services/classrooms/config"
 	"ego/services/classrooms/database"
 	"ego/services/classrooms/internal/dto"
@@ -24,22 +24,22 @@ import (
 )
 
 type testUsersServer struct {
-	usersClient.UnimplementedUserServiceServer
+	identityClient.UnimplementedIdentityServiceServer
 }
 
-func (testUsersServer) GetUsersInfo(_ context.Context, req *usersClient.GetUsersInfoRequest) (*usersClient.GetUsersInfoResponse, error) {
-	users := make([]*usersClient.UserInfo, len(req.Ids))
+func (testUsersServer) GetUsersInfo(_ context.Context, req *identityClient.GetUsersInfoRequest) (*identityClient.GetUsersInfoResponse, error) {
+	users := make([]*identityClient.UserInfo, len(req.Ids))
 	for i, id := range req.Ids {
-		users[i] = &usersClient.UserInfo{Id: id, Email: id + "@example.com", Name: id}
+		users[i] = &identityClient.UserInfo{Id: id, Email: id + "@example.com", Name: id}
 	}
-	return &usersClient.GetUsersInfoResponse{Users: users}, nil
+	return &identityClient.GetUsersInfoResponse{Users: users}, nil
 }
 
-func (testUsersServer) SearchUserIDsByName(_ context.Context, req *usersClient.SearchUserIDsByNameRequest) (*usersClient.SearchUserIDsByNameResponse, error) {
+func (testUsersServer) SearchUserIDsByName(_ context.Context, req *identityClient.SearchUserIDsByNameRequest) (*identityClient.SearchUserIDsByNameResponse, error) {
 	if strings.Contains(strings.ToLower(req.Query), "teacher") {
-		return &usersClient.SearchUserIDsByNameResponse{Ids: []string{"teacher-1"}}, nil
+		return &identityClient.SearchUserIDsByNameResponse{Ids: []string{"teacher-1"}}, nil
 	}
-	return &usersClient.SearchUserIDsByNameResponse{}, nil
+	return &identityClient.SearchUserIDsByNameResponse{}, nil
 }
 
 type testExamsServer struct {
@@ -73,11 +73,11 @@ func classroomTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func classroomTestClients(t *testing.T) (usersClient.UserServiceClient, examsClient.ExamServiceClient) {
+func classroomTestClients(t *testing.T) (identityClient.IdentityServiceClient, examsClient.ExamServiceClient) {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
-	usersClient.RegisterUserServiceServer(server, testUsersServer{})
+	identityClient.RegisterIdentityServiceServer(server, testUsersServer{})
 	examsClient.RegisterExamServiceServer(server, testExamsServer{})
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() {
@@ -91,7 +91,7 @@ func classroomTestClients(t *testing.T) (usersClient.UserServiceClient, examsCli
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return usersClient.NewUserServiceClient(conn), examsClient.NewExamServiceClient(conn)
+	return identityClient.NewIdentityServiceClient(conn), examsClient.NewExamServiceClient(conn)
 }
 
 func TestClassroomMembershipLifecycleAndFilters(t *testing.T) {

@@ -18,8 +18,7 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr          string
-	UsersServiceAddr         string
+	IdentityServiceAddr      string
 	ClassroomsServiceAddr    string
 	NotificationsServiceAddr string
 	StorageServiceAddr       string
@@ -43,11 +42,10 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "postsdb"),
 
-		AuthServiceAddr:          getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		UsersServiceAddr:         getEnv("USERS_SERVICE_ADDR", "users:50052"),
+		IdentityServiceAddr:      getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
 		ClassroomsServiceAddr:    getEnv("CLASSROOMS_SERVICE_ADDR", "classrooms:50057"),
 		NotificationsServiceAddr: getEnv("NOTIFICATIONS_SERVICE_ADDR", "notifications:50058"),
-		StorageServiceAddr:       getEnv("STORAGE_SERVICE_ADDR", "storage:50055"),
+		StorageServiceAddr:       getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
 		ImageMaxBytes:            getEnvInt64("POST_IMAGE_MAX_BYTES", 5*1024*1024),
 		FileMaxBytes:             getEnvInt64("POST_FILE_MAX_BYTES", 10*1024*1024),
 		VideoMaxBytes:            getEnvInt64("POST_VIDEO_MAX_BYTES", 20*1024*1024),
