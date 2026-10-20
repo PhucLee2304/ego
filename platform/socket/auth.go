@@ -19,7 +19,12 @@ func AuthenticateToken(ctx context.Context, r *http.Request, identityServiceClie
 	tokenResp, err := identityServiceClient.ValidateToken(ctx, &identityClient.ValidateTokenRequest{
 		Token: token,
 	})
-	if err != nil || !tokenResp.IsValid {
+	if err != nil {
+		// Identity could not judge the token; keep the gRPC error so the caller
+		// does not report a valid token as unauthorized.
+		return "", err
+	}
+	if !tokenResp.IsValid {
 		return "", ErrUnauthorized
 	}
 

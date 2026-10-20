@@ -1345,7 +1345,7 @@ func (s *service) UpdateAssignmentContent(ctx context.Context, teacherID string,
 		return nil, ErrAssignmentContentConfirmation
 	}
 	if totalAttempts > 0 && strings.TrimSpace(req.Reason) == "" {
-		return nil, errors.New("[ERROR] A reason is required when changing an exam with attempts")
+		return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] A reason is required when changing an exam with attempts", nil)
 	}
 	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		return repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, assignment.Title, assignment.Description, false)

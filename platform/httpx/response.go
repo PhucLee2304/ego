@@ -9,6 +9,7 @@ import (
 
 	"ego/platform/logger"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
@@ -94,14 +95,31 @@ func FromError(err error, message string) *HTTPError {
 	if grpcStatus, ok := status.FromError(err); ok {
 		switch grpcStatus.Code() {
 		case codes.PermissionDenied:
-			return NewError(http.StatusForbidden, grpcStatus.Message(), err)
+			return NewError(http.StatusForbidden, publicStatusMessage(grpcStatus), err)
 		case codes.NotFound:
-			return NewError(http.StatusNotFound, grpcStatus.Message(), err)
+			return NewError(http.StatusNotFound, publicStatusMessage(grpcStatus), err)
 		case codes.InvalidArgument, codes.FailedPrecondition:
-			return NewError(http.StatusBadRequest, grpcStatus.Message(), err)
+			return NewError(http.StatusBadRequest, publicStatusMessage(grpcStatus), err)
+		case codes.AlreadyExists:
+			return NewError(http.StatusConflict, publicStatusMessage(grpcStatus), err)
+		case codes.Unauthenticated:
+			return NewError(http.StatusUnauthorized, publicStatusMessage(grpcStatus), err)
+		case codes.Unavailable, codes.DeadlineExceeded:
+			return NewError(http.StatusServiceUnavailable, "[UNAVAILABLE] Service temporarily unavailable", err)
 		}
 	}
 	return NewError(http.StatusInternalServerError, message, err)
+}
+
+// publicStatusMessage forwards only a message the producer explicitly marked as
+// public (rpc.PublicError); the plain status message may be internal error text.
+func publicStatusMessage(grpcStatus *status.Status) string {
+	for _, detail := range grpcStatus.Details() {
+		if localized, ok := detail.(*errdetails.LocalizedMessage); ok {
+			return localized.GetMessage()
+		}
+	}
+	return ""
 }
 
 // JSON writes a success response.

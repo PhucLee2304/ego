@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"ego/platform/logger"
+	platformRpc "ego/platform/rpc"
 
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
@@ -176,12 +177,15 @@ func TestFromError(t *testing.T) {
 		t.Fatalf("unexpected not-found error: %+v", notFound)
 	}
 
-	denied := FromError(status.Error(codes.PermissionDenied, "[FORBIDDEN] Not a member"), "[ERROR] Failed")
+	denied := FromError(platformRpc.PublicError(codes.PermissionDenied, "[FORBIDDEN] Not a member"), "[ERROR] Failed")
 	if denied.StatusCode != http.StatusForbidden || denied.Message != "[FORBIDDEN] Not a member" {
 		t.Fatalf("unexpected gRPC permission error: %+v", denied)
 	}
-	if unavailable := FromError(status.Error(codes.Unavailable, "dial tcp"), "[ERROR] Failed"); unavailable.StatusCode != http.StatusInternalServerError || unavailable.Message != "[ERROR] Failed" {
-		t.Fatalf("expected an internal error for an unavailable gRPC service, got %+v", unavailable)
+	if unavailable := FromError(status.Error(codes.Unavailable, "dial tcp"), "[ERROR] Failed"); unavailable.StatusCode != http.StatusServiceUnavailable || strings.Contains(unavailable.Message, "dial tcp") {
+		t.Fatalf("expected a sanitized 503 for an unavailable gRPC service, got %+v", unavailable)
+	}
+	if hidden := FromError(status.Error(codes.PermissionDenied, "[FORBIDDEN] internal detail"), "[ERROR] Failed"); hidden.StatusCode != http.StatusForbidden || strings.Contains(hidden.Message, "internal detail") {
+		t.Fatalf("expected a gRPC message not marked public to be hidden, got %+v", hidden)
 	}
 
 	cause := errors.New("connection refused")

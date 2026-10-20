@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"ego/api/gen/go/classrooms"
+	platformRpc "ego/platform/rpc"
 	"ego/platform/valuex"
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
@@ -42,7 +43,7 @@ func (s *server) GetClassroomPostAccess(ctx context.Context, req *classrooms.Get
 	classroom, err := s.repo.GetClassroomByID(ctx, uint(req.ClassroomId))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, status.Error(codes.NotFound, "[ERROR] Classroom not found")
+			return nil, platformRpc.PublicError(codes.NotFound, "[ERROR] Classroom not found")
 		}
 		return nil, toStatusError(err)
 	}
@@ -236,17 +237,21 @@ func (s *server) GetAssignmentSubmissionSyncStatus(ctx context.Context, req *cla
 func toStatusError(err error) error {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		return status.Error(codes.NotFound, "[ERROR] Assignment not found")
+		return platformRpc.PublicError(codes.NotFound, "[ERROR] Assignment not found")
 	case errors.Is(err, errStudentNotApproved):
-		return status.Error(codes.PermissionDenied, err.Error())
+		return platformRpc.PublicError(codes.PermissionDenied, errStudentNotApproved.Error())
 	case errors.Is(err, errAssignmentExamMismatch):
-		return status.Error(codes.InvalidArgument, err.Error())
+		return platformRpc.PublicError(codes.InvalidArgument, errAssignmentExamMismatch.Error())
 	case errors.Is(err, errInvalidSubmissionScore):
-		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, errAssignmentNotOpen),
-		errors.Is(err, errAssignmentClosed),
-		errors.Is(err, errClassroomNotActive), errors.Is(err, errAssignmentNotActive):
-		return status.Error(codes.FailedPrecondition, err.Error())
+		return platformRpc.PublicError(codes.InvalidArgument, errInvalidSubmissionScore.Error())
+	case errors.Is(err, errAssignmentNotOpen):
+		return platformRpc.PublicError(codes.FailedPrecondition, errAssignmentNotOpen.Error())
+	case errors.Is(err, errAssignmentClosed):
+		return platformRpc.PublicError(codes.FailedPrecondition, errAssignmentClosed.Error())
+	case errors.Is(err, errClassroomNotActive):
+		return platformRpc.PublicError(codes.FailedPrecondition, errClassroomNotActive.Error())
+	case errors.Is(err, errAssignmentNotActive):
+		return platformRpc.PublicError(codes.FailedPrecondition, errAssignmentNotActive.Error())
 	default:
 		return status.Error(codes.Internal, err.Error())
 	}

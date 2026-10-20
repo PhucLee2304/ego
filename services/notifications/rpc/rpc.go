@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	notificationsClient "ego/api/gen/go/notifications"
-	"ego/platform/httpx"
+	"ego/platform/logger"
 	"ego/services/notifications/internal/dto"
 
 	"google.golang.org/grpc/codes"
@@ -21,7 +21,7 @@ type Server struct {
 }
 
 type notificationCreator interface {
-	CreateNotifications(context.Context, []dto.CreateNotificationRequest) *httpx.HTTPError
+	CreateNotifications(context.Context, []dto.CreateNotificationRequest) error
 }
 
 func New(service notificationCreator) *Server { return &Server{service: service} }
@@ -52,8 +52,9 @@ func (s *Server) CreateNotifications(ctx context.Context, req *notificationsClie
 			IdempotencyKey: fmt.Sprintf("%s:user:%s", baseKey, recipient),
 		})
 	}
-	if httpErr := s.service.CreateNotifications(ctx, requests); httpErr != nil {
-		return nil, status.Errorf(codes.Internal, "%s: %v", httpErr.Message, httpErr.Unwrap())
+	if err := s.service.CreateNotifications(ctx, requests); err != nil {
+		logger.Log.Error().Err(err).Msg("[NOTIFICATIONS] Failed to create notifications")
+		return nil, status.Error(codes.Internal, "[ERROR] Failed to create notifications")
 	}
 	return &notificationsClient.CreateNotificationsResponse{CreatedCount: uint32(len(requests))}, nil
 }

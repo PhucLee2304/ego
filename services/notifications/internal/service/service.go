@@ -23,7 +23,7 @@ type Service interface {
 	DeleteDeviceToken(context.Context, string, string) *httpx.HTTPError
 	MarkRead(context.Context, string, []uint) *httpx.HTTPError
 	DeleteNotifications(context.Context, string, []uint) *httpx.HTTPError
-	CreateNotifications(context.Context, []dto.CreateNotificationRequest) *httpx.HTTPError
+	CreateNotifications(context.Context, []dto.CreateNotificationRequest) error
 }
 
 type service struct {
@@ -79,7 +79,7 @@ func (s *service) DeleteNotifications(ctx context.Context, userID string, ids []
 	return nil
 }
 
-func (s *service) CreateNotifications(ctx context.Context, requests []dto.CreateNotificationRequest) *httpx.HTTPError {
+func (s *service) CreateNotifications(ctx context.Context, requests []dto.CreateNotificationRequest) error {
 	items := make([]*model.Notification, len(requests))
 	for i, req := range requests {
 		data := datatypes.JSONMap{}
@@ -89,7 +89,7 @@ func (s *service) CreateNotifications(ctx context.Context, requests []dto.Create
 		items[i] = &model.Notification{UserID: req.UserID, Title: req.Title, Body: req.Body, SourceService: req.SourceService, Data: data, IdempotencyKey: req.IdempotencyKey}
 	}
 	if err := s.repo.CreateNotifications(ctx, items); err != nil {
-		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to create notifications", err)
+		return err
 	}
 	if s.sender == nil {
 		return nil

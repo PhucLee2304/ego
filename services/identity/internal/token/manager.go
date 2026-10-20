@@ -97,6 +97,9 @@ func (m *manager) ValidateRefresh(ctx context.Context, tokenString string) (stri
 func (m *manager) validate(tokenString, tokenType string) (string, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, ErrInvalidToken
+		}
 		return m.secretKey, nil
 	})
 	if err != nil {
@@ -106,7 +109,9 @@ func (m *manager) validate(tokenString, tokenType string) (string, error) {
 		return "", ErrInvalidToken
 	}
 
-	if !token.Valid || claims.TokenType != tokenType {
+	// Tokens issued before the "typ" claim existed carry no type; accept them until
+	// they have all expired so existing sessions are not logged out.
+	if !token.Valid || (claims.TokenType != "" && claims.TokenType != tokenType) {
 		return "", ErrInvalidToken
 	}
 

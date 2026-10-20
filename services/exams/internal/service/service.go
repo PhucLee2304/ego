@@ -96,6 +96,18 @@ var (
 	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
 )
 
+// PrivateExamValidationError marks a private exam request the client must fix;
+// its Message is safe to show to end users.
+type PrivateExamValidationError struct {
+	Message string
+}
+
+func (e *PrivateExamValidationError) Error() string { return e.Message }
+
+func invalidPrivateExam(message string) error {
+	return &PrivateExamValidationError{Message: message}
+}
+
 const maxAutoSubmitWorkers = 10
 const outboxVisibilityTimeout = time.Minute
 const maxOutboxAttempts = 10
@@ -139,23 +151,23 @@ func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *
 func (s *service) CreatePrivateExam(ctx context.Context, req dto.CreatePrivateExamRequest) (*model.Exam, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	if req.Title == "" {
-		return nil, errors.New("[ERROR] Exam title is required")
+		return nil, invalidPrivateExam("[ERROR] Exam title is required")
 	}
 	if len(req.Questions) == 0 {
-		return nil, errors.New("[ERROR] Exam must contain at least one question")
+		return nil, invalidPrivateExam("[ERROR] Exam must contain at least one question")
 	}
 
 	questions := make([]model.Question, len(req.Questions))
 	optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
 	for i, input := range req.Questions {
 		if strings.TrimSpace(input.Content) == "" || len(input.Options) != len(optionKeys) || input.CorrectOptionIndex < 0 || input.CorrectOptionIndex >= len(optionKeys) {
-			return nil, errors.New("[ERROR] Each question must have content, exactly four options, and one valid correct option")
+			return nil, invalidPrivateExam("[ERROR] Each question must have content, exactly four options, and one valid correct option")
 		}
 		options := make([]model.Option, len(optionKeys))
 		for optionIndex, key := range optionKeys {
 			content := strings.TrimSpace(input.Options[optionIndex])
 			if content == "" {
-				return nil, errors.New("[ERROR] Question options cannot be blank")
+				return nil, invalidPrivateExam("[ERROR] Question options cannot be blank")
 			}
 			options[optionIndex] = model.Option{
 				Key:       key,
@@ -220,14 +232,14 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 		}
 		title := strings.TrimSpace(req.Title)
 		if title == "" || len(req.Questions) == 0 {
-			return errors.New("[ERROR] Exam title and at least one question are required")
+			return invalidPrivateExam("[ERROR] Exam title and at least one question are required")
 		}
 		if req.CorrectionOnly {
 			if strings.TrimSpace(req.ActorID) == "" || strings.TrimSpace(req.Reason) == "" {
-				return errors.New("[ERROR] Correction actor and reason are required")
+				return invalidPrivateExam("[ERROR] Correction actor and reason are required")
 			}
 			if title != exam.Title || (exam.Description == nil) != (req.Description == nil) || (exam.Description != nil && req.Description != nil && *exam.Description != *req.Description) || len(req.Questions) != len(exam.Sections[0].Questions) {
-				return errors.New("[ERROR] An exam with attempts only allows correcting the answer or changing score exclusion")
+				return invalidPrivateExam("[ERROR] An exam with attempts only allows correcting the answer or changing score exclusion")
 			}
 			questionsByID := make(map[uint]*model.Question, len(exam.Sections[0].Questions))
 			for i := range exam.Sections[0].Questions {
@@ -237,19 +249,19 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 			for _, input := range req.Questions {
 				question := questionsByID[input.ID]
 				if question == nil || strings.TrimSpace(input.Content) != question.Content || input.Explanation == nil || strings.TrimSpace(*input.Explanation) != question.Explanation || len(input.Options) != len(question.Options) || len(input.OptionIDs) != len(question.Options) {
-					return errors.New("[ERROR] Question structure cannot be changed after an attempt exists")
+					return invalidPrivateExam("[ERROR] Question structure cannot be changed after an attempt exists")
 				}
 				correctOptionID := uint(0)
 				for index, option := range question.Options {
 					if input.OptionIDs[index] != option.ID || strings.TrimSpace(input.Options[index]) != strings.TrimSpace(*option.Content) {
-						return errors.New("[ERROR] Question options cannot be changed after an attempt exists")
+						return invalidPrivateExam("[ERROR] Question options cannot be changed after an attempt exists")
 					}
 					if index == input.CorrectOptionIndex {
 						correctOptionID = option.ID
 					}
 				}
 				if correctOptionID == 0 {
-					return errors.New("[ERROR] Correct option is invalid")
+					return invalidPrivateExam("[ERROR] Correct option is invalid")
 				}
 				if err := repo.UpdateQuestionScoring(ctx, question.ID, input.ExcludedFromScore, correctOptionID); err != nil {
 					return err
@@ -343,13 +355,13 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 		questions := make([]model.Question, len(req.Questions))
 		for i, input := range req.Questions {
 			if strings.TrimSpace(input.Content) == "" || len(input.Options) != 4 || input.CorrectOptionIndex < 0 || input.CorrectOptionIndex > 3 {
-				return errors.New("[ERROR] Each question must have content, exactly four options, and one valid correct option")
+				return invalidPrivateExam("[ERROR] Each question must have content, exactly four options, and one valid correct option")
 			}
 			options := make([]model.Option, 4)
 			for j, value := range input.Options {
 				content := strings.TrimSpace(value)
 				if content == "" {
-					return errors.New("[ERROR] Question options cannot be blank")
+					return invalidPrivateExam("[ERROR] Question options cannot be blank")
 				}
 				options[j] = model.Option{Key: optionKeys[j], Content: &content, IsCorrect: j == input.CorrectOptionIndex, Order: j + 1}
 			}
@@ -709,6 +721,9 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 func (s *service) SubmitAttempt(ctx context.Context, userID string, attemptID uint, req dto.SubmitAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError) {
 	response, err := s.submitAttempt(ctx, userID, attemptID, &req.Answers)
 	if err != nil {
+		if errors.Is(err, dto.ErrScoreQuestionNotFound) || errors.Is(err, dto.ErrScoreQuestionSectionEmpty) {
+			return nil, httpx.NewError(http.StatusBadRequest, err.Error(), err)
+		}
 		return nil, httpx.FromError(err, "[ERROR] Failed to submit attempt")
 	}
 	return response, nil

@@ -62,6 +62,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := AuthenticateToken(r.Context(), r, s.identityServiceClient)
 	if err != nil {
+		if !errors.Is(err, ErrUnauthorized) {
+			httpx.Error(w, httpx.NewError(http.StatusServiceUnavailable, "[SOCKET] Authentication service unavailable", err))
+			return
+		}
 		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[SOCKET] Unauthorized", err))
 		return
 	}
