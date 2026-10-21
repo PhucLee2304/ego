@@ -6,6 +6,7 @@ import (
 
 	"ego/services/identity/internal/model"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -60,13 +61,17 @@ func (r *Repository) SearchUserIDsByName(ctx context.Context, query string) ([]s
 
 func (r *Repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {
 	var user model.User
-	if err := r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&model.User{}).
 		Clauses(clause.Returning{}).
 		Where("id = ?", userID).
 		Updates(updates).
-		Scan(&user).Error; err != nil {
-		return nil, err
+		Scan(&user)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &user, nil
 }

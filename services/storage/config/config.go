@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -19,6 +20,7 @@ type AppConfig struct {
 	R2AccessKey      string
 	R2SecretKey      string
 	R2Bucket         string
+	R2PublicRead     bool
 	R2Expiry         time.Duration
 }
 
@@ -35,6 +37,7 @@ func LoadAppConfig() (*AppConfig, error) {
 		R2AccessKey:         getEnv("R2_ACCESS_KEY", "root"),
 		R2SecretKey:         getEnv("R2_SECRET_KEY", "root"),
 		R2Bucket:            getEnv("R2_BUCKET", "ego"),
+		R2PublicRead:        parseBool("R2_PUBLIC_READ", false),
 		R2Expiry:            parseDuration("R2_EXPIRY", "15m"),
 	}
 
@@ -46,6 +49,19 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func parseBool(key string, fallback bool) bool {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func parseDuration(key, fallback string) time.Duration {

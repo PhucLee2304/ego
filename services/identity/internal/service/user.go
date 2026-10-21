@@ -68,7 +68,7 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 
 	user, err := s.repo.UpdateMe(ctx, userID, updates)
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to update user", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to update user")
 	}
 	return &dto.User{
 		ID:     user.ID,

@@ -5,6 +5,7 @@ import (
 	"ego/platform/httpx"
 	"ego/services/identity/internal/dto"
 	"ego/services/identity/internal/model"
+	"ego/services/identity/internal/repository"
 	"ego/services/identity/internal/token"
 	"errors"
 	"fmt"
@@ -55,16 +56,20 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 		avatar = *firebaseUser.Avatar
 	}
 
-	user, err := s.repo.UpsertUser(ctx, &model.User{
-		Email:  firebaseUser.Email,
-		Name:   name,
-		Avatar: &avatar,
-	})
-	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to login", err)
-	}
+	var accessToken, refreshToken string
+	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		user, err := repo.UpsertUser(ctx, &model.User{
+			Email:  firebaseUser.Email,
+			Name:   name,
+			Avatar: &avatar,
+		})
+		if err != nil {
+			return err
+		}
 
-	accessToken, refreshToken, err := s.jwtManager.Generate(ctx, strconv.Itoa(int(user.ID)))
+		accessToken, refreshToken, err = s.jwtManager.Generate(ctx, strconv.Itoa(int(user.ID)))
+		return err
+	})
 	if err != nil {
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to login", err)
 	}
