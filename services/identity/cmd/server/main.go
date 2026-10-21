@@ -89,7 +89,7 @@ func main() {
 
 	jwtManager := token.NewManager(jwtConfig)
 	repo := repository.NewRepository(db)
-	svc := service.New(jwtManager, *firebaseClient, repo, storageServiceClient)
+	svc := service.New(jwtManager, firebaseClient, repo, storageServiceClient)
 
 	authMiddleware := jwt.NewAuthMiddlewareWithValidator(svc.ValidateToken)
 	roleMiddleware := jwt.NewRoleMiddleware(svc.GetRole)

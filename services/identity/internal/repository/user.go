@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *Repository) UpsertUser(ctx context.Context, user *model.User) (*model.User, error) {
+func (r *repository) UpsertUser(ctx context.Context, user *model.User) (*model.User, error) {
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "firebase_uid"}},
 		DoUpdates: clause.AssignmentColumns([]string{"email"}),
@@ -26,7 +26,7 @@ func (r *Repository) UpsertUser(ctx context.Context, user *model.User) (*model.U
 	return &dbUser, nil
 }
 
-func (r *Repository) GetByID(ctx context.Context, userID string) (*model.User, error) {
+func (r *repository) GetByID(ctx context.Context, userID string) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error; err != nil {
 		return nil, err
@@ -34,7 +34,7 @@ func (r *Repository) GetByID(ctx context.Context, userID string) (*model.User, e
 	return &user, nil
 }
 
-func (r *Repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.User, error) {
+func (r *repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.User, error) {
 	var users []*model.User
 	if len(userIDs) == 0 {
 		return users, nil
@@ -45,7 +45,7 @@ func (r *Repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.U
 	return users, nil
 }
 
-func (r *Repository) SearchUserIDsByName(ctx context.Context, query string) ([]string, error) {
+func (r *repository) SearchUserIDsByName(ctx context.Context, query string) ([]string, error) {
 	var ids []string
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -59,7 +59,7 @@ func (r *Repository) SearchUserIDsByName(ctx context.Context, query string) ([]s
 	return ids, nil
 }
 
-func (r *Repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {
+func (r *repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {
 	var user model.User
 	result := r.db.WithContext(ctx).
 		Model(&model.User{}).
@@ -76,7 +76,7 @@ func (r *Repository) UpdateMe(ctx context.Context, userID string, updates map[st
 	return &user, nil
 }
 
-func (r *Repository) GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error) {
+func (r *repository) GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error) {
 	var users []model.User
 	var total int64
 

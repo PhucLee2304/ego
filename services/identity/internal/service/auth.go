@@ -66,7 +66,7 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 	}
 
 	var accessToken, refreshToken string
-	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+	err = s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		user, err := repo.UpsertUser(ctx, &model.User{
 			FirebaseUID: firebaseUID,
 			Email:       email,

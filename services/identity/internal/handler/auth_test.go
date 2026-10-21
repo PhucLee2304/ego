@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"ego/platform/firebase"
 	identityConfig "ego/services/identity/config"
 	"ego/services/identity/internal/service"
 	"ego/services/identity/internal/token"
@@ -18,7 +17,7 @@ func TestRefreshMalformedTokenReturnsUnauthorized(t *testing.T) {
 		AccessTokenExpiry:  time.Minute,
 		RefreshTokenExpiry: time.Hour,
 	})
-	svc := service.New(jwtManager, firebase.Client{}, nil, nil)
+	svc := service.New(jwtManager, nil, nil, nil)
 	h := New(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/refresh", bytes.NewBufferString(`{"refreshToken":"not-a-jwt"}`))

@@ -11,6 +11,8 @@ import (
 	"ego/services/identity/internal/repository"
 	"ego/services/identity/internal/token"
 	"errors"
+
+	"google.golang.org/grpc"
 )
 
 var (
@@ -37,18 +39,26 @@ type Service interface {
 	SearchUserIDsByName(ctx context.Context, query string) ([]string, error)
 }
 
+type IdentityProvider interface {
+	VerifyIDToken(ctx context.Context, idToken string) (*firebase.FirebaseUser, error)
+}
+
+type StorageClient interface {
+	GetPublicURL(ctx context.Context, in *storageClient.GetPublicURLRequest, opts ...grpc.CallOption) (*storageClient.GetPublicURLResponse, error)
+}
+
 type service struct {
 	jwtManager     token.Manager
-	firebaseClient firebase.Client
-	repo           *repository.Repository
-	storageClient  storageClient.StorageServiceClient
+	firebaseClient IdentityProvider
+	repo           repository.Repository
+	storageClient  StorageClient
 }
 
 func New(
 	jwtManager token.Manager,
-	firebaseClient firebase.Client,
-	repo *repository.Repository,
-	storageClient storageClient.StorageServiceClient,
+	firebaseClient IdentityProvider,
+	repo repository.Repository,
+	storageClient StorageClient,
 ) Service {
 	return &service{
 		jwtManager:     jwtManager,

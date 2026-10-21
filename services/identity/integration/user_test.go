@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	identityClient "ego/api/gen/go/identity"
-	"ego/platform/firebase"
 	"ego/platform/jwt"
 	platformRpc "ego/platform/rpc"
 	"ego/services/identity/database"
@@ -41,7 +40,7 @@ func testService(t *testing.T) (service.Service, *gorm.DB) {
 		t.Fatal(err)
 	}
 	// GetRole, GetUsersInfo and SearchUserIDsByName only use the repository.
-	return service.New(nil, firebase.Client{}, repository.NewRepository(db), nil), db
+	return service.New(nil, nil, repository.NewRepository(db), nil), db
 }
 
 func createUser(t *testing.T, db *gorm.DB, email, name string, role model.RoleName) string {
@@ -203,5 +202,34 @@ func TestGetListOrdersUsersByID(t *testing.T) {
 		if users[i-1].ID >= users[i].ID {
 			t.Fatalf("expected ascending IDs, got %d before %d", users[i-1].ID, users[i].ID)
 		}
+	}
+}
+
+func TestUserTransactionRollsBack(t *testing.T) {
+	_, db := testService(t)
+	repo := repository.NewRepository(db)
+	expectedErr := errors.New("token generation failed")
+
+	err := repo.Transaction(context.Background(), func(tx repository.Repository) error {
+		_, err := tx.UpsertUser(context.Background(), &model.User{
+			FirebaseUID: "rolled-back-uid",
+			Email:       "rolled-back@example.com",
+			Name:        "Rolled Back",
+		})
+		if err != nil {
+			return err
+		}
+		return expectedErr
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected transaction error, got %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.User{}).Where("firebase_uid = ?", "rolled-back-uid").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected user insert to be rolled back, found %d rows", count)
 	}
 }
