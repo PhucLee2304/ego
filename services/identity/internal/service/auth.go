@@ -42,6 +42,15 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 	if err != nil {
 		return nil, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] Invalid token", fmt.Errorf("%w: %w", ErrInvalidIdToken, err))
 	}
+	firebaseUID := strings.TrimSpace(firebaseUser.UID)
+	email := strings.TrimSpace(firebaseUser.Email)
+	if firebaseUID == "" || email == "" {
+		return nil, httpx.NewError(
+			http.StatusUnauthorized,
+			"[UNAUTHORIZED] Token is missing required identity claims",
+			fmt.Errorf("%w: missing Firebase UID or email", ErrInvalidIdToken),
+		)
+	}
 
 	name := ""
 	if firebaseUser.Name != nil {
@@ -59,9 +68,10 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 	var accessToken, refreshToken string
 	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		user, err := repo.UpsertUser(ctx, &model.User{
-			Email:  firebaseUser.Email,
-			Name:   name,
-			Avatar: &avatar,
+			FirebaseUID: firebaseUID,
+			Email:       email,
+			Name:        name,
+			Avatar:      &avatar,
 		})
 		if err != nil {
 			return err

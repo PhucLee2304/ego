@@ -12,18 +12,18 @@ import (
 
 func (r *Repository) UpsertUser(ctx context.Context, user *model.User) (*model.User, error) {
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "email"}},
-		DoNothing: true,
+		Columns:   []clause.Column{{Name: "firebase_uid"}},
+		DoUpdates: clause.AssignmentColumns([]string{"email"}),
 	}).Create(user).Error; err != nil {
 		return nil, err
 	}
 
-	var dbUser *model.User
-	if err := r.db.WithContext(ctx).Where("email = ?", user.Email).First(&dbUser).Error; err != nil {
+	var dbUser model.User
+	if err := r.db.WithContext(ctx).Where("firebase_uid = ?", user.FirebaseUID).First(&dbUser).Error; err != nil {
 		return nil, err
 	}
 
-	return dbUser, nil
+	return &dbUser, nil
 }
 
 func (r *Repository) GetByID(ctx context.Context, userID string) (*model.User, error) {
@@ -84,7 +84,7 @@ func (r *Repository) GetList(ctx context.Context, limit, offset int32) ([]*model
 		return nil, 0, err
 	}
 
-	if err := r.db.WithContext(ctx).Limit(int(limit)).Offset(int(offset)).Find(&users).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("id ASC").Limit(int(limit)).Offset(int(offset)).Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 

@@ -46,7 +46,7 @@ func testService(t *testing.T) (service.Service, *gorm.DB) {
 
 func createUser(t *testing.T, db *gorm.DB, email, name string, role model.RoleName) string {
 	t.Helper()
-	user := &model.User{Email: email, Name: name, Role: role}
+	user := &model.User{FirebaseUID: "firebase-" + email, Email: email, Name: name, Role: role}
 	if err := db.Create(user).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -153,5 +153,55 @@ func TestUserListQueries(t *testing.T) {
 	ids, err := svc.SearchUserIDsByName(context.Background(), "  ann ")
 	if err != nil || len(ids) != 1 || ids[0] != annaID {
 		t.Fatalf("expected [%s], got ids=%#v err=%v", annaID, ids, err)
+	}
+}
+
+func TestUpsertUserUsesFirebaseUIDAndUpdatesEmail(t *testing.T) {
+	_, db := testService(t)
+	repo := repository.NewRepository(db)
+	ctx := context.Background()
+
+	first, err := repo.UpsertUser(ctx, &model.User{
+		FirebaseUID: "firebase-uid-1",
+		Email:       "old@example.com",
+		Name:        "Original Name",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := repo.UpsertUser(ctx, &model.User{
+		FirebaseUID: "firebase-uid-1",
+		Email:       "new@example.com",
+		Name:        "Provider Name",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("expected the same user ID, got %d and %d", first.ID, second.ID)
+	}
+	if second.Email != "new@example.com" {
+		t.Fatalf("expected updated email, got %q", second.Email)
+	}
+	if second.Name != "Original Name" {
+		t.Fatalf("expected user-managed name to be preserved, got %q", second.Name)
+	}
+}
+
+func TestGetListOrdersUsersByID(t *testing.T) {
+	_, db := testService(t)
+	createUser(t, db, "third@example.com", "Third", model.RoleClient)
+	createUser(t, db, "first@example.com", "First", model.RoleClient)
+	createUser(t, db, "second@example.com", "Second", model.RoleClient)
+
+	users, _, err := repository.NewRepository(db).GetList(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(users); i++ {
+		if users[i-1].ID >= users[i].ID {
+			t.Fatalf("expected ascending IDs, got %d before %d", users[i-1].ID, users[i].ID)
+		}
 	}
 }
