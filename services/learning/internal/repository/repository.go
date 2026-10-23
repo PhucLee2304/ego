@@ -15,6 +15,13 @@ type Repository interface {
 	// Exam
 	GetListExam(ctx context.Context, examType model.ExamType, limit, offset int32) ([]*model.Exam, int64, error)
 	GetExamByID(ctx context.Context, id uint) (*model.Exam, error)
+	CreateExam(ctx context.Context, exam *model.Exam) error
+	GetQuestionsByExamID(ctx context.Context, id uint) (*model.Exam, error)
+
+	// Private exam
+	GetPrivateAssignmentExam(ctx context.Context, id uint) (*model.Exam, error)
+	ReplacePrivateExamQuestions(ctx context.Context, exam *model.Exam, questions []model.Question) error
+	CreateExamAudit(ctx context.Context, audit *model.ExamAudit) error
 
 	// Classroom
 	CreateClassroom(ctx context.Context, classroom *model.Classroom) error

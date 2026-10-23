@@ -53,3 +53,35 @@ func (r *repository) GetExamByID(ctx context.Context, id uint) (*model.Exam, err
 
 	return &exam, nil
 }
+
+func (r *repository) CreateExam(ctx context.Context, exam *model.Exam) error {
+	return r.db.WithContext(ctx).Create(exam).Error
+}
+
+func (r *repository) GetQuestionsByExamID(ctx context.Context, id uint) (*model.Exam, error) {
+	var exam model.Exam
+	if err := r.db.WithContext(ctx).
+		Preload("Sections", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups.Questions.Options", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("group_id IS NULL").Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions.Options", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		First(&exam, id).Error; err != nil {
+		return nil, err
+	}
+
+	return &exam, nil
+}
