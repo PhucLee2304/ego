@@ -105,6 +105,7 @@ func main() {
 
 	workers.StartNotificationOutbox(appCtx, svc, 2*time.Second, 100)
 	workers.StartRoomLifecycle(appCtx, svc, 15*time.Second)
+	workers.StartAutoSubmitExpiredAttempts(appCtx, svc, 5*time.Second, 100)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +129,7 @@ func main() {
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 	httpHandler.RegisterRoutes(api, authMiddleware, roleMiddleware)
+	httpHandler.RegisterSocketHandlers(examsSocket)
 	handler.RegisterSockets(api, examsSocket, classroomsSocket)
 	api.HandleFunc("POST /livekit/webhook", handler.LiveKitWebhook(svc, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret))
 

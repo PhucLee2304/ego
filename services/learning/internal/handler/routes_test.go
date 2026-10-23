@@ -25,9 +25,12 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		return "admin", nil
 	})
 
-	New(nil).RegisterRoutes(mux, authMiddleware, roleMiddleware)
+	h := New(nil)
+	h.RegisterRoutes(mux, authMiddleware, roleMiddleware)
 	identity := fakeIdentityClient{}
-	RegisterSockets(mux, platformsocket.NewServer(identity), platformsocket.NewServer(identity))
+	examsHub := platformsocket.NewServer(identity)
+	h.RegisterSocketHandlers(examsHub)
+	RegisterSockets(mux, examsHub, platformsocket.NewServer(identity))
 	return mux
 }
 
@@ -58,6 +61,13 @@ func TestProtectedRoutesRequireToken(t *testing.T) {
 		// Exam
 		{http.MethodGet, "/exams"},
 		{http.MethodGet, "/exams/1"},
+		// Attempt
+		{http.MethodPost, "/exams/1/attempts"},
+		{http.MethodGet, "/attempts"},
+		{http.MethodGet, "/attempts/1/questions"},
+		{http.MethodPost, "/attempts/1/submit"},
+		{http.MethodPost, "/attempts/1/cancel"},
+		{http.MethodGet, "/attempts/1/history"},
 		// Classroom
 		{http.MethodPost, "/classrooms"},
 		{http.MethodGet, "/classrooms"},

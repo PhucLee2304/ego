@@ -4,11 +4,13 @@ import (
 	"net/http"
 
 	"ego/platform/jwt"
+	platformsocket "ego/platform/socket"
 	"ego/services/learning/internal/service"
 )
 
 type Handler interface {
 	RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware)
+	RegisterSocketHandlers(examsHub *platformsocket.Server)
 }
 
 type handler struct {
@@ -23,6 +25,14 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	// Exam
 	mux.HandleFunc("GET /exams", mw.Handle(h.GetList))
 	mux.HandleFunc("GET /exams/{id}", mw.Handle(h.GetByID))
+
+	// Attempt
+	mux.HandleFunc("POST /exams/{id}/attempts", mw.Handle(h.CreateAttempt))
+	mux.HandleFunc("GET /attempts", mw.Handle(h.GetAttempts))
+	mux.HandleFunc("GET /attempts/{id}/questions", mw.Handle(h.GetAttemptQuestions))
+	mux.HandleFunc("POST /attempts/{id}/submit", mw.Handle(h.SubmitAttempt))
+	mux.HandleFunc("POST /attempts/{id}/cancel", mw.Handle(h.CancelAttempt))
+	mux.HandleFunc("GET /attempts/{id}/history", mw.Handle(h.GetAttemptHistory))
 
 	// Classroom
 	mux.HandleFunc("POST /classrooms", mw.Handle(h.CreateClassroom))

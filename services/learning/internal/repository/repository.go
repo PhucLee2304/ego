@@ -23,6 +23,25 @@ type Repository interface {
 	ReplacePrivateExamQuestions(ctx context.Context, exam *model.Exam, questions []model.Question) error
 	CreateExamAudit(ctx context.Context, audit *model.ExamAudit) error
 
+	// Attempt
+	GetActiveAttemptByUserID(ctx context.Context, userID string) (*model.Attempt, error)
+	GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, status model.AttemptStatus, limit, offset int32) ([]*model.Attempt, int64, error)
+	GetAttemptQuestionsByIDAndUserID(ctx context.Context, id uint, userID string) (*model.Attempt, error)
+	GetAttemptForLifecycle(ctx context.Context, id uint, userID string) (*model.Attempt, error)
+	CreateAttempt(ctx context.Context, attempt *model.Attempt) error
+	UpdateAttempt(ctx context.Context, attempt *model.Attempt) error
+	GetExpiredActiveAttempts(ctx context.Context, now time.Time, limit int) ([]*model.Attempt, error)
+
+	// Answer
+	GetAttemptForAnswerUpdate(ctx context.Context, id uint, userID string) (*model.Attempt, error)
+	UpsertAttemptAnswer(ctx context.Context, answer *model.AttemptAnswer) error
+	DeleteAttemptAnswer(ctx context.Context, attemptID, questionID uint) error
+	ReplaceAttemptAnswers(ctx context.Context, attemptID uint, answers []model.AttemptAnswer) error
+
+	// History
+	GetAttemptHistoryByIDAndUserID(ctx context.Context, id uint, userID string) (*model.History, error)
+	UpsertHistory(ctx context.Context, history *model.History) error
+
 	// Classroom
 	CreateClassroom(ctx context.Context, classroom *model.Classroom) error
 	GetClassrooms(ctx context.Context, query dto.ClassroomsQuery, teacherIDs []string) ([]*model.Classroom, int64, error)

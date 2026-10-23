@@ -38,10 +38,37 @@ var (
 	ErrMediaUnavailable       = httpx.NewError(http.StatusServiceUnavailable, "[UNAVAILABLE] The media server is temporarily unavailable", nil)
 )
 
+// Lỗi phía exams/attempt (giữ nguyên status + message của exams cũ).
+var (
+	ErrAttemptNotActive            = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt is not active", nil)
+	ErrAttemptExpired              = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt has expired", nil)
+	ErrAttemptAlreadySubmitted     = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt has already been submitted", nil)
+	ErrAttemptCancelled            = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt has been cancelled", nil)
+	ErrAssignmentAttemptCancel     = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom assignment attempts cannot be cancelled; submit the attempt instead", nil)
+	ErrQuestionNotBelongToAttempt  = httpx.NewError(http.StatusBadRequest, "[ERROR] Question does not belong to attempt", nil)
+	ErrOptionNotBelongToQuestion   = httpx.NewError(http.StatusBadRequest, "[ERROR] Option does not belong to question", nil)
+	ErrAttemptHistoryNotFound      = httpx.NewError(http.StatusNotFound, "[ERROR] Attempt history not found", nil)
+	ErrContextAttemptAlreadyExists = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt already exists for this context", nil)
+	ErrActiveAttemptExists         = httpx.NewError(http.StatusConflict, "[CONFLICT] Active attempt already exists", nil)
+	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
+)
+
 type Service interface {
 	// Exam
 	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, *httpx.HTTPError)
 	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError)
+
+	// Attempt
+	CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError)
+	GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, *httpx.HTTPError)
+	GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, *httpx.HTTPError)
+	CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError)
+	GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError)
+	SubmitAttempt(ctx context.Context, userID string, attemptID uint, req dto.SubmitAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError)
+	AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int, error)
+
+	// Answer
+	UpdateAttemptAnswer(ctx context.Context, userID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error)
 
 	// Classroom
 	CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, *httpx.HTTPError)
