@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -100,8 +99,8 @@ func (s *service) updatePrivateExam(ctx context.Context, id uint, req dto.Update
 			return httpx.NewError(http.StatusBadRequest, "[ERROR] Exam title and at least one question are required", nil)
 		}
 		if req.CorrectionOnly {
-			// TODO(P17): nhánh đính chính đáp án + regrade + audit (correction.go).
-			return errors.New("private exam correction is not ported yet")
+			updated, err = s.correctPrivateExam(ctx, repo, id, exam, title, req, before)
+			return err
 		}
 		optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
 		questions := make([]model.Question, len(req.Questions))

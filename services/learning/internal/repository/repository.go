@@ -22,6 +22,9 @@ type Repository interface {
 	GetPrivateAssignmentExam(ctx context.Context, id uint) (*model.Exam, error)
 	ReplacePrivateExamQuestions(ctx context.Context, exam *model.Exam, questions []model.Question) error
 	CreateExamAudit(ctx context.Context, audit *model.ExamAudit) error
+	GetExamAudits(ctx context.Context, examID uint) ([]*model.ExamAudit, error)
+	UpdateQuestionScoring(ctx context.Context, questionID uint, excluded bool, correctOptionID uint) error
+	GetSubmittedAttemptsByExamID(ctx context.Context, examID uint) ([]*model.Attempt, error)
 
 	// Attempt
 	GetActiveAttemptByUserID(ctx context.Context, userID string) (*model.Attempt, error)

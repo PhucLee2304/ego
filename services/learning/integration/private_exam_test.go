@@ -71,10 +71,45 @@ func TestPrivateExamRepository(t *testing.T) {
 	if updated.Title != "Quiz v2" || len(questions) != 2 || questions[0].Content != "new-1" || !questions[1].Options[3].IsCorrect {
 		t.Fatalf("updated = %#v", updated)
 	}
+	// Đính chính: đổi đáp án đúng của câu 1 sang option C.
+	newCorrect := questions[0].Options[2].ID
+	if err := repo.UpdateQuestionScoring(ctx, questions[0].ID, true, newCorrect); err != nil {
+		t.Fatal(err)
+	}
+	corrected, _ := repo.GetPrivateAssignmentExam(ctx, exam.ID)
+	for _, option := range corrected.Sections[0].Questions[0].Options {
+		if option.IsCorrect != (option.ID == newCorrect) {
+			t.Fatalf("option %d isCorrect = %v", option.ID, option.IsCorrect)
+		}
+	}
+	if !corrected.Sections[0].Questions[0].ExcludedFromScore {
+		t.Fatal("question must be excluded from score")
+	}
+
+	submitted := &model.Attempt{Mode: model.AttemptModeAssignment, Status: model.AttemptStatusSubmitted, ExamID: exam.ID, UserID: "student-1", ContextType: model.AttemptContextTypeStandalone}
+	active := &model.Attempt{Mode: model.AttemptModeAssignment, Status: model.AttemptStatusInProgress, ExamID: exam.ID, UserID: "student-2", ContextType: model.AttemptContextTypeStandalone}
+	for _, attempt := range []*model.Attempt{submitted, active} {
+		if err := repo.CreateAttempt(ctx, attempt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	attempts, err := repo.GetSubmittedAttemptsByExamID(ctx, exam.ID)
+	if err != nil || len(attempts) != 1 || attempts[0].ID != submitted.ID || len(attempts[0].Exam.Sections[0].Questions) != 2 {
+		t.Fatalf("submitted attempts = %#v err=%v", attempts, err)
+	}
+
+	if err := repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: exam.ID, ActorID: "teacher-2", Before: []byte("{}"), After: []byte("{}"), ScoreChanges: []byte("[]")}); err != nil {
+		t.Fatal(err)
+	}
+	audits, err := repo.GetExamAudits(ctx, exam.ID)
+	if err != nil || len(audits) != 2 || audits[0].ActorID != "teacher-2" {
+		t.Fatalf("audits must be newest first: %#v err=%v", audits, err)
+	}
+
 	var optionCount, auditCount int64
 	db.Model(&model.Option{}).Count(&optionCount)
 	db.Model(&model.ExamAudit{}).Where("exam_id = ?", exam.ID).Count(&auditCount)
-	if optionCount != 8 || auditCount != 1 {
+	if optionCount != 8 || auditCount != 2 {
 		t.Fatalf("options = %d (old ones must be deleted), audits = %d", optionCount, auditCount)
 	}
 }

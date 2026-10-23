@@ -44,4 +44,6 @@ services/topics/seed
 services/topics/seed/**
 services/exams/seed
 services/exams/seed/**
+services/learning/seed
+services/learning/seed/**
 **/PLAN**

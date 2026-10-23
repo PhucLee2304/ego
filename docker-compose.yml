@@ -311,6 +311,25 @@ services:
       livekit:
         condition: service_healthy
 
+  learning-seed:
+    build:
+      context: .
+      dockerfile: services/learning/Dockerfile
+      target: seed
+    container_name: ego-learning-seed
+    profiles:
+      - seed
+    env_file:
+      - ./services/learning/.env
+    volumes:
+      - ./services/learning/seed:/app/services/learning/seed:ro
+    depends_on:
+      learning-db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    networks:
+      - ego-network
 
   learning-db:
     image: postgres:15.8-alpine

@@ -2,11 +2,11 @@
 set -eu
 
 case "$ACTION:$SERVICE" in
-  seed:topics|seed:exams)
+  seed:topics|seed:exams|seed:learning)
     docker compose --profile seed run --rm "${SERVICE}-seed"
     ;;
   seed:*)
-    echo "Seed is only available for topics and exams" >&2
+    echo "Seed is only available for topics, exams and learning" >&2
     exit 1
     ;;
   reset-db:identity|reset-db:users)
