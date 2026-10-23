@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	notificationsClient "ego/api/gen/go/notifications"
 	"ego/platform/logger"
 	platformRpc "ego/platform/rpc"
 	learningConfig "ego/services/learning/config"
 	"ego/services/learning/database"
+	"ego/services/learning/internal/repository"
+	"ego/services/learning/internal/service"
+	"ego/services/learning/workers"
 	"errors"
 	"fmt"
 	"net"
@@ -17,6 +21,7 @@ import (
 
 	httpSwagger "github.com/swaggo/http-swagger"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	_ "ego/services/learning/docs"
 )
@@ -41,6 +46,8 @@ func main() {
 	}()
 
 	ctx := context.Background()
+	appCtx, stopApp := context.WithCancel(ctx)
+	defer stopApp()
 
 	appConfig, err := learningConfig.LoadAppConfig()
 	if err != nil {
@@ -54,6 +61,18 @@ func main() {
 	if err := database.Migrate(db); err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
+
+	notificationsConn, err := grpc.NewClient(appConfig.NotificationsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to notifications service")
+	}
+	defer notificationsConn.Close()
+	notificationsServiceClient := notificationsClient.NewNotificationServiceClient(notificationsConn)
+
+	repo := repository.NewRepository(db)
+	svc := service.New(repo, notificationsServiceClient)
+
+	workers.StartNotificationOutbox(appCtx, svc, 2*time.Second, 100)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +122,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	logger.Log.Info().Msg("[SHUTDOWN] Shutting down learning server gracefully")
+	stopApp()
 
 	shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

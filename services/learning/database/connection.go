@@ -2,6 +2,7 @@ package database
 
 import (
 	"ego/services/learning/config"
+	"ego/services/learning/internal/model"
 	"errors"
 	"log"
 
@@ -26,6 +27,13 @@ func Migrate(db *gorm.DB) error {
 	}
 
 	log.Println("Running database migrations...")
+
+	err := db.AutoMigrate(
+		&model.NotificationOutbox{},
+	)
+	if err != nil {
+		return err
+	}
 
 	log.Println("Database migrations completed")
 	return nil
