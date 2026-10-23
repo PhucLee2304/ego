@@ -14,6 +14,8 @@ import (
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
+
+	"gorm.io/gorm"
 )
 
 func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, *httpx.HTTPError) {
@@ -274,4 +276,24 @@ func (s *service) ArchiveClassroom(ctx context.Context, teacherID string, id uin
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
 	return response, nil
+}
+
+// GetClassroomPostAccess trả lớp (kèm member đã duyệt) và cờ userID là học sinh
+// đã được duyệt; dùng cho rpc của posts.
+func (s *service) GetClassroomPostAccess(ctx context.Context, classroomID uint, userID string) (*model.Classroom, bool, error) {
+	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, ErrClassroomNotFound
+		}
+		return nil, false, err
+	}
+	isApproved := false
+	if classroom.TeacherID != userID && userID != "" {
+		isApproved, err = s.repo.IsStudentApprovedInClassroom(ctx, classroom.ID, userID)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	return classroom, isApproved, nil
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -11,10 +12,14 @@ import (
 	learningConfig "ego/services/learning/config"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/media"
+	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
 
 	"google.golang.org/grpc"
 )
+
+// ErrClassroomNotFound là lỗi nội bộ (rpc) khi không có lớp.
+var ErrClassroomNotFound = errors.New("classroom not found")
 
 // errClassroomServiceFailed là message lỗi 500 mặc định của các method HTTP phía classrooms (giữ nguyên từ HTTPService cũ).
 const errClassroomServiceFailed = "[ERROR] Classroom service failed"
@@ -42,6 +47,7 @@ type Service interface {
 	GetClassroomByCode(ctx context.Context, code string) (*dto.ClassroomByCodeResponse, *httpx.HTTPError)
 	UpdateClassroom(ctx context.Context, teacherID string, id uint, req dto.UpdateClassroomRequest) (*dto.ClassroomResponse, *httpx.HTTPError)
 	ArchiveClassroom(ctx context.Context, teacherID string, id uint) (*dto.ClassroomResponse, *httpx.HTTPError)
+	GetClassroomPostAccess(ctx context.Context, classroomID uint, userID string) (*model.Classroom, bool, error)
 
 	// Member
 	RequestJoinClassroom(ctx context.Context, userID string, req dto.RequestJoinClassroomRequest) (*dto.ClassroomJoinRequestResponse, *httpx.HTTPError)

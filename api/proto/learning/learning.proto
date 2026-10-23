@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package learning;
+
+option go_package = "ego/api/gen/go/learning";
+
+// LearningService là gRPC nội bộ của learning cho service khác (hiện chỉ posts).
+service LearningService {
+  rpc GetClassroomPostAccess(GetClassroomPostAccessRequest)
+      returns (GetClassroomPostAccessResponse);
+}
+
+message GetClassroomPostAccessRequest {
+  uint64 classroom_id = 1;
+  string user_id = 2;
+}
+
+message GetClassroomPostAccessResponse {
+  uint64 classroom_id = 1;
+  string classroom_name = 2;
+  string teacher_id = 3;
+  bool active = 4;
+  bool is_teacher = 5;
+  bool is_approved_member = 6;
+  repeated string approved_student_ids = 7;
+}

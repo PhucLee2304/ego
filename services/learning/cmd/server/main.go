@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	identityClient "ego/api/gen/go/identity"
+	learningClient "ego/api/gen/go/learning"
 	notificationsClient "ego/api/gen/go/notifications"
 	"ego/platform/jwt"
 	"ego/platform/logger"
@@ -14,6 +15,7 @@ import (
 	"ego/services/learning/internal/media"
 	"ego/services/learning/internal/repository"
 	"ego/services/learning/internal/service"
+	learningRpc "ego/services/learning/rpc"
 	"ego/services/learning/workers"
 	"errors"
 	"fmt"
@@ -102,6 +104,7 @@ func main() {
 	httpHandler := handler.New(svc)
 
 	workers.StartNotificationOutbox(appCtx, svc, 2*time.Second, 100)
+	workers.StartRoomLifecycle(appCtx, svc, 15*time.Second)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +129,7 @@ func main() {
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 	httpHandler.RegisterRoutes(api, authMiddleware, roleMiddleware)
 	handler.RegisterSockets(api, examsSocket, classroomsSocket)
+	api.HandleFunc("POST /livekit/webhook", handler.LiveKitWebhook(svc, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret))
 
 	logger.Log.Info().Str("LEARNING_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting learning server")
 	httpServer := &http.Server{Addr: ":" + appConfig.Port, Handler: logger.Middleware(mux)}
@@ -141,6 +145,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(platformRpc.ErrorInterceptor()))
+	learningClient.RegisterLearningServiceServer(grpcServer, learningRpc.New(svc))
 
 	logger.Log.Info().Str("LEARNING_GRPC_PORT", appConfig.GRPCPort).Msg("[STARTUP] Starting learning gRPC server")
 	go func() {
