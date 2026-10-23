@@ -10,10 +10,9 @@ import (
 	"time"
 
 	classroomsClient "ego/api/gen/go/classrooms"
+	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
 	storageClient "ego/api/gen/go/storage"
-	tokenClient "ego/api/gen/go/token"
-	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -49,25 +48,15 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[DATABASE] Failed to migrate database")
 	}
 
-	authConn, err := grpc.NewClient(
-		appConfig.AuthServiceAddr,
+	identityConn, err := grpc.NewClient(
+		appConfig.IdentityServiceAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(rpcTimeout)),
 	)
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create auth client")
+		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create identity client")
 	}
-	defer authConn.Close()
-
-	usersConn, err := grpc.NewClient(
-		appConfig.UsersServiceAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(rpcTimeout)),
-	)
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create users client")
-	}
-	defer usersConn.Close()
+	defer identityConn.Close()
 
 	classroomsConn, err := grpc.NewClient(
 		appConfig.ClassroomsServiceAddr,
@@ -99,14 +88,14 @@ func main() {
 	}
 	defer storageConn.Close()
 
-	usersServiceClient := usersClient.NewUserServiceClient(usersConn)
-	authMiddleware := jwt.NewAuthMiddleware(tokenClient.NewTokenServiceClient(authConn))
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
-		response, err := usersServiceClient.GetUserRole(ctx, &usersClient.GetUserRoleRequest{Id: userID})
+		userResp, err := identityServiceClient.GetUserRole(ctx, &identityClient.GetUserRoleRequest{Id: userID})
 		if err != nil {
 			return "", err
 		}
-		return response.Role, nil
+		return userResp.Role, nil
 	})
 
 	repo := repository.NewRepository(db)
@@ -115,7 +104,7 @@ func main() {
 		repo,
 		appConfig,
 		classroomsClient.NewClassroomServiceClient(classroomsConn),
-		usersServiceClient,
+		identityServiceClient,
 		notificationsClient.NewNotificationServiceClient(notificationsConn),
 		storageServiceClient,
 	)

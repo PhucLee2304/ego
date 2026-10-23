@@ -1,4 +1,4 @@
-.PHONY: swag protoc build test reset-db seed
+.PHONY: swag protoc build check-ports dev dev-down log test reset-db seed
 
 SERVICE := $(word 2,$(MAKECMDGOALS))
 
@@ -34,6 +34,7 @@ swag:
 
 protoc:
 	@echo "Generating proto files..."
+	@mkdir -p api/gen/go
 	@for dir in api/proto/* ; do \
 		if [ -d "$$dir" ]; then \
 			echo "--> Generating proto for $$dir"; \
@@ -58,9 +59,24 @@ seed:
 
 endif
 
+check-ports:
+	./scripts/check-ports.sh
+
+dev:
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+dev-down:
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+log:
+	$(if $(SERVICE),,$(error Usage: make log SERVICE_NAME))
+	docker compose logs --follow --tail=200 $(SERVICE)
+
 build:
 	docker compose stop $(filter-out $@,$(MAKECMDGOALS))
+	./scripts/check-ports.sh
 	docker compose up -d --build $(filter-out $@,$(MAKECMDGOALS))
+	docker compose restart nginx
 
 %:
 	@:

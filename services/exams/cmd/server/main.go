@@ -4,9 +4,8 @@ import (
 	"context"
 	classroomsClient "ego/api/gen/go/classrooms"
 	examsClient "ego/api/gen/go/exams"
+	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
-	tokenClient "ego/api/gen/go/token"
-	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -73,20 +72,13 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
-	tokenConn, err := grpc.NewClient(appConfig.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	identityConn, err := grpc.NewClient(appConfig.IdentityServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to identity service")
 	}
-	defer tokenConn.Close()
-	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
-	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
-
-	usersConn, err := grpc.NewClient(appConfig.UsersServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to users service")
-	}
-	defer usersConn.Close()
-	usersServiceClient := usersClient.NewUserServiceClient(usersConn)
+	defer identityConn.Close()
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 
 	mux := http.NewServeMux()
 
@@ -129,15 +121,15 @@ func main() {
 	service := service.New(repo, classroomsServiceClient)
 	service.SetNotificationClient(notificationsClient.NewNotificationServiceClient(notificationsConn))
 	handler := handler.New(service)
-	socketServer := platformsocket.NewServer(tokenServiceClient)
+	socketServer := platformsocket.NewServer(identityServiceClient)
 	service.SetAttemptEventPublisher(socketServer.BroadcastToUser)
 
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
-		resp, err := usersServiceClient.GetUserRole(ctx, &usersClient.GetUserRoleRequest{Id: userID})
+		userResp, err := identityServiceClient.GetUserRole(ctx, &identityClient.GetUserRoleRequest{Id: userID})
 		if err != nil {
 			return "", err
 		}
-		return resp.Role, nil
+		return userResp.Role, nil
 	})
 
 	handler.RegisterRoutes(api, authMiddleware, roleMiddleware)

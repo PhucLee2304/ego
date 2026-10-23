@@ -113,8 +113,8 @@ func TestAssignmentScheduleAndExamUniqueness(t *testing.T) {
 		t.Fatalf("unexpected submitted gradebook event: %#v", publishedEvents[1])
 	}
 
-	usersClient, examsClient := classroomTestClients(t)
-	svc := service.New(repo, &config.AppConfig{}, usersClient, examsClient)
+	identityClient, examsClient := classroomTestClients(t)
+	svc := service.New(repo, &config.AppConfig{}, identityClient, examsClient)
 	classGradebook, err := svc.GetClassGradebook(ctx, classroom.TeacherID, classroom.ID, dto.GradebookRangeQuery{})
 	if err != nil || len(classGradebook.Students) != 1 || classGradebook.AverageScore == nil || *classGradebook.AverageScore != 8.5 {
 		t.Fatalf("class gradebook: response=%#v err=%v", classGradebook, err)

@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"time"
 )
 
 type DBConfig struct {
@@ -30,37 +29,6 @@ func LoadDBConfig() (*DBConfig, error) {
 		cfg.Host,
 		cfg.Port,
 		cfg.Name)
-
-	return &cfg, nil
-}
-
-type JwtConfig struct {
-	JwtSecret          string
-	AccessTokenExpiry  time.Duration
-	RefreshTokenExpiry time.Duration
-}
-
-func LoadJwtConfig() (*JwtConfig, error) {
-	accessTokenExpiry, err := time.ParseDuration(os.Getenv("ACCESS_TOKEN_EXPIRY"))
-	if err != nil {
-		return nil, fmt.Errorf("[ERROR][Config][JWT] Failed to parse ACCESS_TOKEN_EXPIRY: %v", err)
-	}
-
-	refreshTokenExpiry, err := time.ParseDuration(os.Getenv("REFRESH_TOKEN_EXPIRY"))
-	if err != nil {
-		return nil, fmt.Errorf("[ERROR][Config][JWT] Failed to parse REFRESH_TOKEN_EXPIRY: %v", err)
-	}
-
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		return nil, fmt.Errorf("[ERROR][Config][JWT] JWT_SECRET is not set")
-	}
-
-	cfg := JwtConfig{
-		JwtSecret:          jwtSecret,
-		AccessTokenExpiry:  accessTokenExpiry,
-		RefreshTokenExpiry: refreshTokenExpiry,
-	}
 
 	return &cfg, nil
 }

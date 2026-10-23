@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 type AppConfig struct {
@@ -18,14 +19,14 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr          string
-	UsersServiceAddr         string
+	IdentityServiceAddr      string
 	ExamsServiceAddr         string
 	NotificationsServiceAddr string
 	LiveKitURL               string
 	LiveKitPublicURL         string
 	LiveKitAPIKey            string
 	LiveKitAPISecret         string
+	LiveKitJoinTokenTTL      time.Duration
 
 	MaxStudentsPerClass int
 }
@@ -42,14 +43,14 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "classroomsdb"),
 
-		AuthServiceAddr:          getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		UsersServiceAddr:         getEnv("USERS_SERVICE_ADDR", "users:50052"),
+		IdentityServiceAddr:      getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
 		ExamsServiceAddr:         getEnv("EXAMS_SERVICE_ADDR", "exams:50056"),
 		NotificationsServiceAddr: getEnv("NOTIFICATIONS_SERVICE_ADDR", "notifications:50058"),
 		LiveKitURL:               getEnv("LIVEKIT_URL", "http://livekit:7880"),
 		LiveKitPublicURL:         getEnv("LIVEKIT_PUBLIC_URL", "ws://localhost:7880"),
 		LiveKitAPIKey:            getEnv("LIVEKIT_API_KEY", "devkey"),
 		LiveKitAPISecret:         getEnv("LIVEKIT_API_SECRET", "local-development-secret-key-000001"),
+		LiveKitJoinTokenTTL:      getDurationEnv("LIVEKIT_JOIN_TOKEN_TTL", 5*time.Minute),
 
 		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
 	}
@@ -58,6 +59,18 @@ func LoadAppConfig() (*AppConfig, error) {
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 
 	return config, nil
+}
+
+func getDurationEnv(key string, fallback time.Duration) time.Duration {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func getEnv(key, fallback string) string {

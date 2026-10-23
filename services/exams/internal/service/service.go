@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,17 +25,17 @@ import (
 )
 
 type Service interface {
-	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, error)
-	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, error)
+	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, *httpx.HTTPError)
+	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError)
 	CreatePrivateExam(ctx context.Context, req dto.CreatePrivateExamRequest) (*model.Exam, error)
 	DeletePrivateExamRollback(ctx context.Context, id uint) error
-	CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, error)
-	GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, error)
-	GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, error)
+	CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError)
+	GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, *httpx.HTTPError)
+	GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, *httpx.HTTPError)
 	UpdateAttemptAnswer(ctx context.Context, userID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error)
-	SubmitAttempt(ctx context.Context, userID string, attemptID uint, req dto.SubmitAttemptRequest) (*dto.AttemptResponse, error)
-	CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error)
-	GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error)
+	SubmitAttempt(ctx context.Context, userID string, attemptID uint, req dto.SubmitAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError)
+	CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError)
+	GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError)
 	AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int, error)
 	SubmitAssignmentAttempts(ctx context.Context, assignmentID uint) (int, error)
 	GetAssignmentAttemptState(ctx context.Context, assignmentID uint) (int64, int64, error)
@@ -43,7 +44,7 @@ type Service interface {
 	UpdatePrivateExam(ctx context.Context, id uint, req dto.UpdatePrivateExamRequest) (*model.Exam, error)
 	ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error
 	ProcessOutboxEvents(ctx context.Context, limit int) (int, error)
-	GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, error)
+	GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, *httpx.HTTPError)
 	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
 	SetNotificationClient(notificationsClient.NotificationServiceClient)
 	ReconcileClassroomAssignmentSubmissions(ctx context.Context, limit int) (int, error)
@@ -82,16 +83,30 @@ func New(repo *repository.Repository, classroomsClient classroomsClient.Classroo
 }
 
 var (
-	ErrAttemptNotActive            = errors.New("[ERROR] Attempt is not active")
-	ErrAttemptExpired              = errors.New("[ERROR] Attempt has expired")
-	ErrAttemptAlreadySubmitted     = errors.New("[CONFLICT] Attempt has already been submitted")
-	ErrAttemptCancelled            = errors.New("[CONFLICT] Attempt has been cancelled")
-	ErrAssignmentAttemptCancel     = errors.New("[ERROR] Classroom assignment attempts cannot be cancelled; submit the attempt instead")
-	ErrQuestionNotBelongToAttempt  = errors.New("[ERROR] Question does not belong to attempt")
-	ErrOptionNotBelongToQuestion   = errors.New("[ERROR] Option does not belong to question")
-	ErrAttemptHistoryNotFound      = errors.New("[ERROR] Attempt history not found")
-	ErrContextAttemptAlreadyExists = errors.New("[CONFLICT] Attempt already exists for this context")
+	ErrAttemptNotActive            = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt is not active", nil)
+	ErrAttemptExpired              = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt has expired", nil)
+	ErrAttemptAlreadySubmitted     = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt has already been submitted", nil)
+	ErrAttemptCancelled            = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt has been cancelled", nil)
+	ErrAssignmentAttemptCancel     = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom assignment attempts cannot be cancelled; submit the attempt instead", nil)
+	ErrQuestionNotBelongToAttempt  = httpx.NewError(http.StatusBadRequest, "[ERROR] Question does not belong to attempt", nil)
+	ErrOptionNotBelongToQuestion   = httpx.NewError(http.StatusBadRequest, "[ERROR] Option does not belong to question", nil)
+	ErrAttemptHistoryNotFound      = httpx.NewError(http.StatusNotFound, "[ERROR] Attempt history not found", nil)
+	ErrContextAttemptAlreadyExists = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt already exists for this context", nil)
+	ErrActiveAttemptExists         = httpx.NewError(http.StatusConflict, "[CONFLICT] Active attempt already exists", nil)
+	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
 )
+
+// PrivateExamValidationError marks a private exam request the client must fix;
+// its Message is safe to show to end users.
+type PrivateExamValidationError struct {
+	Message string
+}
+
+func (e *PrivateExamValidationError) Error() string { return e.Message }
+
+func invalidPrivateExam(message string) error {
+	return &PrivateExamValidationError{Message: message}
+}
 
 const maxAutoSubmitWorkers = 10
 const outboxVisibilityTimeout = time.Minute
@@ -110,10 +125,10 @@ type classroomAssignmentAttemptSubmittedPayload struct {
 	Score        float64 `json:"score"`
 }
 
-func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, error) {
+func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, *httpx.HTTPError) {
 	exams, total, err := s.repo.GetListExam(ctx, query.Type, query.Limit(), query.Offset())
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get exams", err)
 	}
 
 	examDTOs := make([]*dto.GetExamsResponse, len(exams))
@@ -124,10 +139,10 @@ func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.
 	return examDTOs, httpx.ToPageCounts(total, query.PageSize), nil
 }
 
-func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, error) {
+func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError) {
 	exam, err := s.repo.GetExamByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, httpx.FromError(err, "[ERROR] Failed to get exam")
 	}
 
 	return dto.ToGetExamResponse(exam), nil
@@ -136,23 +151,23 @@ func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, e
 func (s *service) CreatePrivateExam(ctx context.Context, req dto.CreatePrivateExamRequest) (*model.Exam, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	if req.Title == "" {
-		return nil, errors.New("[ERROR] Exam title is required")
+		return nil, invalidPrivateExam("[ERROR] Exam title is required")
 	}
 	if len(req.Questions) == 0 {
-		return nil, errors.New("[ERROR] Exam must contain at least one question")
+		return nil, invalidPrivateExam("[ERROR] Exam must contain at least one question")
 	}
 
 	questions := make([]model.Question, len(req.Questions))
 	optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
 	for i, input := range req.Questions {
 		if strings.TrimSpace(input.Content) == "" || len(input.Options) != len(optionKeys) || input.CorrectOptionIndex < 0 || input.CorrectOptionIndex >= len(optionKeys) {
-			return nil, errors.New("[ERROR] Each question must have content, exactly four options, and one valid correct option")
+			return nil, invalidPrivateExam("[ERROR] Each question must have content, exactly four options, and one valid correct option")
 		}
 		options := make([]model.Option, len(optionKeys))
 		for optionIndex, key := range optionKeys {
 			content := strings.TrimSpace(input.Options[optionIndex])
 			if content == "" {
-				return nil, errors.New("[ERROR] Question options cannot be blank")
+				return nil, invalidPrivateExam("[ERROR] Question options cannot be blank")
 			}
 			options[optionIndex] = model.Option{
 				Key:       key,
@@ -217,14 +232,14 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 		}
 		title := strings.TrimSpace(req.Title)
 		if title == "" || len(req.Questions) == 0 {
-			return errors.New("[ERROR] Exam title and at least one question are required")
+			return invalidPrivateExam("[ERROR] Exam title and at least one question are required")
 		}
 		if req.CorrectionOnly {
 			if strings.TrimSpace(req.ActorID) == "" || strings.TrimSpace(req.Reason) == "" {
-				return errors.New("[ERROR] Correction actor and reason are required")
+				return invalidPrivateExam("[ERROR] Correction actor and reason are required")
 			}
 			if title != exam.Title || (exam.Description == nil) != (req.Description == nil) || (exam.Description != nil && req.Description != nil && *exam.Description != *req.Description) || len(req.Questions) != len(exam.Sections[0].Questions) {
-				return errors.New("[ERROR] An exam with attempts only allows correcting the answer or changing score exclusion")
+				return invalidPrivateExam("[ERROR] An exam with attempts only allows correcting the answer or changing score exclusion")
 			}
 			questionsByID := make(map[uint]*model.Question, len(exam.Sections[0].Questions))
 			for i := range exam.Sections[0].Questions {
@@ -234,19 +249,19 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 			for _, input := range req.Questions {
 				question := questionsByID[input.ID]
 				if question == nil || strings.TrimSpace(input.Content) != question.Content || input.Explanation == nil || strings.TrimSpace(*input.Explanation) != question.Explanation || len(input.Options) != len(question.Options) || len(input.OptionIDs) != len(question.Options) {
-					return errors.New("[ERROR] Question structure cannot be changed after an attempt exists")
+					return invalidPrivateExam("[ERROR] Question structure cannot be changed after an attempt exists")
 				}
 				correctOptionID := uint(0)
 				for index, option := range question.Options {
 					if input.OptionIDs[index] != option.ID || strings.TrimSpace(input.Options[index]) != strings.TrimSpace(*option.Content) {
-						return errors.New("[ERROR] Question options cannot be changed after an attempt exists")
+						return invalidPrivateExam("[ERROR] Question options cannot be changed after an attempt exists")
 					}
 					if index == input.CorrectOptionIndex {
 						correctOptionID = option.ID
 					}
 				}
 				if correctOptionID == 0 {
-					return errors.New("[ERROR] Correct option is invalid")
+					return invalidPrivateExam("[ERROR] Correct option is invalid")
 				}
 				if err := repo.UpdateQuestionScoring(ctx, question.ID, input.ExcludedFromScore, correctOptionID); err != nil {
 					return err
@@ -340,13 +355,13 @@ func (s *service) UpdatePrivateExam(ctx context.Context, id uint, req dto.Update
 		questions := make([]model.Question, len(req.Questions))
 		for i, input := range req.Questions {
 			if strings.TrimSpace(input.Content) == "" || len(input.Options) != 4 || input.CorrectOptionIndex < 0 || input.CorrectOptionIndex > 3 {
-				return errors.New("[ERROR] Each question must have content, exactly four options, and one valid correct option")
+				return invalidPrivateExam("[ERROR] Each question must have content, exactly four options, and one valid correct option")
 			}
 			options := make([]model.Option, 4)
 			for j, value := range input.Options {
 				content := strings.TrimSpace(value)
 				if content == "" {
-					return errors.New("[ERROR] Question options cannot be blank")
+					return invalidPrivateExam("[ERROR] Question options cannot be blank")
 				}
 				options[j] = model.Option{Key: optionKeys[j], Content: &content, IsCorrect: j == input.CorrectOptionIndex, Order: j + 1}
 			}
@@ -379,7 +394,7 @@ func (s *service) ResetAssignmentAttempt(ctx context.Context, assignmentID uint,
 	})
 }
 
-func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, error) {
+func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError) {
 	var assignmentValidation *classroomsClient.ValidateAssignmentAttemptResponse
 	if req.ContextType == model.AttemptContextTypeClassroomAssignment {
 		resp, err := s.classroomsClient.ValidateAssignmentAttempt(ctx, &classroomsClient.ValidateAssignmentAttemptRequest{
@@ -388,7 +403,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			ExamId:       uint64(examID),
 		})
 		if err != nil {
-			return nil, err
+			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
 		}
 		assignmentValidation = resp
 	}
@@ -400,16 +415,16 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 	if activeErr == nil && activeAttempt.ExpiresAt != nil && !time.Now().Before(*activeAttempt.ExpiresAt) {
 		if _, err := s.submitAttempt(ctx, userID, activeAttempt.ID, nil); err != nil &&
 			!errors.Is(err, ErrAttemptAlreadySubmitted) {
-			return nil, err
+			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
 		}
 	} else if activeErr != nil && !errors.Is(activeErr, gorm.ErrRecordNotFound) {
-		return nil, activeErr
+		return nil, httpx.FromError(activeErr, "[ERROR] Failed to create attempt")
 	}
 
 	var attempt *model.Attempt
 	err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		if _, err := repo.GetActiveAttemptByUserID(ctx, userID); err == nil {
-			return errors.New("[CONFLICT] Active attempt already exists")
+			return ErrActiveAttemptExists
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
@@ -426,7 +441,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		}
 
 		if err := dto.ValidateCreateExamAttemptRequestForExam(exam.Type, req); err != nil {
-			return err
+			return httpx.NewError(http.StatusBadRequest, err.Error(), err)
 		}
 
 		now := time.Now()
@@ -438,7 +453,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			if exam.Type != model.ExamTypeAssignment {
 				value, ok := model.GetTestDurationByExamType(exam.Type)
 				if !ok {
-					return errors.New("[ERROR] Unsupported exam type")
+					return ErrUnsupportedExamType
 				}
 				duration = &value
 			}
@@ -525,21 +540,21 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 	})
 	if err != nil {
 		if platformdb.IsUniqueViolation(err, model.AttemptActiveUserUniqueIndex) {
-			return nil, errors.New("[CONFLICT] Active attempt already exists")
+			return nil, ErrActiveAttemptExists
 		}
 		if platformdb.IsUniqueViolation(err, model.AttemptClassroomAssignmentUniqueIndex) {
 			return nil, ErrContextAttemptAlreadyExists
 		}
-		return nil, err
+		return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
 	}
 	if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil {
 		if _, err := s.classroomsClient.CreateAssignmentSubmission(ctx, &classroomsClient.CreateAssignmentSubmissionRequest{
 			StudentId: userID, AssignmentId: uint64(*attempt.ContextID), AttemptId: uint64(attempt.ID),
 		}); err != nil {
 			if cleanupErr := s.repo.DeleteAttemptRollback(ctx, attempt.ID); cleanupErr != nil {
-				return nil, errors.Join(err, cleanupErr)
+				return nil, httpx.FromError(errors.Join(err, cleanupErr), "[ERROR] Failed to create attempt")
 			}
-			return nil, err
+			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
 		}
 	}
 
@@ -554,10 +569,10 @@ func assignmentAttemptExpiresAt(startedAt time.Time, durationMinutes int, dueAt 
 	return expiresAt
 }
 
-func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, error) {
+func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, *httpx.HTTPError) {
 	attempts, total, err := s.repo.GetAttemptsByUserIDAndStatus(ctx, userID, query.Status, query.Limit(), query.Offset())
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get attempts", err)
 	}
 
 	now := time.Now()
@@ -569,20 +584,20 @@ func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetA
 	return responses, httpx.ToPageCounts(total, query.PageSize), nil
 }
 
-func (s *service) GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, error) {
+func (s *service) GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, *httpx.HTTPError) {
 	attempt, err := s.repo.GetAttemptQuestionsByIDAndUserID(ctx, id, userID)
 	if err != nil {
-		return nil, err
+		return nil, httpx.FromError(err, "[ERROR] Failed to get attempt questions")
 	}
 
 	if attempt.Status != model.AttemptStatusInProgress {
-		return nil, errors.New("[ERROR] Attempt is not active")
+		return nil, ErrAttemptNotActive
 	}
 
 	if attempt.ExpiresAt != nil && !time.Now().Before(*attempt.ExpiresAt) {
 		if _, err := s.submitAttempt(ctx, userID, attempt.ID, nil); err != nil &&
 			!errors.Is(err, ErrAttemptAlreadySubmitted) {
-			return nil, err
+			return nil, httpx.FromError(err, "[ERROR] Failed to get attempt questions")
 		}
 		return nil, ErrAttemptExpired
 	}
@@ -703,14 +718,21 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 	return response, nil
 }
 
-func (s *service) SubmitAttempt(ctx context.Context, userID string, attemptID uint, req dto.SubmitAttemptRequest) (*dto.AttemptResponse, error) {
-	return s.submitAttempt(ctx, userID, attemptID, &req.Answers)
+func (s *service) SubmitAttempt(ctx context.Context, userID string, attemptID uint, req dto.SubmitAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError) {
+	response, err := s.submitAttempt(ctx, userID, attemptID, &req.Answers)
+	if err != nil {
+		if errors.Is(err, dto.ErrScoreQuestionNotFound) || errors.Is(err, dto.ErrScoreQuestionSectionEmpty) {
+			return nil, httpx.NewError(http.StatusBadRequest, err.Error(), err)
+		}
+		return nil, httpx.FromError(err, "[ERROR] Failed to submit attempt")
+	}
+	return response, nil
 }
 
-func (s *service) CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error) {
+func (s *service) CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError) {
 	attempt, err := s.repo.GetAttemptForLifecycle(ctx, attemptID, userID)
 	if err != nil {
-		return nil, err
+		return nil, httpx.FromError(err, "[ERROR] Failed to cancel attempt")
 	}
 	if attempt.ContextType == model.AttemptContextTypeClassroomAssignment {
 		return nil, ErrAssignmentAttemptCancel
@@ -763,19 +785,23 @@ func (s *service) CancelAttempt(ctx context.Context, userID string, attemptID ui
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, httpx.FromError(err, "[ERROR] Failed to cancel attempt")
 	}
 
 	return response, nil
 }
 
-func (s *service) GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, error) {
+func (s *service) GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError) {
 	history, err := s.repo.GetAttemptHistoryByIDAndUserID(ctx, attemptID, userID)
 	if err != nil {
-		return nil, err
+		return nil, httpx.FromError(err, "[ERROR] Failed to get attempt history")
 	}
 
-	return dto.UnmarshalAttemptHistory(history.Data)
+	response, err := dto.UnmarshalAttemptHistory(history.Data)
+	if err != nil {
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to read attempt history", err)
+	}
+	return response, nil
 }
 
 func (s *service) AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int, error) {
@@ -1227,10 +1253,10 @@ func (s *service) ProcessOutboxEvents(ctx context.Context, limit int) (int, erro
 	return int(processed.Load()), nil
 }
 
-func (s *service) GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, error) {
+func (s *service) GetPendingOutboxEvents(ctx context.Context, query dto.GetPendingOutboxEventsQuery) ([]*dto.OutboxEventResponse, int, *httpx.HTTPError) {
 	events, total, err := s.repo.GetPendingOutboxEvents(ctx, query)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get pending outbox events", err)
 	}
 
 	responses := make([]*dto.OutboxEventResponse, len(events))

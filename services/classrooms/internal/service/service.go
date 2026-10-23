@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	examsClient "ego/api/gen/go/exams"
+	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
-	usersClient "ego/api/gen/go/users"
 	platformdb "ego/platform/db"
 	"ego/platform/httpx"
 	"ego/platform/logger"
@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -60,12 +61,28 @@ type Service interface {
 	UpdateSchedule(ctx context.Context, teacherID string, scheduleID uint, req dto.UpdateScheduleRequest) (*dto.CalendarResponse, error)
 	DeleteSchedule(ctx context.Context, teacherID string, scheduleID uint) error
 	GetRoom(ctx context.Context, userID string, roomID uint) (*dto.RoomResponse, error)
+	GetRoomActivity(ctx context.Context, userID string, classroomID uint, roomID uint) (*dto.RoomActivityResponse, error)
 	StartRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error)
 	JoinRoom(ctx context.Context, userID string, roomID uint) (*dto.JoinRoomResponse, error)
 	EndRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error)
 	GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, error)
 	HandleParticipantJoined(ctx context.Context, roomName, userID string, joinedAt time.Time) error
 	HandleParticipantLeft(ctx context.Context, roomName, userID string, leftAt time.Time) error
+	RequestScreenShare(ctx context.Context, userID string, classroomID, roomID uint) (*dto.RoomParticipantStateResponse, error)
+	SetHandRaised(ctx context.Context, userID string, classroomID, roomID uint, raised bool) (*dto.RoomParticipantStateResponse, error)
+	LowerHands(ctx context.Context, teacherID string, classroomID, roomID uint, userID *string) (*dto.LoweredHandsResponse, error)
+	MuteParticipant(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	AllowParticipantMicrophone(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	DisableParticipantCamera(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	AllowParticipantCamera(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	MuteAllParticipants(ctx context.Context, teacherID string, classroomID, roomID uint) (*dto.MutedParticipantsResponse, error)
+	RemoveParticipant(ctx context.Context, teacherID string, classroomID, roomID uint, userID string, reason *string) (*dto.RoomParticipantStateResponse, error)
+	ApproveScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	RejectScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, error)
+	StartScreenShare(ctx context.Context, userID string, classroomID, roomID uint) error
+	StopScreenShare(ctx context.Context, actorID string, classroomID, roomID uint, userID string) error
+	HandleScreenSharePublished(ctx context.Context, roomName, userID string) error
+	HandleScreenShareUnpublished(ctx context.Context, roomName, userID string) error
 	ProcessRoomLifecycle(ctx context.Context) (int, error)
 	SetMediaClient(media.Client)
 	SetRoomEventPublisher(func(string, any))
@@ -74,7 +91,7 @@ type Service interface {
 type service struct {
 	repo                *repository.Repository
 	cfg                 *classroomsConfig.AppConfig
-	usersClient         usersClient.UserServiceClient
+	identityClient      identityClient.IdentityServiceClient
 	examsClient         examsClient.ExamServiceClient
 	notificationsClient notificationsClient.NotificationServiceClient
 	mediaClient         media.Client
@@ -87,33 +104,33 @@ func (s *service) SetNotificationClient(client notificationsClient.NotificationS
 func (s *service) SetMediaClient(client media.Client)                { s.mediaClient = client }
 func (s *service) SetRoomEventPublisher(publisher func(string, any)) { s.roomPublisher = publisher }
 
-func New(repo *repository.Repository, appConfig *classroomsConfig.AppConfig, usersServiceClient usersClient.UserServiceClient, examsServiceClient examsClient.ExamServiceClient) Service {
+func New(repo *repository.Repository, appConfig *classroomsConfig.AppConfig, identityServiceClient identityClient.IdentityServiceClient, examsServiceClient examsClient.ExamServiceClient) Service {
 	return &service{
-		repo:        repo,
-		cfg:         appConfig,
-		usersClient: usersServiceClient,
-		examsClient: examsServiceClient,
+		repo:           repo,
+		cfg:            appConfig,
+		identityClient: identityServiceClient,
+		examsClient:    examsServiceClient,
 	}
 }
 
 var (
-	ErrClassroomNotActive             = errors.New("[ERROR] Classroom is not active")
-	ErrClassroomForbidden             = errors.New("[FORBIDDEN] Classroom access denied")
-	ErrClassroomCapacityFull          = errors.New("[ERROR] Classroom capacity is full")
-	ErrTeacherCannotJoinClass         = errors.New("[ERROR] Teacher cannot join own classroom as student")
-	ErrAssignmentInvalidTime          = errors.New("[ERROR] Assignment due time must be after open time")
-	ErrAssignmentDuration             = errors.New("[ERROR] Assignment duration must not exceed the open time window")
-	ErrAssignmentExpired              = errors.New("[ERROR] An expired assignment cannot be activated")
-	ErrAssignmentAlreadyExists        = errors.New("[CONFLICT] This exam is already assigned to the classroom")
-	ErrAssignmentScheduleConfirmation = errors.New("[CONFIRMATION_REQUIRED] Active attempts may be affected by this schedule change")
-	ErrAssignmentContentConfirmation  = errors.New("[CONFIRMATION_REQUIRED] This exam already has attempts; confirm to submit active attempts and pause all related assignments")
-	ErrScheduleInvalidTime            = errors.New("[ERROR] Schedule end time must be after start time")
-	ErrCalendarInvalidRange           = errors.New("[ERROR] Calendar range must be valid and no longer than 366 days")
-	ErrRoomLive                       = errors.New("[CONFLICT] The room is currently live")
-	ErrRoomNotLive                    = errors.New("[ERROR] This session has not started yet")
-	ErrRoomEnded                      = errors.New("[ERROR] This session has ended")
-	ErrRoomTooEarly                   = errors.New("[ERROR] The room can only be started up to 30 minutes before the scheduled time")
-	ErrMediaUnavailable               = errors.New("[UNAVAILABLE] The media server is temporarily unavailable")
+	ErrClassroomNotActive             = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom is not active", nil)
+	ErrClassroomForbidden             = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Classroom access denied", nil)
+	ErrClassroomCapacityFull          = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom capacity is full", nil)
+	ErrTeacherCannotJoinClass         = httpx.NewError(http.StatusBadRequest, "[ERROR] Teacher cannot join own classroom as student", nil)
+	ErrAssignmentInvalidTime          = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment due time must be after open time", nil)
+	ErrAssignmentDuration             = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment duration must not exceed the open time window", nil)
+	ErrAssignmentExpired              = httpx.NewError(http.StatusBadRequest, "[ERROR] An expired assignment cannot be activated", nil)
+	ErrAssignmentAlreadyExists        = httpx.NewError(http.StatusConflict, "[CONFLICT] This exam is already assigned to the classroom", nil)
+	ErrAssignmentScheduleConfirmation = httpx.NewError(http.StatusConflict, "[CONFIRMATION_REQUIRED] Active attempts may be affected by this schedule change", nil)
+	ErrAssignmentContentConfirmation  = httpx.NewError(http.StatusConflict, "[CONFIRMATION_REQUIRED] This exam already has attempts; confirm to submit active attempts and pause all related assignments", nil)
+	ErrScheduleInvalidTime            = httpx.NewError(http.StatusBadRequest, "[ERROR] Schedule end time must be after start time", nil)
+	ErrCalendarInvalidRange           = httpx.NewError(http.StatusBadRequest, "[ERROR] Calendar range must be valid and no longer than 366 days", nil)
+	ErrRoomLive                       = httpx.NewError(http.StatusConflict, "[CONFLICT] The room is currently live", nil)
+	ErrRoomNotLive                    = httpx.NewError(http.StatusBadRequest, "[ERROR] This session has not started yet", nil)
+	ErrRoomEnded                      = httpx.NewError(http.StatusBadRequest, "[ERROR] This session has ended", nil)
+	ErrRoomTooEarly                   = httpx.NewError(http.StatusBadRequest, "[ERROR] The room can only be started up to 30 minutes before the scheduled time", nil)
+	ErrMediaUnavailable               = httpx.NewError(http.StatusServiceUnavailable, "[UNAVAILABLE] The media server is temporarily unavailable", nil)
 )
 
 func (s *service) CreateSchedule(ctx context.Context, teacherID string, classroomID uint, req dto.CreateScheduleRequest) (*dto.CalendarResponse, error) {
@@ -285,7 +302,7 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 
 			response = dto.ToCreatedClassroomResponse(classroom)
 			// Lấy thông tin hiển thị của giáo viên từ Users thay vì sao chép dữ liệu người dùng sang Classrooms.
-			usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{teacherID}})
+			usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{teacherID}})
 			if err != nil {
 				return err
 			}
@@ -307,7 +324,7 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, error) {
 	var teacherIDs []string
 	if query.Query != "" {
-		usersResp, err := s.usersClient.SearchUserIDsByName(ctx, &usersClient.SearchUserIDsByNameRequest{Query: query.Query})
+		usersResp, err := s.identityClient.SearchUserIDsByName(ctx, &identityClient.SearchUserIDsByNameRequest{Query: query.Query})
 		if err != nil {
 			return nil, 0, err
 		}
@@ -332,9 +349,9 @@ func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) 
 			}
 		}
 	}
-	var users []*usersClient.UserInfo
+	var users []*identityClient.UserInfo
 	if len(userIDs) > 0 {
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
 		if err != nil {
 			return nil, 0, err
 		}
@@ -347,7 +364,7 @@ func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) 
 func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, error) {
 	var teacherIDs []string
 	if query.Query != "" {
-		usersResp, err := s.usersClient.SearchUserIDsByName(ctx, &usersClient.SearchUserIDsByNameRequest{Query: query.Query})
+		usersResp, err := s.identityClient.SearchUserIDsByName(ctx, &identityClient.SearchUserIDsByNameRequest{Query: query.Query})
 		if err != nil {
 			return nil, 0, err
 		}
@@ -372,9 +389,9 @@ func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.
 			}
 		}
 	}
-	var users []*usersClient.UserInfo
+	var users []*identityClient.UserInfo
 	if len(userIDs) > 0 {
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
 		if err != nil {
 			return nil, 0, err
 		}
@@ -403,7 +420,7 @@ func (s *service) GetClassroom(ctx context.Context, userID string, id uint) (*dt
 	for _, member := range classroom.Members {
 		userIDs = append(userIDs, member.UserID)
 	}
-	usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +445,7 @@ func (s *service) GetClassroomByCode(ctx context.Context, code string) (*dto.Cla
 		return nil, err
 	}
 	response := dto.ToClassroomByCodeResponse(classroom, countApprovedMembers)
-	usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
+	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +480,7 @@ func (s *service) UpdateClassroom(ctx context.Context, teacherID string, id uint
 			return err
 		}
 		response = dto.ToClassroomResponse(classroom)
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
 		if err != nil {
 			return err
 		}
@@ -498,7 +515,7 @@ func (s *service) ArchiveClassroom(ctx context.Context, teacherID string, id uin
 			return err
 		}
 		response = dto.ToClassroomResponse(classroom)
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
 		if err != nil {
 			return err
 		}
@@ -542,7 +559,7 @@ func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req d
 			}
 			existing.Classroom = *classroom
 			response = dto.ToClassroomJoinRequestResponse(existing)
-			usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{existing.UserID, classroom.TeacherID}})
+			usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{existing.UserID, classroom.TeacherID}})
 			if err != nil {
 				return err
 			}
@@ -572,7 +589,7 @@ func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req d
 		}
 		member.Classroom = *classroom
 		response = dto.ToClassroomJoinRequestResponse(member)
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{member.UserID, classroom.TeacherID}})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{member.UserID, classroom.TeacherID}})
 		if err != nil {
 			return err
 		}
@@ -622,7 +639,7 @@ func (s *service) GetJoinRequests(ctx context.Context, teacherID string, classro
 		}
 	}
 	if len(userIDs) > 0 {
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
 		if err != nil {
 			return nil, err
 		}
@@ -667,7 +684,7 @@ func (s *service) ApproveMember(ctx context.Context, teacherID string, classroom
 			return err
 		}
 		response = dto.ToClassroomJoinRequestResponse(member)
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{member.UserID, member.Classroom.TeacherID}})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{member.UserID, member.Classroom.TeacherID}})
 		if err != nil {
 			return err
 		}
@@ -712,7 +729,7 @@ func (s *service) RejectMember(ctx context.Context, teacherID string, classroomI
 			return err
 		}
 		response = dto.ToClassroomJoinRequestResponse(member)
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{member.UserID, member.Classroom.TeacherID}})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{member.UserID, member.Classroom.TeacherID}})
 		if err != nil {
 			return err
 		}
@@ -1283,11 +1300,11 @@ func (s *service) GetAssignmentAudits(ctx context.Context, teacherID string, cla
 		}
 	}
 	if len(actorIDs) > 0 {
-		users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: actorIDs})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: actorIDs})
 		if err != nil {
 			return nil, err
 		}
-		usersByID := dto.ToUserInfoMap(users.Users)
+		usersByID := dto.ToUserInfoMap(usersResp.Users)
 		for _, response := range responses {
 			response.Actor = usersByID[response.ActorID]
 		}
@@ -1328,7 +1345,7 @@ func (s *service) UpdateAssignmentContent(ctx context.Context, teacherID string,
 		return nil, ErrAssignmentContentConfirmation
 	}
 	if totalAttempts > 0 && strings.TrimSpace(req.Reason) == "" {
-		return nil, errors.New("[ERROR] A reason is required when changing an exam with attempts")
+		return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] A reason is required when changing an exam with attempts", nil)
 	}
 	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
 		return repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, assignment.Title, assignment.Description, false)
@@ -1419,9 +1436,9 @@ func (s *service) GetAssignments(ctx context.Context, userID string, classroomID
 		userIDs = append(userIDs, userID)
 	}
 
-	var users []*usersClient.UserInfo
+	var users []*identityClient.UserInfo
 	if len(userIDs) > 0 {
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1471,9 +1488,9 @@ func (s *service) GetAssignment(ctx context.Context, userID string, classroomID 
 		userIDs = append(userIDs, userID)
 	}
 
-	var users []*usersClient.UserInfo
+	var users []*identityClient.UserInfo
 	if len(userIDs) > 0 {
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
 		if err != nil {
 			return nil, err
 		}
@@ -1520,9 +1537,9 @@ func (s *service) GetGradebook(ctx context.Context, teacherID string, classroomI
 		}
 	}
 
-	var users []*usersClient.UserInfo
+	var users []*identityClient.UserInfo
 	if len(userIDs) > 0 {
-		usersResp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: userIDs})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
 		if err != nil {
 			return nil, err
 		}
@@ -1571,13 +1588,13 @@ func (s *service) GetClassGradebook(ctx context.Context, teacherID string, class
 	for i, member := range members {
 		ids[i] = member.UserID
 	}
-	users := []*usersClient.UserInfo{}
+	users := []*identityClient.UserInfo{}
 	if len(ids) > 0 {
-		resp, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: ids})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
 		if err != nil {
 			return nil, err
 		}
-		users = resp.Users
+		users = usersResp.Users
 	}
 	usersByID := dto.ToUserInfoMap(users)
 	now := time.Now()

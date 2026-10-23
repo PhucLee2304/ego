@@ -70,9 +70,9 @@ func TestInteractionAndPinNotificationsUseDirectOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := repo.ClaimOutbox(ctx, time.Now().Add(time.Second), 20)
-	if err != nil {
-		t.Fatal(err)
+	events, claimErr := repo.ClaimOutbox(ctx, time.Now().Add(time.Second), 20)
+	if claimErr != nil {
+		t.Fatal(claimErr)
 	}
 	if len(events) != 5 {
 		t.Fatalf("expected 5 notifications, got %d", len(events))

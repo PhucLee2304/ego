@@ -1,0 +1,97 @@
+package repository
+
+import (
+	"context"
+	"strings"
+
+	"ego/services/identity/internal/model"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+func (r *repository) UpsertUser(ctx context.Context, user *model.User) (*model.User, error) {
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "firebase_uid"}},
+		DoUpdates: clause.AssignmentColumns([]string{"email"}),
+	}).Create(user).Error; err != nil {
+		return nil, err
+	}
+
+	var dbUser model.User
+	if err := r.db.WithContext(ctx).Where("firebase_uid = ?", user.FirebaseUID).First(&dbUser).Error; err != nil {
+		return nil, err
+	}
+
+	return &dbUser, nil
+}
+
+func (r *repository) GetByID(ctx context.Context, userID string) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.User, error) {
+	var users []*model.User
+	if len(userIDs) == 0 {
+		return users, nil
+	}
+	if err := r.db.WithContext(ctx).Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+func (r *repository) SearchUserIDsByName(ctx context.Context, query string) ([]string, error) {
+	var ids []string
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ids, nil
+	}
+	if err := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("name ILIKE ?", "%"+query+"%").
+		Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func (r *repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {
+	var user model.User
+	result := r.db.WithContext(ctx).
+		Model(&model.User{}).
+		Clauses(clause.Returning{}).
+		Where("id = ?", userID).
+		Updates(updates).
+		Scan(&user)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &user, nil
+}
+
+func (r *repository) GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error) {
+	var users []model.User
+	var total int64
+
+	if err := r.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := r.db.WithContext(ctx).Order("id ASC").Limit(int(limit)).Offset(int(offset)).Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+
+	userPtrs := make([]*model.User, len(users))
+	for i := range users {
+		userPtrs[i] = &users[i]
+	}
+
+	return userPtrs, total, nil
+}

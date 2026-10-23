@@ -18,11 +18,11 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr    string
-	StorageServiceAddr string
-	SeedDir            string
-	SeedUploadWorkers  int
-	SeedUploadRetries  int
+	IdentityServiceAddr string
+	StorageServiceAddr  string
+	SeedDir             string
+	SeedUploadWorkers   int
+	SeedUploadRetries   int
 }
 
 func LoadAppConfig() (*AppConfig, error) {
@@ -37,11 +37,11 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "23042004"),
 		DBName:     getEnv("DB_NAME", "topicsdb"),
 
-		AuthServiceAddr:    getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		StorageServiceAddr: getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
-		SeedDir:            getEnv("SEED_DIR", "/app/services/topics/seed"),
-		SeedUploadWorkers:  getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
-		SeedUploadRetries:  getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
+		IdentityServiceAddr: getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
+		StorageServiceAddr:  getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
+		SeedDir:             getEnv("SEED_DIR", "/app/services/topics/seed"),
+		SeedUploadWorkers:   getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
+		SeedUploadRetries:   getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",

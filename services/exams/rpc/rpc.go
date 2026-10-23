@@ -7,7 +7,12 @@ import (
 	"ego/services/exams/internal/model"
 	"ego/services/exams/internal/service"
 	"encoding/json"
+	"errors"
 	"time"
+
+	platformRpc "ego/platform/rpc"
+
+	"google.golang.org/grpc/codes"
 )
 
 type server struct {
@@ -47,7 +52,7 @@ func (s *server) CreatePrivateExam(ctx context.Context, req *examsClient.CreateP
 		Questions:   questions,
 	})
 	if err != nil {
-		return nil, err
+		return nil, privateExamError(err)
 	}
 
 	resp := &examsClient.CreatePrivateExamResponse{
@@ -91,6 +96,16 @@ func (s *server) UpdateAssignmentAttemptSchedule(ctx context.Context, req *exams
 		return nil, err
 	}
 	return &examsClient.UpdateAssignmentAttemptScheduleResponse{UpdatedCount: count}, nil
+}
+
+// privateExamError reports validation failures as InvalidArgument so callers can
+// return them to the client instead of a generic internal error.
+func privateExamError(err error) error {
+	var validationErr *service.PrivateExamValidationError
+	if errors.As(err, &validationErr) {
+		return platformRpc.PublicError(codes.InvalidArgument, validationErr.Message)
+	}
+	return err
 }
 
 func privateExamResponse(exam *model.Exam) *examsClient.PrivateExamResponse {
@@ -137,7 +152,7 @@ func (s *server) UpdatePrivateExam(ctx context.Context, req *examsClient.UpdateP
 	}
 	exam, err := s.service.UpdatePrivateExam(ctx, uint(req.Id), dto.UpdatePrivateExamRequest{Title: req.Title, Description: req.Description, Questions: questions, CorrectionOnly: req.CorrectionOnly, ActorID: req.ActorId, Reason: req.Reason})
 	if err != nil {
-		return nil, err
+		return nil, privateExamError(err)
 	}
 	return privateExamResponse(exam), nil
 }

@@ -263,6 +263,76 @@ func (r *Repository) CreateRoom(ctx context.Context, room *model.Room) error {
 	return r.db.WithContext(ctx).Create(room).Error
 }
 
+func (r *Repository) GetOrCreateRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error) {
+	candidate := &model.RoomParticipantState{RoomID: roomID, UserID: userID, MicrophoneAllowed: true, CameraAllowed: true}
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(candidate).Error; err != nil {
+		return nil, err
+	}
+	var state model.RoomParticipantState
+	if err := r.db.WithContext(ctx).Where("room_id = ? AND user_id = ?", roomID, userID).First(&state).Error; err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// FindRoomParticipantState trả về nil khi participant chưa có state trong room.
+func (r *Repository) FindRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error) {
+	var state model.RoomParticipantState
+	// Limit+Find thay cho First: "chưa có state" là trường hợp bình thường, không để GORM log record not found.
+	result := r.db.WithContext(ctx).Where("room_id = ? AND user_id = ?", roomID, userID).Order("id").Limit(1).Find(&state)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return &state, nil
+}
+
+func (r *Repository) UpdateRoomParticipantState(ctx context.Context, state *model.RoomParticipantState) error {
+	return r.db.WithContext(ctx).Save(state).Error
+}
+
+// LowerRoomHands hạ tay trong room (chỉ [userID] nếu khác nil) và trả về user
+// đã được hạ theo thứ tự giơ tay.
+func (r *Repository) LowerRoomHands(ctx context.Context, roomID uint, userID *string) ([]string, error) {
+	lowered := []string{}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&model.RoomParticipantState{}).Where("room_id = ? AND hand_raised_at IS NOT NULL", roomID)
+		if userID != nil {
+			query = query.Where("user_id = ?", *userID)
+		}
+		if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Order("hand_raised_at ASC").Pluck("user_id", &lowered).Error; err != nil {
+			return err
+		}
+		if len(lowered) == 0 {
+			return nil
+		}
+		return tx.Model(&model.RoomParticipantState{}).Where("room_id = ? AND user_id IN ?", roomID, lowered).Update("hand_raised_at", nil).Error
+	})
+	return lowered, err
+}
+
+func (r *Repository) GetRoomParticipantStates(ctx context.Context, roomID uint) ([]*model.RoomParticipantState, error) {
+	var states []*model.RoomParticipantState
+	err := r.db.WithContext(ctx).Where("room_id = ?", roomID).Order("user_id ASC").Find(&states).Error
+	return states, err
+}
+
+func (r *Repository) DeleteRoomParticipantStates(ctx context.Context, roomID uint) error {
+	return r.db.WithContext(ctx).Unscoped().Where("room_id = ?", roomID).Delete(&model.RoomParticipantState{}).Error
+}
+
+func (r *Repository) CreateRoomModerationAudit(ctx context.Context, audit *model.RoomModerationAudit) error {
+	return r.db.WithContext(ctx).Create(audit).Error
+}
+
+func (r *Repository) GetRoomModerationAudits(ctx context.Context, roomID uint) ([]*model.RoomModerationAudit, error) {
+	var audits []*model.RoomModerationAudit
+	err := r.db.WithContext(ctx).Where("room_id = ?", roomID).Order("created_at ASC, id ASC").Find(&audits).Error
+	return audits, err
+}
+
 func (r *Repository) GetRoomByID(ctx context.Context, id uint) (*model.Room, error) {
 	var room model.Room
 	if err := r.db.WithContext(ctx).Preload("Schedule").Preload("Schedule.Classroom").Where("id = ?", id).First(&room).Error; err != nil {
@@ -285,6 +355,15 @@ func (r *Repository) GetRoomByName(ctx context.Context, name string) (*model.Roo
 		return nil, gorm.ErrRecordNotFound
 	}
 	return r.GetRoomByID(ctx, id)
+}
+
+// SetRoomHostAbsentSince chỉ ghi cột host_absent_since khi room còn LIVE.
+// Webhook join/leave chạy song song với EndRoom nên không được Save cả dòng:
+// bản ghi nạp trước khi room kết thúc sẽ ghi đè status ENDED thành LIVE.
+func (r *Repository) SetRoomHostAbsentSince(ctx context.Context, roomID uint, absentSince *time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.Room{}).
+		Where("id = ? AND status = ?", roomID, model.RoomStatusLive).
+		Update("host_absent_since", absentSince).Error
 }
 
 func (r *Repository) UpdateRoom(ctx context.Context, room *model.Room) error {
@@ -310,7 +389,7 @@ func (r *Repository) GetLiveRoomsByClassroom(ctx context.Context, classroomID ui
 
 func (r *Repository) GetRoomsForLifecycle(ctx context.Context, now time.Time) ([]*model.Room, error) {
 	var rooms []*model.Room
-	err := r.db.WithContext(ctx).Preload("Schedule").Where("status IN ?", []model.RoomStatus{model.RoomStatusScheduled, model.RoomStatusLive}).Find(&rooms).Error
+	err := r.db.WithContext(ctx).Preload("Schedule").Preload("Schedule.Classroom").Where("status IN ?", []model.RoomStatus{model.RoomStatusScheduled, model.RoomStatusLive}).Find(&rooms).Error
 	return rooms, err
 }
 

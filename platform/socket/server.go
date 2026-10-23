@@ -2,7 +2,7 @@ package socket
 
 import (
 	"context"
-	tokenClient "ego/api/gen/go/token"
+	identityClient "ego/api/gen/go/identity"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,22 +19,22 @@ import (
 type HandlerFunc func(ctx context.Context, client *Client, message Message) (any, error)
 
 type Server struct {
-	tokenServiceClient tokenClient.TokenServiceClient
-	upgrader           websocket.Upgrader
-	writeWait          time.Duration
-	pongWait           time.Duration
-	pingInterval       time.Duration
-	readLimit          int64
-	sendBuffer         int
+	identityServiceClient identityClient.IdentityServiceClient
+	upgrader              websocket.Upgrader
+	writeWait             time.Duration
+	pongWait              time.Duration
+	pingInterval          time.Duration
+	readLimit             int64
+	sendBuffer            int
 
 	mu       sync.RWMutex
 	handlers map[MessageType]HandlerFunc
 	clients  map[string]map[*Client]struct{}
 }
 
-func NewServer(tokenServiceClient tokenClient.TokenServiceClient) *Server {
+func NewServer(identityServiceClient identityClient.IdentityServiceClient) *Server {
 	return &Server{
-		tokenServiceClient: tokenServiceClient,
+		identityServiceClient: identityServiceClient,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -55,14 +55,18 @@ func (s *Server) Handle(messageType MessageType, handler HandlerFunc) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.tokenServiceClient == nil {
-		httpx.Error(w, http.StatusInternalServerError, "[SOCKET] Token service client is not configured")
+	if s.identityServiceClient == nil {
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[SOCKET] Identity service client is not configured", errors.New("identity service client is not configured")))
 		return
 	}
 
-	userID, err := AuthenticateToken(r.Context(), r, s.tokenServiceClient)
+	userID, err := AuthenticateToken(r.Context(), r, s.identityServiceClient)
 	if err != nil {
-		httpx.Error(w, http.StatusUnauthorized, fmt.Sprintf("[SOCKET] Unauthorized: %v", err))
+		if !errors.Is(err, ErrUnauthorized) {
+			httpx.Error(w, httpx.NewError(http.StatusServiceUnavailable, "[SOCKET] Authentication service unavailable", err))
+			return
+		}
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[SOCKET] Unauthorized", err))
 		return
 	}
 

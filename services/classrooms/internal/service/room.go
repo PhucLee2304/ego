@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	usersClient "ego/api/gen/go/users"
+	identityClient "ego/api/gen/go/identity"
 	"ego/platform/logger"
 	"ego/services/classrooms/internal/dto"
 	"ego/services/classrooms/internal/media"
 	"ego/services/classrooms/internal/model"
 	"ego/services/classrooms/internal/repository"
+	classroomsSocket "ego/services/classrooms/internal/socket"
 )
 
 func (s *service) GetRoom(ctx context.Context, userID string, roomID uint) (*dto.RoomResponse, error) {
@@ -30,6 +31,34 @@ func (s *service) GetRoom(ctx context.Context, userID string, roomID uint) (*dto
 		}
 	}
 	return dto.ToRoomResponse(room, isHost), nil
+}
+
+func (s *service) GetRoomActivity(ctx context.Context, userID string, classroomID uint, roomID uint) (*dto.RoomActivityResponse, error) {
+	room, err := s.repo.GetRoomByID(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	if room.Schedule.ClassroomID != classroomID {
+		return nil, ErrClassroomForbidden
+	}
+	isHost := room.Schedule.Classroom.TeacherID == userID
+	if !isHost {
+		approved, err := s.repo.IsStudentApprovedInClassroom(ctx, classroomID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !approved {
+			return nil, ErrClassroomForbidden
+		}
+	}
+	if room.Status == model.RoomStatusEnded {
+		return nil, ErrRoomEnded
+	}
+	states, err := s.repo.GetRoomParticipantStates(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	return dto.ToRoomActivityResponse(room, states, userID, isHost), nil
 }
 
 func (s *service) StartRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, error) {
@@ -124,12 +153,25 @@ func (s *service) JoinRoom(ctx context.Context, userID string, roomID uint) (*dt
 	if room.Status == model.RoomStatusEnded {
 		return nil, ErrRoomEnded
 	}
-	name := userID
-	users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: []string{userID}})
-	if err == nil && len(users.Users) > 0 {
-		name = users.Users[0].Name
+	state, err := s.repo.GetOrCreateRoomParticipantState(ctx, room.ID, userID)
+	if err != nil {
+		return nil, err
 	}
-	token, err := s.mediaClient.CreateJoinToken(media.RoomName(room.ID), userID, name, isHost)
+	// Học sinh bị giáo viên xóa khỏi phòng không được vào lại cho đến khi room
+	// kết thúc; state (cùng RemovedAt) chỉ bị xóa lúc đó.
+	if state.RemovedAt != nil {
+		return nil, ErrParticipantRemoved
+	}
+	permissions := media.HostPermissions()
+	if !isHost {
+		permissions = participantPermissions(state, false)
+	}
+	name := userID
+	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{userID}})
+	if err == nil && len(usersResp.Users) > 0 {
+		name = usersResp.Users[0].Name
+	}
+	token, err := s.mediaClient.CreateJoinToken(media.RoomName(room.ID), userID, name, isHost, permissions)
 	if err != nil {
 		return nil, errors.Join(ErrMediaUnavailable, err)
 	}
@@ -180,6 +222,9 @@ func (s *service) finishRoom(ctx context.Context, room *model.Room) error {
 		if err := repo.CloseAllParticipantSessions(ctx, locked.ID, now); err != nil {
 			return err
 		}
+		if err := repo.DeleteRoomParticipantStates(ctx, locked.ID); err != nil {
+			return err
+		}
 		*room = *locked
 		return nil
 	}); err != nil {
@@ -197,8 +242,7 @@ func (s *service) HandleParticipantJoined(ctx context.Context, roomName, userID 
 	role := model.RoomParticipantRoleParticipant
 	if userID == room.Schedule.Classroom.TeacherID {
 		role = model.RoomParticipantRoleHost
-		room.HostAbsentSince = nil
-		if err := s.repo.UpdateRoom(ctx, room); err != nil {
+		if err := s.repo.SetRoomHostAbsentSince(ctx, room.ID, nil); err != nil {
 			return err
 		}
 	}
@@ -213,9 +257,15 @@ func (s *service) HandleParticipantLeft(ctx context.Context, roomName, userID st
 	if err := s.repo.CloseParticipantSession(ctx, room.ID, userID, leftAt); err != nil {
 		return err
 	}
-	if userID == room.Schedule.Classroom.TeacherID && room.Status == model.RoomStatusLive {
-		room.HostAbsentSince = &leftAt
-		return s.repo.UpdateRoom(ctx, room)
+	// Phê duyệt chia sẻ màn hình gắn với phiên đang kết nối; vào lại phòng
+	// bằng token mới thì phải xin lại.
+	if changed, err := s.clearScreenShareState(ctx, room.ID, userID); err != nil {
+		return err
+	} else if changed {
+		s.publishRoomActivity(room, classroomsSocket.EventScreenShareStopped, userID)
+	}
+	if userID == room.Schedule.Classroom.TeacherID {
+		return s.repo.SetRoomHostAbsentSince(ctx, room.ID, &leftAt)
 	}
 	return nil
 }
@@ -247,13 +297,13 @@ func (s *service) GetRoomAttendance(ctx context.Context, userID string, roomID u
 	for _, session := range sessions {
 		ids = append(ids, session.UserID)
 	}
-	var userInfos []*usersClient.UserInfo
+	var userInfos []*identityClient.UserInfo
 	if len(ids) > 0 {
-		users, err := s.usersClient.GetUsersInfo(ctx, &usersClient.GetUsersInfoRequest{Ids: ids})
+		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
 		if err != nil {
 			return nil, err
 		}
-		userInfos = users.Users
+		userInfos = usersResp.Users
 	}
 	usersByID := dto.ToUserInfoMap(userInfos)
 	responses := make([]*dto.AttendanceSessionResponse, len(sessions))
@@ -276,6 +326,13 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 			var mediaErr error
 			for attempt := 1; attempt <= 3; attempt++ {
 				identities, mediaErr = s.mediaClient.ListParticipants(ctx, media.RoomName(room.ID))
+				if errors.Is(mediaErr, media.ErrRoomNotFound) {
+					// LiveKit dọn phòng trống sau departure_timeout: không ai đang kết nối,
+					// vẫn đối chiếu để đóng các phiên còn mở thay vì bỏ qua như lỗi.
+					logger.Log.Debug().Uint("room_id", room.ID).Msg("[ROOM] Media room is closed, reconciling as empty")
+					identities, mediaErr = nil, nil
+					break
+				}
 				if mediaErr == nil {
 					if attempt > 1 {
 						logger.Log.Info().Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Participant reconcile recovered")
@@ -366,7 +423,7 @@ func (s *service) publishRoomState(ctx context.Context, room *model.Room, eventT
 	if err != nil {
 		return
 	}
-	payload := map[string]any{"type": eventType, "payload": dto.ToRoomResponse(room, false)}
+	payload := classroomsSocket.NewRoomEvent(eventType, room.ID, dto.ToRoomResponse(room, false))
 	s.roomPublisher(room.Schedule.Classroom.TeacherID, payload)
 	for _, member := range members {
 		s.roomPublisher(member.UserID, payload)

@@ -285,25 +285,27 @@ func TestPrivateAssignmentExamConstraints(t *testing.T) {
 	if err := db.Where("attempt_id = ? AND question_id = ?", groupAttempt.ID, groupQuestion.ID).First(&answer).Error; err != nil {
 		t.Fatalf("grouped TOEIC answer was not persisted: %v", err)
 	}
-	result, err := svc.SubmitAttempt(context.Background(), groupAttempt.UserID, groupAttempt.ID, dto.SubmitAttemptRequest{
+	// SubmitAttempt and CreateAttempt return *httpx.HTTPError; keep it out of the
+	// error-typed err so a nil pointer is not turned into a non-nil interface.
+	result, httpErr := svc.SubmitAttempt(context.Background(), groupAttempt.UserID, groupAttempt.ID, dto.SubmitAttemptRequest{
 		Answers: []dto.SubmitAttemptAnswer{{QuestionID: groupQuestion.ID, SelectedOptionID: &selectedOptionID}},
 	})
-	if err != nil {
-		t.Fatalf("submit grouped TOEIC attempt: %v", err)
+	if httpErr != nil {
+		t.Fatalf("submit grouped TOEIC attempt: %v", httpErr)
 	}
 	if result.TotalQuestions != 1 || result.CorrectAnswers == nil || *result.CorrectAnswers != 1 || result.Score == nil || *result.Score != 10 {
 		t.Fatalf("grouped TOEIC attempt was scored incorrectly: %#v", result)
 	}
 
 	duration := model.AttemptDuration10
-	createdAttempt, err := svc.CreateAttempt(context.Background(), "toeic-create-student", groupExam.ID, dto.CreateExamAttemptRequest{
+	createdAttempt, httpErr := svc.CreateAttempt(context.Background(), "toeic-create-student", groupExam.ID, dto.CreateExamAttemptRequest{
 		Mode:        model.AttemptModePractice,
 		Parts:       []model.PartCode{model.Part3},
 		Duration:    &duration,
 		ContextType: model.AttemptContextTypeStandalone,
 	})
-	if err != nil {
-		t.Fatalf("create grouped TOEIC attempt: %v", err)
+	if httpErr != nil {
+		t.Fatalf("create grouped TOEIC attempt: %v", httpErr)
 	}
 	if createdAttempt.TotalQuestions != 1 {
 		t.Fatalf("expected grouped question in attempt total, got %d", createdAttempt.TotalQuestions)

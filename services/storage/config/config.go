@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -10,7 +11,7 @@ type AppConfig struct {
 	Mode     string
 	GRPCPort string
 
-	AuthServiceAddr string
+	IdentityServiceAddr string
 
 	R2Region         string
 	R2Endpoint       string
@@ -19,23 +20,25 @@ type AppConfig struct {
 	R2AccessKey      string
 	R2SecretKey      string
 	R2Bucket         string
+	R2PublicRead     bool
 	R2Expiry         time.Duration
 }
 
 func LoadAppConfig() (*AppConfig, error) {
 	config := &AppConfig{
-		Port:             getEnv("APP_PORT", "8082"),
-		Mode:             getEnv("APP_MODE", "development"),
-		GRPCPort:         getEnv("GRPC_PORT", "50054"),
-		AuthServiceAddr:  getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		R2Region:         getEnv("R2_REGION", "auto"),
-		R2Endpoint:       getEnv("R2_ENDPOINT", "http://localhost:9002"),
-		R2Host:           getEnv("R2_HOST", "localhost:9002"),
-		R2PublicEndpoint: getEnv("R2_PUBLIC_ENDPOINT", ""),
-		R2AccessKey:      getEnv("R2_ACCESS_KEY", "root"),
-		R2SecretKey:      getEnv("R2_SECRET_KEY", "root"),
-		R2Bucket:         getEnv("R2_BUCKET", "ego"),
-		R2Expiry:         parseDuration("R2_EXPIRY", "15m"),
+		Port:                getEnv("APP_PORT", "8082"),
+		Mode:                getEnv("APP_MODE", "development"),
+		GRPCPort:            getEnv("GRPC_PORT", "50054"),
+		IdentityServiceAddr: getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
+		R2Region:            getEnv("R2_REGION", "auto"),
+		R2Endpoint:          getEnv("R2_ENDPOINT", "http://localhost:9002"),
+		R2Host:              getEnv("R2_HOST", "localhost:9002"),
+		R2PublicEndpoint:    getEnv("R2_PUBLIC_ENDPOINT", ""),
+		R2AccessKey:         getEnv("R2_ACCESS_KEY", "root"),
+		R2SecretKey:         getEnv("R2_SECRET_KEY", "root"),
+		R2Bucket:            getEnv("R2_BUCKET", "ego"),
+		R2PublicRead:        parseBool("R2_PUBLIC_READ", false),
+		R2Expiry:            parseDuration("R2_EXPIRY", "15m"),
 	}
 
 	return config, nil
@@ -46,6 +49,19 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func parseBool(key string, fallback bool) bool {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func parseDuration(key, fallback string) time.Duration {

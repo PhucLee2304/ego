@@ -1,8 +1,49 @@
 package socket
 
-import "time"
+import (
+	"time"
 
-const EventGradebookUpdated = "GRADEBOOK_UPDATED"
+	"github.com/google/uuid"
+)
+
+const (
+	EventGradebookUpdated              = "GRADEBOOK_UPDATED"
+	EventRoomStarted                   = "ROOM_STARTED"
+	EventRoomEnded                     = "ROOM_ENDED"
+	EventParticipantPermissionsUpdated = "PARTICIPANT_PERMISSIONS_UPDATED"
+	EventHandRaised                    = "HAND_RAISED"
+	EventHandLowered                   = "HAND_LOWERED"
+	EventScreenShareRequested          = "SCREEN_SHARE_REQUESTED"
+	EventScreenShareApproved           = "SCREEN_SHARE_APPROVED"
+	EventScreenShareRejected           = "SCREEN_SHARE_REJECTED"
+	EventScreenShareStopped            = "SCREEN_SHARE_STOPPED"
+	EventParticipantRemoved            = "PARTICIPANT_REMOVED"
+	EventParticipantMicrophoneAllowed  = "PARTICIPANT_MICROPHONE_ALLOWED"
+)
+
+type RoomEvent struct {
+	Type      string    `json:"type"`
+	EventID   string    `json:"eventId"`
+	RoomID    uint      `json:"roomId"`
+	CreatedAt time.Time `json:"createdAt"`
+	Payload   any       `json:"payload"`
+}
+
+func NewRoomEvent(eventType string, roomID uint, payload any) RoomEvent {
+	return RoomEvent{
+		Type:      eventType,
+		EventID:   uuid.NewString(),
+		RoomID:    roomID,
+		CreatedAt: time.Now().UTC(),
+		Payload:   payload,
+	}
+}
+
+// ParticipantActivityPayload cho biết participant nào bị tác động; client tải
+// lại activity để lấy trạng thái đầy đủ.
+type ParticipantActivityPayload struct {
+	UserID string `json:"userId"`
+}
 
 type GradebookUpdatedEvent struct {
 	Type    string                  `json:"type"`

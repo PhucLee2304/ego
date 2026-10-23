@@ -2,15 +2,18 @@ package service
 
 import (
 	"context"
+	"net/http"
+
+	"ego/platform/httpx"
 	"ego/services/topics/internal/dto"
 	"ego/services/topics/internal/repository"
 )
 
 type Service interface {
-	GetTopics(ctx context.Context) (*dto.GetTopicsResponse, error)
-	GetSectionsByTopic(ctx context.Context, topicID uint) (*dto.GetSectionsResponse, error)
-	GetLessonsBySection(ctx context.Context, sectionID uint) (*dto.GetLessonsResponse, error)
-	GetLessonByID(ctx context.Context, id uint) (*dto.GetLessonByIDResponse, error)
+	GetTopics(ctx context.Context) (*dto.GetTopicsResponse, *httpx.HTTPError)
+	GetSectionsByTopic(ctx context.Context, topicID uint) (*dto.GetSectionsResponse, *httpx.HTTPError)
+	GetLessonsBySection(ctx context.Context, sectionID uint) (*dto.GetLessonsResponse, *httpx.HTTPError)
+	GetLessonByID(ctx context.Context, id uint) (*dto.GetLessonByIDResponse, *httpx.HTTPError)
 }
 
 type service struct {
@@ -21,10 +24,10 @@ func New(repo *repository.Repository) Service {
 	return &service{repo: repo}
 }
 
-func (s *service) GetTopics(ctx context.Context) (*dto.GetTopicsResponse, error) {
+func (s *service) GetTopics(ctx context.Context) (*dto.GetTopicsResponse, *httpx.HTTPError) {
 	topics, err := s.repo.GetTopics(ctx)
 	if err != nil {
-		return nil, err
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get topics", err)
 	}
 
 	topicDTOs := make([]*dto.Topic, len(topics))
@@ -40,10 +43,10 @@ func (s *service) GetTopics(ctx context.Context) (*dto.GetTopicsResponse, error)
 	return &dto.GetTopicsResponse{Topics: topicDTOs}, nil
 }
 
-func (s *service) GetSectionsByTopic(ctx context.Context, topicID uint) (*dto.GetSectionsResponse, error) {
+func (s *service) GetSectionsByTopic(ctx context.Context, topicID uint) (*dto.GetSectionsResponse, *httpx.HTTPError) {
 	sections, err := s.repo.GetSectionsByTopic(ctx, topicID)
 	if err != nil {
-		return nil, err
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get sections", err)
 	}
 
 	sectionDTOs := make([]*dto.Section, len(sections))
@@ -58,10 +61,10 @@ func (s *service) GetSectionsByTopic(ctx context.Context, topicID uint) (*dto.Ge
 	return &dto.GetSectionsResponse{Sections: sectionDTOs}, nil
 }
 
-func (s *service) GetLessonsBySection(ctx context.Context, sectionID uint) (*dto.GetLessonsResponse, error) {
+func (s *service) GetLessonsBySection(ctx context.Context, sectionID uint) (*dto.GetLessonsResponse, *httpx.HTTPError) {
 	lessons, err := s.repo.GetLessonsBySection(ctx, sectionID)
 	if err != nil {
-		return nil, err
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get lessons", err)
 	}
 
 	lessonDTOs := make([]*dto.Lesson, len(lessons))
@@ -80,10 +83,10 @@ func (s *service) GetLessonsBySection(ctx context.Context, sectionID uint) (*dto
 	return &dto.GetLessonsResponse{Lessons: lessonDTOs}, nil
 }
 
-func (s *service) GetLessonByID(ctx context.Context, id uint) (*dto.GetLessonByIDResponse, error) {
+func (s *service) GetLessonByID(ctx context.Context, id uint) (*dto.GetLessonByIDResponse, *httpx.HTTPError) {
 	lesson, err := s.repo.GetLessonByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, httpx.FromError(err, "[ERROR] Failed to get lesson")
 	}
 
 	var transcriptDTOs []*dto.Transcript

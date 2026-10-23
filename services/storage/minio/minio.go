@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -95,26 +94,19 @@ func (c *Client) UploadFile(
 
 func (c *Client) DownloadFile(ctx context.Context, folders []BucketFolder, fileName string) (io.ReadCloser, error) {
 	objectKey := BuildObjectKey(folders, fileName)
-	url := fmt.Sprintf("%s/%s", strings.TrimRight(c.Host, "/"), objectKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if objectKey == "" {
+		return nil, errors.New("[MINIO] Object key cannot be empty")
+	}
+
+	output, err := c.Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.Bucket),
+		Key:    aws.String(objectKey),
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("[MINIO] Failed to download file: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		err := resp.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("[MINIO] Failed to download file, status: %s", resp.Status)
-	}
-
-	return resp.Body, nil
+	return output.Body, nil
 }
 
 func (c *Client) GetPublicURL(folders []BucketFolder, fileName string) (*string, error) {

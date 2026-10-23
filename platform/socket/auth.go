@@ -2,7 +2,7 @@ package socket
 
 import (
 	"context"
-	tokenClient "ego/api/gen/go/token"
+	identityClient "ego/api/gen/go/identity"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,20 +10,25 @@ import (
 
 var ErrUnauthorized = errors.New("socket authentication failed")
 
-func AuthenticateToken(ctx context.Context, r *http.Request, tokenServiceClient tokenClient.TokenServiceClient) (string, error) {
+func AuthenticateToken(ctx context.Context, r *http.Request, identityServiceClient identityClient.IdentityServiceClient) (string, error) {
 	token := TokenFromRequest(r)
 	if token == "" {
 		return "", ErrUnauthorized
 	}
 
-	resp, err := tokenServiceClient.ValidateToken(ctx, &tokenClient.ValidateTokenRequest{
+	tokenResp, err := identityServiceClient.ValidateToken(ctx, &identityClient.ValidateTokenRequest{
 		Token: token,
 	})
-	if err != nil || !resp.IsValid {
+	if err != nil {
+		// Identity could not judge the token; keep the gRPC error so the caller
+		// does not report a valid token as unauthorized.
+		return "", err
+	}
+	if !tokenResp.IsValid {
 		return "", ErrUnauthorized
 	}
 
-	userID := strings.TrimSpace(resp.UserId)
+	userID := strings.TrimSpace(tokenResp.UserId)
 	if userID == "" {
 		return "", ErrUnauthorized
 	}

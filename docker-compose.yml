@@ -12,13 +12,12 @@ x-go-service: &go-service
 services:
   docs:
     image: swaggerapi/swagger-ui:latest
-    container_name: docs
+    container_name: ego-docs
     restart: unless-stopped
     environment:
       URLS: >
         [
-          { "url": "/auth/docs/doc.json", "name": "Auth" },
-          { "url": "/users/docs/doc.json", "name": "Users" },
+          { "url": "/identity/docs/doc.json", "name": "Identity" },
           { "url": "/storage/docs/doc.json", "name": "Storage" },
           { "url": "/topics/docs/doc.json", "name": "Topics" },
           { "url": "/exams/docs/doc.json", "name": "Exams" },
@@ -30,7 +29,7 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: nginx
+    container_name: ego-nginx
     restart: unless-stopped
     ports:
       - "${NGINX_PORT}:80"
@@ -38,9 +37,7 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
     depends_on:
-      users:
-        condition: service_healthy
-      auth:
+      identity:
         condition: service_healthy
       storage:
         condition: service_healthy
@@ -57,21 +54,23 @@ services:
     networks:
       - ego-network
 
-  users:
+  identity:
     <<: *go-service
     build:
       context: .
-      dockerfile: services/users/Dockerfile
-    container_name: users
+      dockerfile: services/identity/Dockerfile
+    container_name: ego-identity
     env_file:
-      - ./services/users/.env
+      - ./services/identity/.env
+    volumes:
+      - ./platform/credentials:/app/platform/credentials:ro
     depends_on:
       users-db:
         condition: service_healthy
 
   users-db:
     image: postgres:15.8-alpine
-    container_name: users-db
+    container_name: ego-users-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${USERS_DB_USER}
@@ -89,28 +88,41 @@ services:
       timeout: 5s
       retries: 5
 
-  auth:
-    <<: *go-service
-    build:
-      context: .
-      dockerfile: services/auth/Dockerfile
-    container_name: auth
-    env_file:
-      - ./services/auth/.env
-    volumes:
-      - ./platform/credentials:/app/platform/credentials:ro
-
   storage:
     <<: *go-service
     build:
       context: .
       dockerfile: services/storage/Dockerfile
-    container_name: storage
+    container_name: ego-storage
     env_file:
       - ./services/storage/.env
     depends_on:
-      auth:
+      identity:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  minio:
+    container_name: ego-minio
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
+    user: "0:0"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --address ":9000" --console-address ":9001"
+    ports:
+      - "${MINIO_API_PORT:-9102}:9000"
+      - "${MINIO_CONSOLE_PORT:-9103}:9001"
+    volumes:
+      - ./data/minio:/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9000/minio/health/live >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   topics:
     <<: *go-service
@@ -118,7 +130,7 @@ services:
       context: .
       dockerfile: services/topics/Dockerfile
       target: server
-    container_name: topics
+    container_name: ego-topics
     env_file:
       - ./services/topics/.env
     depends_on:
@@ -130,7 +142,7 @@ services:
       context: .
       dockerfile: services/topics/Dockerfile
       target: seed
-    container_name: topics-seed
+    container_name: ego-topics-seed
     profiles:
       - seed
     env_file:
@@ -147,7 +159,7 @@ services:
 
   topics-db:
     image: postgres:15.8-alpine
-    container_name: topics-db
+    container_name: ego-topics-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${TOPICS_DB_USER}
@@ -167,7 +179,7 @@ services:
 
   exams:
     <<: *go-service
-    container_name: exams
+    container_name: ego-exams
     build:
       context: .
       dockerfile: services/exams/Dockerfile
@@ -177,9 +189,7 @@ services:
     depends_on:
       exams-db:
         condition: service_healthy
-      auth:
-        condition: service_healthy
-      users:
+      identity:
         condition: service_healthy
       notifications:
         condition: service_healthy
@@ -189,7 +199,7 @@ services:
       context: .
       dockerfile: services/exams/Dockerfile
       target: seed
-    container_name: exams-seed
+    container_name: ego-exams-seed
     profiles:
       - seed
     env_file:
@@ -201,14 +211,14 @@ services:
         condition: service_healthy
       storage:
         condition: service_healthy
-      auth:
+      identity:
         condition: service_healthy
     networks:
       - ego-network
 
   exams-db:
     image: postgres:15.8-alpine
-    container_name: exams-db
+    container_name: ego-exams-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${EXAMS_DB_USER}
@@ -228,7 +238,7 @@ services:
 
   classrooms:
     <<: *go-service
-    container_name: classrooms
+    container_name: ego-classrooms
     build:
       context: .
       dockerfile: services/classrooms/Dockerfile
@@ -240,12 +250,11 @@ services:
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_JOIN_TOKEN_TTL: ${LIVEKIT_JOIN_TOKEN_TTL}
     depends_on:
       classrooms-db:
         condition: service_healthy
-      auth:
-        condition: service_healthy
-      users:
+      identity:
         condition: service_healthy
       exams:
         condition: service_healthy
@@ -256,7 +265,7 @@ services:
 
   classrooms-db:
     image: postgres:15.8-alpine
-    container_name: classrooms-db
+    container_name: ego-classrooms-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${CLASSROOMS_DB_USER}
@@ -276,7 +285,7 @@ services:
 
   livekit:
     image: livekit/livekit-server:v1.9.10
-    container_name: livekit
+    container_name: ego-livekit
     restart: unless-stopped
     environment:
       LIVEKIT_CONFIG: |
@@ -307,7 +316,7 @@ services:
 
   notifications:
     <<: *go-service
-    container_name: notifications
+    container_name: ego-notifications
     build:
       context: .
       dockerfile: services/notifications/Dockerfile
@@ -318,12 +327,12 @@ services:
     depends_on:
       notifications-db:
         condition: service_healthy
-      auth:
+      identity:
         condition: service_healthy
 
   notifications-db:
     image: postgres:15.8-alpine
-    container_name: notifications-db
+    container_name: ego-notifications-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${NOTIFICATIONS_DB_USER}
@@ -343,7 +352,7 @@ services:
 
   posts:
     <<: *go-service
-    container_name: posts
+    container_name: ego-posts
     build:
       context: .
       dockerfile: services/posts/Dockerfile
@@ -352,9 +361,7 @@ services:
     depends_on:
       posts-db:
         condition: service_healthy
-      auth:
-        condition: service_healthy
-      users:
+      identity:
         condition: service_healthy
       classrooms:
         condition: service_healthy
@@ -365,7 +372,7 @@ services:
 
   posts-db:
     image: postgres:15.8-alpine
-    container_name: posts-db
+    container_name: ego-posts-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTS_DB_USER}
