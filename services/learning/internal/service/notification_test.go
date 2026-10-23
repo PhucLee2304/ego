@@ -75,7 +75,7 @@ func TestProcessNotificationOutbox(t *testing.T) {
 		outboxEvent(3, "room:5:started", model.NotificationSourceRoom, 2),
 	}}
 	client := &fakeNotificationClient{failKeys: map[string]bool{"room:5:started": true}}
-	svc := New(repo, client, nil, nil, nil, nil)
+	svc := New(repo, nil, client, nil, nil, nil, nil)
 
 	before := time.Now()
 	processed, err := svc.ProcessNotificationOutbox(context.Background(), 10)
@@ -117,7 +117,7 @@ func TestProcessNotificationOutbox(t *testing.T) {
 
 func TestProcessNotificationOutboxWithoutClient(t *testing.T) {
 	repo := &fakeRepository{claimed: []*model.NotificationOutbox{outboxEvent(1, "k", model.NotificationSourceAttempt, 0)}}
-	processed, err := New(repo, nil, nil, nil, nil, nil).ProcessNotificationOutbox(context.Background(), 10)
+	processed, err := New(repo, nil, nil, nil, nil, nil, nil).ProcessNotificationOutbox(context.Background(), 10)
 	if err != nil || processed != 0 || len(repo.processed) != 0 {
 		t.Fatalf("processed = %d, err = %v, marked = %v; want 0, nil, none", processed, err, repo.processed)
 	}

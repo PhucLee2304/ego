@@ -48,3 +48,34 @@ func TestSocketsRequireToken(t *testing.T) {
 		})
 	}
 }
+
+// Route cần đăng nhập: request không có token phải bị middleware chặn (401),
+// không được rơi vào 404/405 (route chưa mount).
+func TestProtectedRoutesRequireToken(t *testing.T) {
+	mux := newTestMux(t)
+
+	for _, route := range []struct{ method, path string }{
+		// Classroom
+		{http.MethodPost, "/classrooms"},
+		{http.MethodGet, "/classrooms"},
+		{http.MethodGet, "/classrooms/me"},
+		{http.MethodGet, "/classrooms/code"},
+		{http.MethodGet, "/classrooms/1"},
+		{http.MethodPatch, "/classrooms/1"},
+		{http.MethodPost, "/classrooms/1/archive"},
+		// Member
+		{http.MethodPost, "/classrooms/join"},
+		{http.MethodGet, "/classrooms/1/members/join-requests"},
+		{http.MethodPost, "/classrooms/1/members/u1/approve"},
+		{http.MethodPost, "/classrooms/1/members/u1/reject"},
+		{http.MethodDelete, "/classrooms/1/members/u1"},
+	} {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+		})
+	}
+}

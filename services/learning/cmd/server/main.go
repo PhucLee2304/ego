@@ -88,7 +88,7 @@ func main() {
 	classroomsSocket := platformsocket.NewServer(identityServiceClient)
 
 	repo := repository.NewRepository(db)
-	svc := service.New(repo, notificationsServiceClient, identityServiceClient, mediaClient, classroomsSocket.BroadcastToUser, examsSocket.BroadcastToUser)
+	svc := service.New(repo, appConfig, notificationsServiceClient, identityServiceClient, mediaClient, classroomsSocket.BroadcastToUser, examsSocket.BroadcastToUser)
 
 	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {

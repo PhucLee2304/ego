@@ -20,7 +20,6 @@ func Connect(cfg *config.AppConfig) (*gorm.DB, error) {
 }
 
 // Migrate chạy AutoMigrate cho mọi model rồi raw SQL trong model/index.go.
-// Model classrooms được thêm từ P7.
 func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return errors.New("[DATABASE] Database connection is nil")
@@ -38,6 +37,8 @@ func Migrate(db *gorm.DB) error {
 		&model.AttemptAnswer{},
 		&model.History{},
 		&model.ExamAudit{},
+		&model.Classroom{},
+		&model.Member{},
 		&model.NotificationOutbox{},
 	)
 	if err != nil {

@@ -1,0 +1,16 @@
+package model
+
+import "gorm.io/gorm"
+
+type Classroom struct {
+	gorm.Model
+	Code        string  `gorm:"type:text;not null;uniqueIndex"`
+	Name        string  `gorm:"type:text;not null"`
+	Description *string `gorm:"type:text"`
+	Avatar      *string `gorm:"type:text"`
+
+	TeacherID string `gorm:"type:text;not null;index"`
+	Active    bool   `gorm:"not null;default:true;index"`
+
+	Members []Member `gorm:"foreignKey:ClassroomID;references:ID"`
+}
