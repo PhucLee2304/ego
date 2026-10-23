@@ -20,7 +20,7 @@ func Connect(cfg *config.AppConfig) (*gorm.DB, error) {
 }
 
 // Migrate chạy AutoMigrate cho mọi model rồi raw SQL trong model/index.go.
-// Model được thêm dần theo từng phase (P4 notification outbox, P5 exams, P13+ classrooms).
+// Model classrooms được thêm từ P13.
 func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return errors.New("[DATABASE] Database connection is nil")
@@ -29,10 +29,31 @@ func Migrate(db *gorm.DB) error {
 	log.Println("Running database migrations...")
 
 	err := db.AutoMigrate(
+		&model.Exam{},
+		&model.Section{},
+		&model.Group{},
+		&model.Question{},
+		&model.Option{},
+		&model.Attempt{},
+		&model.AttemptAnswer{},
+		&model.History{},
+		&model.ExamAudit{},
 		&model.NotificationOutbox{},
 	)
 	if err != nil {
 		return err
+	}
+
+	for _, sql := range []string{
+		model.CreateAttemptActiveUserUniqueIndexSQL,
+		model.CreateAttemptClassroomAssignmentUniqueIndexSQL,
+		model.CreateOptionCorrectQuestionUniqueIndexSQL,
+		model.CreateOptionQuestionKeyUniqueIndexSQL,
+		model.CreateAssignmentQuestionOptionsConstraintSQL,
+	} {
+		if err := db.Exec(sql).Error; err != nil {
+			return err
+		}
 	}
 
 	log.Println("Database migrations completed")
