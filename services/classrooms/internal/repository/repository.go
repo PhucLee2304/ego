@@ -278,12 +278,13 @@ func (r *Repository) GetOrCreateRoomParticipantState(ctx context.Context, roomID
 // FindRoomParticipantState trả về nil khi participant chưa có state trong room.
 func (r *Repository) FindRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error) {
 	var state model.RoomParticipantState
-	err := r.db.WithContext(ctx).Where("room_id = ? AND user_id = ?", roomID, userID).First(&state).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
+	// Limit+Find thay cho First: "chưa có state" là trường hợp bình thường, không để GORM log record not found.
+	result := r.db.WithContext(ctx).Where("room_id = ? AND user_id = ?", roomID, userID).Order("id").Limit(1).Find(&state)
+	if result.Error != nil {
+		return nil, result.Error
 	}
-	if err != nil {
-		return nil, err
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &state, nil
 }
@@ -388,7 +389,7 @@ func (r *Repository) GetLiveRoomsByClassroom(ctx context.Context, classroomID ui
 
 func (r *Repository) GetRoomsForLifecycle(ctx context.Context, now time.Time) ([]*model.Room, error) {
 	var rooms []*model.Room
-	err := r.db.WithContext(ctx).Preload("Schedule").Where("status IN ?", []model.RoomStatus{model.RoomStatusScheduled, model.RoomStatusLive}).Find(&rooms).Error
+	err := r.db.WithContext(ctx).Preload("Schedule").Preload("Schedule.Classroom").Where("status IN ?", []model.RoomStatus{model.RoomStatusScheduled, model.RoomStatusLive}).Find(&rooms).Error
 	return rooms, err
 }
 

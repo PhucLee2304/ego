@@ -326,6 +326,13 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 			var mediaErr error
 			for attempt := 1; attempt <= 3; attempt++ {
 				identities, mediaErr = s.mediaClient.ListParticipants(ctx, media.RoomName(room.ID))
+				if errors.Is(mediaErr, media.ErrRoomNotFound) {
+					// LiveKit dọn phòng trống sau departure_timeout: không ai đang kết nối,
+					// vẫn đối chiếu để đóng các phiên còn mở thay vì bỏ qua như lỗi.
+					logger.Log.Debug().Uint("room_id", room.ID).Msg("[ROOM] Media room is closed, reconciling as empty")
+					identities, mediaErr = nil, nil
+					break
+				}
 				if mediaErr == nil {
 					if attempt > 1 {
 						logger.Log.Info().Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Participant reconcile recovered")

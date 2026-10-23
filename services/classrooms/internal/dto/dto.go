@@ -303,7 +303,10 @@ func ToCalendarResponse(schedule *model.Schedule) *CalendarResponse {
 		UpdatedAt:    &schedule.UpdatedAt,
 	}
 	if schedule.Room != nil {
-		response.Room = ToRoomResponse(schedule.Room, false)
+		// Preload("Room") không gắn ngược Schedule vào room → gắn tay để room có startsAt/endsAt.
+		room := *schedule.Room
+		room.Schedule = *schedule
+		response.Room = ToRoomResponse(&room, false)
 	}
 	return response
 }

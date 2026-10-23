@@ -25,6 +25,18 @@ func wrapParticipantError(err error) error {
 	return err
 }
 
+// ErrRoomNotFound cho biết phòng không tồn tại trên LiveKit (đã bị dọn sau khi
+// trống hoặc chưa được tạo), khác với lỗi media server không phản hồi.
+var ErrRoomNotFound = errors.New("[ERROR] The room does not exist on the media server")
+
+func wrapRoomError(err error) error {
+	var twirpErr twirp.Error
+	if errors.As(err, &twirpErr) && twirpErr.Code() == twirp.NotFound {
+		return errors.Join(ErrRoomNotFound, err)
+	}
+	return err
+}
+
 // Source là nguồn media mà backend quản lý quyền publish.
 type Source int
 
@@ -130,7 +142,7 @@ func (c *LiveKitClient) RemoveParticipant(ctx context.Context, room, identity st
 func (c *LiveKitClient) ListParticipants(ctx context.Context, room string) ([]string, error) {
 	response, err := c.rooms.ListParticipants(ctx, &livekit.ListParticipantsRequest{Room: room})
 	if err != nil {
-		return nil, err
+		return nil, wrapRoomError(err)
 	}
 	identities := make([]string, len(response.Participants))
 	for i, participant := range response.Participants {

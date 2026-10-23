@@ -29,6 +29,8 @@ type fakeRoomMedia struct {
 	tokenCalls   int
 	listFailures int
 	listCalls    int
+	// closedRooms giả lập phòng LiveKit đã bị dọn (ListParticipants trả not_found).
+	closedRooms map[string]bool
 
 	sharers               map[string][]string
 	stopped               []string
@@ -66,6 +68,9 @@ func (f *fakeRoomMedia) ListParticipants(_ context.Context, room string) ([]stri
 	if f.listFailures > 0 {
 		f.listFailures--
 		return nil, errors.New("temporary media failure")
+	}
+	if f.closedRooms[room] {
+		return nil, media.ErrRoomNotFound
 	}
 	return f.participants[room], nil
 }
@@ -520,6 +525,22 @@ func TestRoomLifecycleWorkerAndReconcile(t *testing.T) {
 	}
 	if err := db.Model(&model.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", liveRoom.ID, "student").Count(&openCount).Error; err != nil || openCount != 0 {
 		t.Fatalf("expected reconcile to close missing student session, count=%d err=%v", openCount, err)
+	}
+
+	// LiveKit đã dọn phòng trống: không retry như lỗi, coi là không ai kết nối.
+	mediaClient.closedRooms = map[string]bool{liveName: true}
+	listCallsBefore := mediaClient.listCalls
+	if _, err := svc.ProcessRoomLifecycle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mediaClient.listCalls != listCallsBefore+1 {
+		t.Fatalf("expected closed media room not to be retried, calls=%d", mediaClient.listCalls-listCallsBefore)
+	}
+	if err := db.Model(&model.RoomParticipant{}).Where("room_id = ? AND left_at IS NULL", liveRoom.ID).Count(&openCount).Error; err != nil || openCount != 0 {
+		t.Fatalf("expected closed media room to close all open sessions, count=%d err=%v", openCount, err)
+	}
+	if room, err := repo.GetRoomByID(ctx, liveRoom.ID); err != nil || room.Status != model.RoomStatusLive || room.HostAbsentSince == nil {
+		t.Fatalf("expected room to stay live with host marked absent: room=%#v err=%v", room, err)
 	}
 
 	expiredSchedule := &model.Schedule{ClassroomID: classroom.ID, Title: "Never started", StartsAt: now.Add(-2 * time.Hour), EndsAt: now.Add(-time.Hour)}
