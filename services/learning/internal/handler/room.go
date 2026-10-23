@@ -9,6 +9,21 @@ import (
 	_ "ego/services/learning/internal/dto"
 )
 
+// roomRequest đọc user từ JWT cùng classroom/room ID trên path. userId trên
+// path chỉ là participant bị tác động; danh tính người gọi luôn lấy từ JWT.
+func roomRequest(w http.ResponseWriter, r *http.Request) (string, uint, uint, bool) {
+	userID, id, ok := roomID(w, r)
+	if !ok {
+		return "", 0, 0, false
+	}
+	classroomID, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid classroom ID", err))
+		return "", 0, 0, false
+	}
+	return userID, classroomID, id, true
+}
+
 // GetRoom godoc
 // @Summary      Get room
 // @Tags         Rooms

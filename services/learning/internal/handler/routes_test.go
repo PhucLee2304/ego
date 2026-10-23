@@ -81,6 +81,23 @@ func TestProtectedRoutesRequireToken(t *testing.T) {
 		{http.MethodPost, "/classrooms/1/rooms/2/join"},
 		{http.MethodPost, "/classrooms/1/rooms/2/end"},
 		{http.MethodGet, "/classrooms/1/rooms/2/attendance"},
+		// Screen share
+		{http.MethodPost, "/classrooms/1/rooms/2/screen-share/request"},
+		{http.MethodPost, "/classrooms/1/rooms/2/screen-share/start"},
+		{http.MethodPost, "/classrooms/1/rooms/2/screen-share/u1/approve"},
+		{http.MethodPost, "/classrooms/1/rooms/2/screen-share/u1/reject"},
+		{http.MethodPost, "/classrooms/1/rooms/2/screen-share/u1/stop"},
+		// Hands
+		{http.MethodPatch, "/classrooms/1/rooms/2/hand"},
+		{http.MethodDelete, "/classrooms/1/rooms/2/hands"},
+		{http.MethodDelete, "/classrooms/1/rooms/2/hands/u1"},
+		// Moderation
+		{http.MethodPost, "/classrooms/1/rooms/2/participants/mute-all"},
+		{http.MethodPost, "/classrooms/1/rooms/2/participants/u1/mute"},
+		{http.MethodPost, "/classrooms/1/rooms/2/participants/u1/allow-microphone"},
+		{http.MethodPost, "/classrooms/1/rooms/2/participants/u1/disable-camera"},
+		{http.MethodPost, "/classrooms/1/rooms/2/participants/u1/allow-camera"},
+		{http.MethodPost, "/classrooms/1/rooms/2/participants/u1/remove"},
 	} {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()

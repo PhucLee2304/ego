@@ -49,6 +49,26 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/join", mw.Handle(h.JoinRoom))
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/end", mw.Handle(h.EndRoom))
 	mux.HandleFunc("GET /classrooms/{id}/rooms/{roomId}/attendance", mw.Handle(h.GetRoomAttendance))
+
+	// Screen share
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/request", mw.Handle(h.RequestScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/start", mw.Handle(h.StartScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/approve", mw.Handle(h.ApproveScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/reject", mw.Handle(h.RejectScreenShare))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/screen-share/{userId}/stop", mw.Handle(h.StopScreenShare))
+
+	// Hands
+	mux.HandleFunc("PATCH /classrooms/{id}/rooms/{roomId}/hand", mw.Handle(h.SetHandRaised))
+	mux.HandleFunc("DELETE /classrooms/{id}/rooms/{roomId}/hands", mw.Handle(h.LowerHands))
+	mux.HandleFunc("DELETE /classrooms/{id}/rooms/{roomId}/hands/{userId}", mw.Handle(h.LowerHands))
+
+	// Moderation
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/mute-all", mw.Handle(h.MuteAllParticipants))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/mute", mw.Handle(h.MuteParticipant))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/allow-microphone", mw.Handle(h.AllowParticipantMicrophone))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/disable-camera", mw.Handle(h.DisableParticipantCamera))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/allow-camera", mw.Handle(h.AllowParticipantCamera))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/remove", mw.Handle(h.RemoveParticipant))
 }
 
 // RegisterSockets mount 2 hub WebSocket riêng, giữ nguyên đường dẫn của exams và classrooms.

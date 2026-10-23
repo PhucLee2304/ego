@@ -65,9 +65,30 @@ type Service interface {
 	GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, *httpx.HTTPError)
 	ProcessRoomLifecycle(ctx context.Context) (int, error)
 
+	// Screen share
+	RequestScreenShare(ctx context.Context, userID string, classroomID, roomID uint) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	ApproveScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	RejectScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	StartScreenShare(ctx context.Context, userID string, classroomID, roomID uint) *httpx.HTTPError
+	StopScreenShare(ctx context.Context, actorID string, classroomID, roomID uint, userID string) *httpx.HTTPError
+
+	// Hands
+	SetHandRaised(ctx context.Context, userID string, classroomID, roomID uint, raised bool) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	LowerHands(ctx context.Context, teacherID string, classroomID, roomID uint, userID *string) (*dto.LoweredHandsResponse, *httpx.HTTPError)
+
+	// Moderation
+	MuteParticipant(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	AllowParticipantMicrophone(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	DisableParticipantCamera(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	AllowParticipantCamera(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+	MuteAllParticipants(ctx context.Context, teacherID string, classroomID, roomID uint) (*dto.MutedParticipantsResponse, *httpx.HTTPError)
+	RemoveParticipant(ctx context.Context, teacherID string, classroomID, roomID uint, userID string, reason *string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
+
 	// Webhook LiveKit
 	HandleParticipantJoined(ctx context.Context, roomName, userID string, joinedAt time.Time) error
 	HandleParticipantLeft(ctx context.Context, roomName, userID string, leftAt time.Time) error
+	HandleScreenSharePublished(ctx context.Context, roomName, userID string) error
+	HandleScreenShareUnpublished(ctx context.Context, roomName, userID string) error
 
 	// Notification outbox
 	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
