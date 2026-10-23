@@ -40,6 +40,11 @@ services:
     environment:
       SERVICE: classrooms
 
+  learning:
+    <<: *air-service
+    environment:
+      SERVICE: learning
+
   notifications:
     <<: *air-service
     environment:

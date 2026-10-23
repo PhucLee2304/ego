@@ -22,6 +22,7 @@ services:
           { "url": "/topics/docs/doc.json", "name": "Topics" },
           { "url": "/exams/docs/doc.json", "name": "Exams" },
           { "url": "/classrooms/docs/doc.json", "name": "Classrooms" },
+          { "url": "/learning/docs/doc.json", "name": "Learning" },
           { "url": "/notifications/docs/doc.json", "name": "Notifications" }
         ]
     networks:
@@ -46,6 +47,8 @@ services:
       exams:
         condition: service_healthy
       classrooms:
+        condition: service_healthy
+      learning:
         condition: service_healthy
       notifications:
         condition: service_healthy
@@ -282,6 +285,53 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  learning:
+    <<: *go-service
+    container_name: ego-learning
+    build:
+      context: .
+      dockerfile: services/learning/Dockerfile
+      target: server
+    env_file:
+      - ./services/learning/.env
+    environment:
+      LIVEKIT_URL: ${LIVEKIT_INTERNAL_URL}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_JOIN_TOKEN_TTL: ${LIVEKIT_JOIN_TOKEN_TTL}
+    depends_on:
+      learning-db:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      notifications:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+
+
+  learning-db:
+    image: postgres:15.8-alpine
+    container_name: ego-learning-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${LEARNING_DB_USER}
+      POSTGRES_PASSWORD: ${LEARNING_DB_PASSWORD}
+      POSTGRES_DB: ${LEARNING_DB_NAME}
+    ports:
+      - "${LEARNING_DB_PORT}:5432"
+    volumes:
+      - ./data/learning-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${LEARNING_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 
   livekit:
     image: livekit/livekit-server:v1.9.10
