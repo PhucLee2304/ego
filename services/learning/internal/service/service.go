@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"time"
 
 	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
@@ -23,6 +24,13 @@ var (
 	ErrClassroomForbidden     = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Classroom access denied", nil)
 	ErrClassroomCapacityFull  = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom capacity is full", nil)
 	ErrTeacherCannotJoinClass = httpx.NewError(http.StatusBadRequest, "[ERROR] Teacher cannot join own classroom as student", nil)
+	ErrScheduleInvalidTime    = httpx.NewError(http.StatusBadRequest, "[ERROR] Schedule end time must be after start time", nil)
+	ErrCalendarInvalidRange   = httpx.NewError(http.StatusBadRequest, "[ERROR] Calendar range must be valid and no longer than 366 days", nil)
+	ErrRoomLive               = httpx.NewError(http.StatusConflict, "[CONFLICT] The room is currently live", nil)
+	ErrRoomNotLive            = httpx.NewError(http.StatusBadRequest, "[ERROR] This session has not started yet", nil)
+	ErrRoomEnded              = httpx.NewError(http.StatusBadRequest, "[ERROR] This session has ended", nil)
+	ErrRoomTooEarly           = httpx.NewError(http.StatusBadRequest, "[ERROR] The room can only be started up to 30 minutes before the scheduled time", nil)
+	ErrMediaUnavailable       = httpx.NewError(http.StatusServiceUnavailable, "[UNAVAILABLE] The media server is temporarily unavailable", nil)
 )
 
 type Service interface {
@@ -41,6 +49,25 @@ type Service interface {
 	ApproveMember(ctx context.Context, teacherID string, classroomID uint, userID string) (*dto.ClassroomJoinRequestResponse, *httpx.HTTPError)
 	RejectMember(ctx context.Context, teacherID string, classroomID uint, userID string) (*dto.ClassroomJoinRequestResponse, *httpx.HTTPError)
 	RemoveMember(ctx context.Context, teacherID string, classroomID uint, userID string) *httpx.HTTPError
+
+	// Schedule
+	CreateSchedule(ctx context.Context, teacherID string, classroomID uint, req dto.CreateScheduleRequest) (*dto.CalendarResponse, *httpx.HTTPError)
+	GetCalendar(ctx context.Context, userID string, classroomID uint, query dto.CalendarQuery) ([]*dto.CalendarResponse, *httpx.HTTPError)
+	UpdateSchedule(ctx context.Context, teacherID string, scheduleID uint, req dto.UpdateScheduleRequest) (*dto.CalendarResponse, *httpx.HTTPError)
+	DeleteSchedule(ctx context.Context, teacherID string, scheduleID uint) *httpx.HTTPError
+
+	// Room
+	GetRoom(ctx context.Context, userID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError)
+	GetRoomActivity(ctx context.Context, userID string, classroomID uint, roomID uint) (*dto.RoomActivityResponse, *httpx.HTTPError)
+	StartRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError)
+	JoinRoom(ctx context.Context, userID string, roomID uint) (*dto.JoinRoomResponse, *httpx.HTTPError)
+	EndRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError)
+	GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, *httpx.HTTPError)
+	ProcessRoomLifecycle(ctx context.Context) (int, error)
+
+	// Webhook LiveKit
+	HandleParticipantJoined(ctx context.Context, roomName, userID string, joinedAt time.Time) error
+	HandleParticipantLeft(ctx context.Context, roomName, userID string, leftAt time.Time) error
 
 	// Notification outbox
 	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)

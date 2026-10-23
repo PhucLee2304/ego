@@ -85,3 +85,14 @@ func (r *repository) IsStudentApprovedInClassroom(ctx context.Context, classroom
 
 	return count > 0, nil
 }
+
+func (r *repository) GetApprovedMembersByClassroom(ctx context.Context, classroomID uint) ([]*model.Member, error) {
+	var members []*model.Member
+	if err := r.db.WithContext(ctx).
+		Where("classroom_id = ? AND approved = ?", classroomID, true).
+		Order("joined_at ASC, id ASC").
+		Find(&members).Error; err != nil {
+		return nil, err
+	}
+	return members, nil
+}

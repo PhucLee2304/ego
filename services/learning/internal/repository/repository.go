@@ -27,6 +27,41 @@ type Repository interface {
 	GetJoinRequests(ctx context.Context, classroomID uint) ([]*model.Member, error)
 	DeleteMember(ctx context.Context, member *model.Member) error
 	IsStudentApprovedInClassroom(ctx context.Context, classroomID uint, userID string) (bool, error)
+	GetApprovedMembersByClassroom(ctx context.Context, classroomID uint) ([]*model.Member, error)
+
+	// Schedule
+	CreateSchedule(ctx context.Context, schedule *model.Schedule) error
+	GetScheduleByID(ctx context.Context, id uint) (*model.Schedule, error)
+	GetSchedulesByRange(ctx context.Context, classroomID uint, from time.Time, to time.Time) ([]*model.Schedule, error)
+	UpdateSchedule(ctx context.Context, schedule *model.Schedule) error
+	DeleteSchedule(ctx context.Context, schedule *model.Schedule) error
+
+	// Room
+	CreateRoom(ctx context.Context, room *model.Room) error
+	GetRoomByID(ctx context.Context, id uint) (*model.Room, error)
+	GetRoomByIDForUpdate(ctx context.Context, id uint) (*model.Room, error)
+	GetRoomByName(ctx context.Context, name string) (*model.Room, error)
+	SetRoomHostAbsentSince(ctx context.Context, roomID uint, absentSince *time.Time) error
+	UpdateRoom(ctx context.Context, room *model.Room) error
+	DeleteRoom(ctx context.Context, room *model.Room) error
+	HasLiveRoomByClassroom(ctx context.Context, classroomID uint) (bool, error)
+	GetLiveRoomsByClassroom(ctx context.Context, classroomID uint) ([]*model.Room, error)
+	GetRoomsForLifecycle(ctx context.Context, now time.Time) ([]*model.Room, error)
+
+	// Participant
+	GetOrCreateRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error)
+	FindRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error)
+	UpdateRoomParticipantState(ctx context.Context, state *model.RoomParticipantState) error
+	LowerRoomHands(ctx context.Context, roomID uint, userID *string) ([]string, error)
+	GetRoomParticipantStates(ctx context.Context, roomID uint) ([]*model.RoomParticipantState, error)
+	DeleteRoomParticipantStates(ctx context.Context, roomID uint) error
+	CreateRoomModerationAudit(ctx context.Context, audit *model.RoomModerationAudit) error
+	GetRoomModerationAudits(ctx context.Context, roomID uint) ([]*model.RoomModerationAudit, error)
+	OpenParticipantSession(ctx context.Context, roomID uint, userID string, role model.RoomParticipantRole, joinedAt time.Time) error
+	CloseParticipantSession(ctx context.Context, roomID uint, userID string, leftAt time.Time) error
+	CloseAllParticipantSessions(ctx context.Context, roomID uint, leftAt time.Time) error
+	GetOpenParticipantSessions(ctx context.Context, roomID uint) ([]*model.RoomParticipant, error)
+	GetRoomAttendance(ctx context.Context, roomID uint, userID *string) ([]*model.RoomParticipant, error)
 
 	// Notification outbox
 	CreateNotificationOutbox(ctx context.Context, event *model.NotificationOutbox) error

@@ -39,6 +39,11 @@ func Migrate(db *gorm.DB) error {
 		&model.ExamAudit{},
 		&model.Classroom{},
 		&model.Member{},
+		&model.Schedule{},
+		&model.Room{},
+		&model.RoomParticipant{},
+		&model.RoomParticipantState{},
+		&model.RoomModerationAudit{},
 		&model.NotificationOutbox{},
 	)
 	if err != nil {
@@ -51,6 +56,7 @@ func Migrate(db *gorm.DB) error {
 		model.CreateOptionCorrectQuestionUniqueIndexSQL,
 		model.CreateOptionQuestionKeyUniqueIndexSQL,
 		model.CreateAssignmentQuestionOptionsConstraintSQL,
+		model.CreateRoomParticipantOpenSessionUniqueIndexSQL,
 	} {
 		if err := db.Exec(sql).Error; err != nil {
 			return err

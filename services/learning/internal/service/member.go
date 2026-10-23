@@ -10,6 +10,7 @@ import (
 	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
 	"ego/services/learning/internal/dto"
+	"ego/services/learning/internal/media"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
 
@@ -240,7 +241,6 @@ func (s *service) RejectMember(ctx context.Context, teacherID string, classroomI
 // RemoveMember thu hồi rồi xóa member và ghi outbox trong một transaction
 // (trước đây khôi phục Approved bằng tay khi RPC exams lỗi).
 func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomID uint, userID string) *httpx.HTTPError {
-	// TODO(P8): sau commit, gỡ học sinh khỏi các phòng LIVE của lớp (mediaClient.RemoveParticipant).
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		classroom, err := repo.GetClassroomByID(ctx, classroomID)
 		if err != nil {
@@ -268,5 +268,18 @@ func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomI
 			[]string{userID}, "Removed from classroom", "You were removed from "+classroom.Name,
 			"CLASSROOM", classroomID, 0, time.Time{})
 	})
-	return httpx.FromError(err, errClassroomServiceFailed)
+	if err != nil {
+		return httpx.FromError(err, errClassroomServiceFailed)
+	}
+	// Gỡ khỏi LiveKit sau khi commit; lỗi bỏ qua như trước vì member đã bị xóa.
+	if s.mediaClient != nil {
+		rooms, err := s.repo.GetLiveRoomsByClassroom(ctx, classroomID)
+		if err != nil {
+			return httpx.FromError(err, errClassroomServiceFailed)
+		}
+		for _, room := range rooms {
+			_ = s.mediaClient.RemoveParticipant(ctx, media.RoomName(room.ID), userID)
+		}
+	}
+	return nil
 }

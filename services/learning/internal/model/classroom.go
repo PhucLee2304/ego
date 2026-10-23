@@ -12,5 +12,6 @@ type Classroom struct {
 	TeacherID string `gorm:"type:text;not null;index"`
 	Active    bool   `gorm:"not null;default:true;index"`
 
-	Members []Member `gorm:"foreignKey:ClassroomID;references:ID"`
+	Members   []Member   `gorm:"foreignKey:ClassroomID;references:ID"`
+	Schedules []Schedule `gorm:"foreignKey:ClassroomID;references:ID"`
 }

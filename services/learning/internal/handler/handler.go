@@ -35,6 +35,20 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms/{id}/members/{userId}/approve", mw.Handle(h.ApproveMember))
 	mux.HandleFunc("POST /classrooms/{id}/members/{userId}/reject", mw.Handle(h.RejectMember))
 	mux.HandleFunc("DELETE /classrooms/{id}/members/{userId}", mw.Handle(h.RemoveMember))
+
+	// Schedule
+	mux.HandleFunc("POST /classrooms/{id}/schedules", mw.Handle(h.CreateSchedule))
+	mux.HandleFunc("GET /classrooms/{id}/calendar", mw.Handle(h.GetCalendar))
+	mux.HandleFunc("PATCH /classrooms/{id}/schedules/{scheduleId}", mw.Handle(h.UpdateSchedule))
+	mux.HandleFunc("DELETE /classrooms/{id}/schedules/{scheduleId}", mw.Handle(h.DeleteSchedule))
+
+	// Room
+	mux.HandleFunc("GET /classrooms/{id}/rooms/{roomId}", mw.Handle(h.GetRoom))
+	mux.HandleFunc("GET /classrooms/{id}/rooms/{roomId}/activity", mw.Handle(h.GetRoomActivity))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/start", mw.Handle(h.StartRoom))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/join", mw.Handle(h.JoinRoom))
+	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/end", mw.Handle(h.EndRoom))
+	mux.HandleFunc("GET /classrooms/{id}/rooms/{roomId}/attendance", mw.Handle(h.GetRoomAttendance))
 }
 
 // RegisterSockets mount 2 hub WebSocket riêng, giữ nguyên đường dẫn của exams và classrooms.

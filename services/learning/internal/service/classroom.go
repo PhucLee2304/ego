@@ -251,7 +251,13 @@ func (s *service) ArchiveClassroom(ctx context.Context, teacherID string, id uin
 		if classroom.TeacherID != teacherID {
 			return ErrClassroomForbidden
 		}
-		// TODO(P8): chặn lưu trữ khi lớp đang có phòng LIVE (HasLiveRoomByClassroom → ErrRoomLive).
+		live, err := repo.HasLiveRoomByClassroom(ctx, id)
+		if err != nil {
+			return err
+		}
+		if live {
+			return ErrRoomLive
+		}
 		classroom.Active = false
 		if err := repo.UpdateClassroom(ctx, classroom); err != nil {
 			return err

@@ -103,3 +103,9 @@ const CreateAssignmentQuestionOptionsConstraintSQL = `
 	FOR EACH ROW
 	EXECUTE FUNCTION validate_assignment_question_options_from_question();
 `
+
+const CreateRoomParticipantOpenSessionUniqueIndexSQL = `
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_room_participants_open_session
+	ON room_participants (room_id, user_id)
+	WHERE left_at IS NULL AND deleted_at IS NULL;
+`

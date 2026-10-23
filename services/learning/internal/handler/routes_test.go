@@ -69,6 +69,18 @@ func TestProtectedRoutesRequireToken(t *testing.T) {
 		{http.MethodPost, "/classrooms/1/members/u1/approve"},
 		{http.MethodPost, "/classrooms/1/members/u1/reject"},
 		{http.MethodDelete, "/classrooms/1/members/u1"},
+		// Schedule
+		{http.MethodPost, "/classrooms/1/schedules"},
+		{http.MethodGet, "/classrooms/1/calendar"},
+		{http.MethodPatch, "/classrooms/1/schedules/2"},
+		{http.MethodDelete, "/classrooms/1/schedules/2"},
+		// Room
+		{http.MethodGet, "/classrooms/1/rooms/2"},
+		{http.MethodGet, "/classrooms/1/rooms/2/activity"},
+		{http.MethodPost, "/classrooms/1/rooms/2/start"},
+		{http.MethodPost, "/classrooms/1/rooms/2/join"},
+		{http.MethodPost, "/classrooms/1/rooms/2/end"},
+		{http.MethodGet, "/classrooms/1/rooms/2/attendance"},
 	} {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
