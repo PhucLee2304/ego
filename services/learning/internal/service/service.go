@@ -39,6 +39,10 @@ var (
 )
 
 type Service interface {
+	// Exam
+	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, *httpx.HTTPError)
+	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError)
+
 	// Classroom
 	CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, *httpx.HTTPError)
 	GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, *httpx.HTTPError)

@@ -1,0 +1,55 @@
+package repository
+
+import (
+	"context"
+
+	"ego/services/learning/internal/model"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+func (r *repository) GetListExam(ctx context.Context, examType model.ExamType, limit, offset int32) ([]*model.Exam, int64, error) {
+	var exams []*model.Exam
+	var total int64
+	query := r.db.WithContext(ctx).Model(&model.Exam{}).Where("type = ? AND is_public = ?", examType, true)
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := query.
+		Order("id ASC").
+		Limit(int(limit)).
+		Offset(int(offset)).
+		Find(&exams).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return exams, total, nil
+}
+
+func (r *repository) GetExamByID(ctx context.Context, id uint) (*model.Exam, error) {
+	var exam model.Exam
+	// Public exam routes intentionally exclude private classroom exams. Private
+	// content is exposed only through an authorized classroom attempt.
+	if err := r.db.WithContext(ctx).
+		Preload("Sections", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Groups.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Preload("Sections.Questions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("group_id IS NULL").Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})
+		}).
+		Where("id = ? AND is_public = ?", id, true).
+		First(&exam).Error; err != nil {
+		return nil, err
+	}
+
+	return &exam, nil
+}

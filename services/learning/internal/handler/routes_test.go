@@ -55,6 +55,9 @@ func TestProtectedRoutesRequireToken(t *testing.T) {
 	mux := newTestMux(t)
 
 	for _, route := range []struct{ method, path string }{
+		// Exam
+		{http.MethodGet, "/exams"},
+		{http.MethodGet, "/exams/1"},
 		// Classroom
 		{http.MethodPost, "/classrooms"},
 		{http.MethodGet, "/classrooms"},

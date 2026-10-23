@@ -12,6 +12,10 @@ import (
 )
 
 type Repository interface {
+	// Exam
+	GetListExam(ctx context.Context, examType model.ExamType, limit, offset int32) ([]*model.Exam, int64, error)
+	GetExamByID(ctx context.Context, id uint) (*model.Exam, error)
+
 	// Classroom
 	CreateClassroom(ctx context.Context, classroom *model.Classroom) error
 	GetClassrooms(ctx context.Context, query dto.ClassroomsQuery, teacherIDs []string) ([]*model.Classroom, int64, error)
