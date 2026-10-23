@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -54,8 +55,8 @@ func LoadAppConfig() (*AppConfig, error) {
 
 		LiveKitURL:          getEnv("LIVEKIT_URL", "http://livekit:7880"),
 		LiveKitPublicURL:    getEnv("LIVEKIT_PUBLIC_URL", "ws://localhost:7880"),
-		LiveKitAPIKey:       getEnv("LIVEKIT_API_KEY", "devkey"),
-		LiveKitAPISecret:    getEnv("LIVEKIT_API_SECRET", "local-development-secret-key-000001"),
+		LiveKitAPIKey:       getEnv("LIVEKIT_API_KEY", ""),
+		LiveKitAPISecret:    getEnv("LIVEKIT_API_SECRET", ""),
 		LiveKitJoinTokenTTL: getDurationEnv("LIVEKIT_JOIN_TOKEN_TTL", 5*time.Minute),
 
 		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
@@ -63,6 +64,10 @@ func LoadAppConfig() (*AppConfig, error) {
 		SeedDir:           getEnv("SEED_DIR", "services/learning/seed"),
 		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
 		SeedUploadRetries: getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
+	}
+
+	if config.LiveKitAPIKey == "" || config.LiveKitAPISecret == "" {
+		return nil, errors.New("[CONFIG] LIVEKIT_API_KEY and LIVEKIT_API_SECRET are required")
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",

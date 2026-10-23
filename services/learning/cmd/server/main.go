@@ -2,11 +2,16 @@ package main
 
 import (
 	"context"
+	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
+	"ego/platform/jwt"
 	"ego/platform/logger"
 	platformRpc "ego/platform/rpc"
+	platformsocket "ego/platform/socket"
 	learningConfig "ego/services/learning/config"
 	"ego/services/learning/database"
+	"ego/services/learning/internal/handler"
+	"ego/services/learning/internal/media"
 	"ego/services/learning/internal/repository"
 	"ego/services/learning/internal/service"
 	"ego/services/learning/workers"
@@ -62,6 +67,13 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
+	identityConn, err := grpc.NewClient(appConfig.IdentityServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to identity service")
+	}
+	defer identityConn.Close()
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+
 	notificationsConn, err := grpc.NewClient(appConfig.NotificationsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to notifications service")
@@ -69,8 +81,25 @@ func main() {
 	defer notificationsConn.Close()
 	notificationsServiceClient := notificationsClient.NewNotificationServiceClient(notificationsConn)
 
+	mediaClient := media.New(appConfig.LiveKitURL, appConfig.LiveKitAPIKey, appConfig.LiveKitAPISecret, appConfig.LiveKitJoinTokenTTL)
+
+	// Hai hub WebSocket riêng: /ws/exams (attempt) và /ws/classrooms (room, gradebook).
+	examsSocket := platformsocket.NewServer(identityServiceClient)
+	classroomsSocket := platformsocket.NewServer(identityServiceClient)
+
 	repo := repository.NewRepository(db)
-	svc := service.New(repo, notificationsServiceClient)
+	svc := service.New(repo, notificationsServiceClient, identityServiceClient, mediaClient, classroomsSocket.BroadcastToUser, examsSocket.BroadcastToUser)
+
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
+	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
+		userResp, err := identityServiceClient.GetUserRole(ctx, &identityClient.GetUserRoleRequest{Id: userID})
+		if err != nil {
+			return "", err
+		}
+		return userResp.Role, nil
+	})
+
+	httpHandler := handler.New(svc)
 
 	workers.StartNotificationOutbox(appCtx, svc, 2*time.Second, 100)
 
@@ -95,6 +124,8 @@ func main() {
 
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
+	httpHandler.RegisterRoutes(api, authMiddleware, roleMiddleware)
+	handler.RegisterSockets(api, examsSocket, classroomsSocket)
 
 	logger.Log.Info().Str("LEARNING_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting learning server")
 	httpServer := &http.Server{Addr: ":" + appConfig.Port, Handler: logger.Middleware(mux)}

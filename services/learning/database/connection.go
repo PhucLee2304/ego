@@ -1,10 +1,10 @@
 package database
 
 import (
+	"ego/platform/logger"
 	"ego/services/learning/config"
 	"ego/services/learning/internal/model"
 	"errors"
-	"log"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -15,18 +15,18 @@ func Connect(cfg *config.AppConfig) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Println("Database connection established")
+	logger.Log.Info().Msg("[STARTUP] Database connection established")
 	return db, nil
 }
 
 // Migrate chạy AutoMigrate cho mọi model rồi raw SQL trong model/index.go.
-// Model classrooms được thêm từ P13.
+// Model classrooms được thêm từ P7.
 func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return errors.New("[DATABASE] Database connection is nil")
 	}
 
-	log.Println("Running database migrations...")
+	logger.Log.Info().Msg("[STARTUP] Running database migrations")
 
 	err := db.AutoMigrate(
 		&model.Exam{},
@@ -56,6 +56,6 @@ func Migrate(db *gorm.DB) error {
 		}
 	}
 
-	log.Println("Database migrations completed")
+	logger.Log.Info().Msg("[STARTUP] Database migrations completed")
 	return nil
 }

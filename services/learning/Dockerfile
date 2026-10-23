@@ -8,7 +8,7 @@ COPY . .
 FROM builder AS server-builder
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o server services/learning/cmd/server/main.go
 
-# Target seed được bật ở P12 khi có services/learning/cmd/seed.
+# Target seed được bật ở P18 khi có services/learning/cmd/seed.
 # FROM builder AS seed-builder
 # RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o seed ./services/learning/cmd/seed
 

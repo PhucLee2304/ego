@@ -22,3 +22,24 @@ func TestGetDurationEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadAppConfigRequiresLiveKitSecrets(t *testing.T) {
+	tests := []struct {
+		name, key, secret string
+		wantErr           bool
+	}{
+		{name: "thiếu cả hai", wantErr: true},
+		{name: "thiếu secret", key: "k", wantErr: true},
+		{name: "đủ", key: "k", secret: "s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LIVEKIT_API_KEY", tt.key)
+			t.Setenv("LIVEKIT_API_SECRET", tt.secret)
+			_, err := LoadAppConfig()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("LoadAppConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
