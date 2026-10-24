@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	classroomsClient "ego/api/gen/go/classrooms"
 	identityClient "ego/api/gen/go/identity"
+	learningClient "ego/api/gen/go/learning"
 	notificationsClient "ego/api/gen/go/notifications"
 	storageClient "ego/api/gen/go/storage"
 	"ego/platform/jwt"
@@ -58,15 +58,15 @@ func main() {
 	}
 	defer identityConn.Close()
 
-	classroomsConn, err := grpc.NewClient(
-		appConfig.ClassroomsServiceAddr,
+	learningConn, err := grpc.NewClient(
+		appConfig.LearningServiceAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(rpcTimeout)),
 	)
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create classrooms client")
+		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create learning client")
 	}
-	defer classroomsConn.Close()
+	defer learningConn.Close()
 
 	notificationsConn, err := grpc.NewClient(
 		appConfig.NotificationsServiceAddr,
@@ -103,7 +103,7 @@ func main() {
 	service := service.New(
 		repo,
 		appConfig,
-		classroomsClient.NewClassroomServiceClient(classroomsConn),
+		learningClient.NewLearningServiceClient(learningConn),
 		identityServiceClient,
 		notificationsClient.NewNotificationServiceClient(notificationsConn),
 		storageServiceClient,

@@ -6,7 +6,7 @@ tmp_dir = "tmp"
   entrypoint = ["./tmp/main"]
   cmd = "go build -buildvcs=false -o ./tmp/main ./services/${SERVICE:-identity}/cmd/server"
   delay = 1000
-  exclude_dir = ["backups", "data", "logs", "tmp", "vendor", "services/topics/seed", "services/exams/seed"]
+  exclude_dir = ["backups", "data", "logs", "tmp", "vendor", "services/topics/seed", "services/learning/seed"]
   exclude_file = []
   exclude_regex = ["_test.go"]
   exclude_unchanged = false

@@ -30,16 +30,6 @@ services:
     environment:
       SERVICE: topics
 
-  exams:
-    <<: *air-service
-    environment:
-      SERVICE: exams
-
-  classrooms:
-    <<: *air-service
-    environment:
-      SERVICE: classrooms
-
   learning:
     <<: *air-service
     environment:

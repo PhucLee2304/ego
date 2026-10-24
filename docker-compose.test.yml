@@ -22,34 +22,6 @@ services:
       timeout: 2s
       retries: 20
 
-  exams-test-db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: test
-      POSTGRES_PASSWORD: test
-      POSTGRES_DB: exams_test
-    ports:
-      - "55435:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U test -d exams_test"]
-      interval: 2s
-      timeout: 2s
-      retries: 20
-
-  classrooms-test-db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: test
-      POSTGRES_PASSWORD: test
-      POSTGRES_DB: classrooms_test
-    ports:
-      - "55436:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U test -d classrooms_test"]
-      interval: 2s
-      timeout: 2s
-      retries: 20
-
   learning-test-db:
     image: postgres:17-alpine
     environment:

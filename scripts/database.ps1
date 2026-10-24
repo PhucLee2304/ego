@@ -4,10 +4,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$databases = @{ identity = "users-db"; users = "users-db"; topics = "topics-db"; exams = "exams-db"; classrooms = "classrooms-db"; learning = "learning-db"; notifications = "notifications-db" }
+$databases = @{ identity = "users-db"; users = "users-db"; topics = "topics-db"; learning = "learning-db"; notifications = "notifications-db" }
 
 if ($Action -eq "seed") {
-    if ($Service -notin @("topics", "exams", "learning")) { throw "Seed is only available for topics, exams and learning" }
+    if ($Service -notin @("topics", "learning")) { throw "Seed is only available for topics and learning" }
     docker compose --profile seed run --rm "$Service-seed"
     if ($LASTEXITCODE -ne 0) { throw "Seed failed for $Service" }
     exit

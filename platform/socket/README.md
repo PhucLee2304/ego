@@ -11,17 +11,17 @@ Package này xử lý các phần hạ tầng của kết nối:
 - định tuyến message theo `type`
 - format response chung dạng `ack` / `error`
 
-Các service vẫn tự xử lý nghiệp vụ của mình. Ví dụ, service `exams` có thể đăng ký handler
+Các service vẫn tự xử lý nghiệp vụ của mình. Ví dụ, service `learning` đăng ký handler
 `ATTEMPT_ANSWER_UPDATED` để validate attempt và upsert answer.
 
 ## Route
 
 Package nay chi cung cap `http.Handler`. Moi service tu mount route rieng de tranh dung nhau.
 
-Vi du voi service `exams`:
+Vi du voi service `learning` (2 hub rieng: `/ws/exams`, `/ws/classrooms`):
 
 - route trong service: `/ws/exams`
-- route day du qua gateway cua exams: `/api/v1/ws/exams`
+- route day du qua gateway: `/exams/api/v1/ws/exams` (hoac `/learning/api/v1/ws/exams`)
 
 ## Message Envelope
 
