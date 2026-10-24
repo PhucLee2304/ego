@@ -5,6 +5,7 @@ import (
 	"time"
 
 	platformdb "ego/platform/db"
+	"ego/platform/httpx"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
 
@@ -95,6 +96,29 @@ type Repository interface {
 	CloseAllParticipantSessions(ctx context.Context, roomID uint, leftAt time.Time) error
 	GetOpenParticipantSessions(ctx context.Context, roomID uint) ([]*model.RoomParticipant, error)
 	GetRoomAttendance(ctx context.Context, roomID uint, userID *string) ([]*model.RoomParticipant, error)
+
+	// Assignment
+	CreateAssignments(ctx context.Context, assignments []*model.Assignment) error
+	GetAssignmentsByExamID(ctx context.Context, examID uint) ([]*model.Assignment, error)
+	AssignmentExistsByClassroomAndExam(ctx context.Context, classroomID uint, examID uint) (bool, error)
+	GetAssignmentsByClassroom(ctx context.Context, classroomID uint, pagination httpx.PaginationQuery) ([]*model.Assignment, int64, error)
+	GetAssignmentsDueInRange(ctx context.Context, classroomID uint, from time.Time, to time.Time) ([]*model.Assignment, error)
+	GetAssignmentByClassroom(ctx context.Context, classroomID uint, assignmentID uint) (*model.Assignment, error)
+	GetAssignmentByClassroomForUpdate(ctx context.Context, classroomID uint, assignmentID uint) (*model.Assignment, error)
+	UpdateAssignment(ctx context.Context, assignment *model.Assignment) error
+	UpdateAssignmentsContentAndActive(ctx context.Context, examID uint, title string, description *string, active bool) error
+	RestoreAssignmentActiveStates(ctx context.Context, states map[uint]bool) error
+
+	// Assignment attempt
+	GetActiveAttemptsByAssignmentID(ctx context.Context, assignmentID uint) ([]*model.Attempt, error)
+	ExpireActiveAssignmentAttempts(ctx context.Context, assignmentID uint, now time.Time) error
+	CountAssignmentAttempts(ctx context.Context, assignmentID uint) (int64, int64, error)
+	UpdateActiveAssignmentAttemptSchedule(ctx context.Context, assignmentID uint, duration int, dueAt time.Time) (int64, error)
+	ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error
+
+	// Submission
+	GetAssignmentSubmissionByAssignmentAndStudent(ctx context.Context, assignmentID uint, studentID string) (*model.AssignmentSubmission, error)
+	DeleteAssignmentSubmission(ctx context.Context, assignmentID uint, studentID string) error
 
 	// Notification outbox
 	CreateNotificationOutbox(ctx context.Context, event *model.NotificationOutbox) error

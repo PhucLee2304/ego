@@ -68,10 +68,17 @@ func (s *service) GetCalendar(ctx context.Context, userID string, classroomID ui
 	if err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	// TODO(P19): thêm hạn nộp assignment trong khoảng (GetAssignmentsDueInRange → CalendarTypeAssignmentDeadline).
-	responses := make([]*dto.CalendarResponse, 0, len(schedules))
+	assignments, err := s.repo.GetAssignmentsDueInRange(ctx, classroomID, query.From, query.To)
+	if err != nil {
+		return nil, httpx.FromError(err, errClassroomServiceFailed)
+	}
+	responses := make([]*dto.CalendarResponse, 0, len(schedules)+len(assignments))
 	for _, schedule := range schedules {
 		responses = append(responses, dto.ToCalendarResponse(schedule))
+	}
+	for _, assignment := range assignments {
+		assignmentID := assignment.ID
+		responses = append(responses, &dto.CalendarResponse{ClassroomID: classroomID, CalendarType: dto.CalendarTypeAssignmentDeadline, Title: "Deadline: " + assignment.Title, Description: assignment.Description, StartsAt: assignment.DueAt, RelatedAssignmentID: &assignmentID, Editable: false})
 	}
 	sort.SliceStable(responses, func(i, j int) bool {
 		if responses[i].StartsAt.Equal(responses[j].StartsAt) {

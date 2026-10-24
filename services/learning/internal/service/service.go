@@ -36,6 +36,13 @@ var (
 	ErrRoomEnded              = httpx.NewError(http.StatusBadRequest, "[ERROR] This session has ended", nil)
 	ErrRoomTooEarly           = httpx.NewError(http.StatusBadRequest, "[ERROR] The room can only be started up to 30 minutes before the scheduled time", nil)
 	ErrMediaUnavailable       = httpx.NewError(http.StatusServiceUnavailable, "[UNAVAILABLE] The media server is temporarily unavailable", nil)
+
+	ErrAssignmentInvalidTime          = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment due time must be after open time", nil)
+	ErrAssignmentDuration             = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment duration must not exceed the open time window", nil)
+	ErrAssignmentExpired              = httpx.NewError(http.StatusBadRequest, "[ERROR] An expired assignment cannot be activated", nil)
+	ErrAssignmentAlreadyExists        = httpx.NewError(http.StatusConflict, "[CONFLICT] This exam is already assigned to the classroom", nil)
+	ErrAssignmentScheduleConfirmation = httpx.NewError(http.StatusConflict, "[CONFIRMATION_REQUIRED] Active attempts may be affected by this schedule change", nil)
+	ErrAssignmentContentConfirmation  = httpx.NewError(http.StatusConflict, "[CONFIRMATION_REQUIRED] This exam already has attempts; confirm to submit active attempts and pause all related assignments", nil)
 )
 
 // Lỗi phía exams/attempt (giữ nguyên status + message của exams cũ).
@@ -101,6 +108,20 @@ type Service interface {
 	EndRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError)
 	GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, *httpx.HTTPError)
 	ProcessRoomLifecycle(ctx context.Context) (int, error)
+
+	// Assignment
+	CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, *httpx.HTTPError)
+	AssignExistingExam(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.AssignExistingExamRequest) (*dto.CreatedAssignmentsResponse, *httpx.HTTPError)
+	GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int, *httpx.HTTPError)
+	GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, *httpx.HTTPError)
+	UpdateAssignmentSchedule(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentScheduleRequest) (*dto.AssignmentResponse, *httpx.HTTPError)
+	SetAssignmentActive(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, active bool) (*dto.AssignmentResponse, *httpx.HTTPError)
+
+	// Assignment edit
+	GetEditableAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.EditableAssignmentResponse, *httpx.HTTPError)
+	UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, *httpx.HTTPError)
+	ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) *httpx.HTTPError
+	GetAssignmentAudits(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) ([]*dto.ExamAuditResponse, *httpx.HTTPError)
 
 	// Screen share
 	RequestScreenShare(ctx context.Context, userID string, classroomID, roomID uint) (*dto.RoomParticipantStateResponse, *httpx.HTTPError)
@@ -181,4 +202,30 @@ func (s *service) withRepo(repo repository.Repository) *service {
 	copy := *s
 	copy.repo = repo
 	return &copy
+}
+
+// attemptEvent là một push WebSocket của hub /ws/exams đang chờ commit.
+type attemptEvent struct {
+	userID  string
+	payload any
+}
+
+// withRepoDeferringEvents như withRepo, nhưng gom push ATTEMPT_SUBMITTING/SUBMITTED
+// vào events thay vì gửi ngay: chỉ gửi bằng publishAttemptEvents sau khi transaction
+// ngoài commit, để học sinh không nhận "đã nộp" của một transaction bị rollback.
+func (s *service) withRepoDeferringEvents(repo repository.Repository, events *[]attemptEvent) *service {
+	copy := s.withRepo(repo)
+	copy.attemptPublisher = func(userID string, payload any) {
+		*events = append(*events, attemptEvent{userID: userID, payload: payload})
+	}
+	return copy
+}
+
+func (s *service) publishAttemptEvents(events []attemptEvent) {
+	if s.attemptPublisher == nil {
+		return
+	}
+	for _, event := range events {
+		s.attemptPublisher(event.userID, event.payload)
+	}
 }

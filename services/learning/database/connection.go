@@ -40,6 +40,8 @@ func Migrate(db *gorm.DB) error {
 		&model.Classroom{},
 		&model.Member{},
 		&model.Schedule{},
+		&model.Assignment{},
+		&model.AssignmentSubmission{},
 		&model.Room{},
 		&model.RoomParticipant{},
 		&model.RoomParticipantState{},

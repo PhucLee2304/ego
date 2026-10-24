@@ -82,6 +82,17 @@ func TestProtectedRoutesRequireToken(t *testing.T) {
 		{http.MethodPost, "/classrooms/1/members/u1/approve"},
 		{http.MethodPost, "/classrooms/1/members/u1/reject"},
 		{http.MethodDelete, "/classrooms/1/members/u1"},
+		// Assignment
+		{http.MethodPost, "/classrooms/assignments"},
+		{http.MethodGet, "/classrooms/1/assignments"},
+		{http.MethodGet, "/classrooms/1/assignments/2"},
+		{http.MethodPost, "/classrooms/1/assignments/2/classrooms"},
+		{http.MethodPatch, "/classrooms/1/assignments/2/schedule"},
+		{http.MethodPatch, "/classrooms/1/assignments/2/active"},
+		{http.MethodGet, "/classrooms/1/assignments/2/edit"},
+		{http.MethodPatch, "/classrooms/1/assignments/2"},
+		{http.MethodDelete, "/classrooms/1/assignments/2/students/u1/attempt"},
+		{http.MethodGet, "/classrooms/1/assignments/2/audits"},
 		// Schedule
 		{http.MethodPost, "/classrooms/1/schedules"},
 		{http.MethodGet, "/classrooms/1/calendar"},
