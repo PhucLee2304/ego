@@ -95,3 +95,11 @@ func (r *repository) ExpireActiveAssignmentAttemptsByUser(ctx context.Context, a
 		Where("context_type = ? AND context_id IN ? AND user_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentIDs, userID, model.AttemptStatusInProgress).
 		Update("expires_at", now).Error
 }
+
+func (r *repository) GetSubmittedAttemptsByAssignment(ctx context.Context, assignmentID uint) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	err := r.db.WithContext(ctx).
+		Where("context_type = ? AND context_id = ? AND status = ? AND score IS NOT NULL", model.AttemptContextTypeClassroomAssignment, assignmentID, model.AttemptStatusSubmitted).
+		Order("id ASC").Find(&attempts).Error
+	return attempts, err
+}

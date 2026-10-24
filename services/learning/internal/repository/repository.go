@@ -120,12 +120,17 @@ type Repository interface {
 	ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error
 	GetActiveAttemptsByAssignmentIDsAndUser(ctx context.Context, assignmentIDs []uint, userID string) ([]*model.Attempt, error)
 	ExpireActiveAssignmentAttemptsByUser(ctx context.Context, assignmentIDs []uint, userID string, now time.Time) error
+	GetSubmittedAttemptsByAssignment(ctx context.Context, assignmentID uint) ([]*model.Attempt, error)
 
 	// Submission
 	GetAssignmentSubmissionByAssignmentAndStudent(ctx context.Context, assignmentID uint, studentID string) (*model.AssignmentSubmission, error)
 	DeleteAssignmentSubmission(ctx context.Context, assignmentID uint, studentID string) error
 	UpsertAssignmentSubmission(ctx context.Context, submission *model.AssignmentSubmission) error
 	UpsertAssignmentSubmissionResult(ctx context.Context, submission *model.AssignmentSubmission) error
+
+	// Gradebook
+	GetAssignmentsForGradebook(ctx context.Context, classroomID uint, from *time.Time, to *time.Time) ([]*model.Assignment, error)
+	GetAssignmentQuestionAnalytics(ctx context.Context, assignmentID uint, examID uint) ([]*AssignmentQuestionAnalytics, error)
 
 	// Notification outbox
 	CreateNotificationOutbox(ctx context.Context, event *model.NotificationOutbox) error

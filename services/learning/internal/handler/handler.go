@@ -62,6 +62,13 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("DELETE /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt", mw.Handle(h.ResetAssignmentAttempt))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/audits", mw.Handle(h.GetAssignmentAudits))
 
+	// Gradebook
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/gradebook", mw.Handle(h.GetGradebook))
+	mux.HandleFunc("GET /classrooms/{id}/gradebook", mw.Handle(h.GetClassGradebook))
+	mux.HandleFunc("GET /classrooms/{id}/students/{userId}/progress", mw.Handle(h.GetStudentProgress))
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/analytics", mw.Handle(h.GetAssignmentAnalytics))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/gradebook/reconcile", mw.Handle(h.ReconcileAssignmentSubmissions))
+
 	// Schedule
 	mux.HandleFunc("POST /classrooms/{id}/schedules", mw.Handle(h.CreateSchedule))
 	mux.HandleFunc("GET /classrooms/{id}/calendar", mw.Handle(h.GetCalendar))

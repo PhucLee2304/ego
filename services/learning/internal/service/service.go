@@ -161,6 +161,13 @@ type Service interface {
 	HandleScreenSharePublished(ctx context.Context, roomName, userID string) error
 	HandleScreenShareUnpublished(ctx context.Context, roomName, userID string) error
 
+	// Gradebook
+	GetGradebook(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, *httpx.HTTPError)
+	GetClassGradebook(ctx context.Context, teacherID string, classroomID uint, query dto.GradebookRangeQuery) (*dto.ClassGradebookResponse, *httpx.HTTPError)
+	GetStudentProgress(ctx context.Context, userID string, classroomID uint, studentID string) (*dto.StudentProgressResponse, *httpx.HTTPError)
+	GetAssignmentAnalytics(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.AssignmentAnalyticsResponse, *httpx.HTTPError)
+	ReconcileAssignmentSubmissions(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (int, *httpx.HTTPError)
+
 	// Notification outbox
 	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
 }
