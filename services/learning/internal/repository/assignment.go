@@ -110,3 +110,33 @@ func (r *repository) RestoreAssignmentActiveStates(ctx context.Context, states m
 	}
 	return nil
 }
+
+func (r *repository) GetAssignmentForAttemptValidation(ctx context.Context, id uint) (*model.Assignment, error) {
+	var assignment model.Assignment
+	if err := r.db.WithContext(ctx).
+		Preload("Classroom").
+		Where("id = ?", id).
+		First(&assignment).Error; err != nil {
+		return nil, err
+	}
+
+	return &assignment, nil
+}
+
+func (r *repository) GetAssignmentForAttemptValidationForUpdate(ctx context.Context, id uint) (*model.Assignment, error) {
+	var assignment model.Assignment
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Classroom").Where("id = ?", id).First(&assignment).Error; err != nil {
+		return nil, err
+	}
+	return &assignment, nil
+}
+
+func (r *repository) GetAssignmentIDsByClassroom(ctx context.Context, classroomID uint) ([]uint, error) {
+	var ids []uint
+	if err := r.db.WithContext(ctx).Model(&model.Assignment{}).Where("classroom_id = ?", classroomID).Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}

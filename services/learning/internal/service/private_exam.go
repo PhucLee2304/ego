@@ -85,6 +85,7 @@ func (s *service) getPrivateExam(ctx context.Context, id uint) (*model.Exam, err
 
 func (s *service) updatePrivateExam(ctx context.Context, id uint, req dto.UpdatePrivateExamRequest) (*model.Exam, error) {
 	var updated *model.Exam
+	var gradebookEvents []*gradebookEvent
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		exam, err := repo.GetPrivateAssignmentExam(ctx, id)
 		if err != nil {
@@ -99,7 +100,7 @@ func (s *service) updatePrivateExam(ctx context.Context, id uint, req dto.Update
 			return httpx.NewError(http.StatusBadRequest, "[ERROR] Exam title and at least one question are required", nil)
 		}
 		if req.CorrectionOnly {
-			updated, err = s.correctPrivateExam(ctx, repo, id, exam, title, req, before)
+			updated, err = s.correctPrivateExam(ctx, repo, id, exam, title, req, before, &gradebookEvents)
 			return err
 		}
 		optionKeys := []model.OptionKey{model.OptionA, model.OptionB, model.OptionC, model.OptionD}
@@ -136,5 +137,11 @@ func (s *service) updatePrivateExam(ctx context.Context, id uint, req dto.Update
 		}
 		return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON("[]")})
 	})
-	return updated, err
+	if err != nil {
+		return nil, err
+	}
+	// Gọi lồng trong tx của assignment thì s là bản withRepoDeferringEvents nên
+	// GRADEBOOK_UPDATED vẫn chỉ gửi sau khi tx ngoài commit.
+	s.publishGradebookEvents(gradebookEvents)
+	return updated, nil
 }

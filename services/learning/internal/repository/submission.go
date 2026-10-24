@@ -22,3 +22,22 @@ func (r *repository) DeleteAssignmentSubmission(ctx context.Context, assignmentI
 		Where("assignment_id = ? AND student_id = ?", assignmentID, studentID).
 		Delete(&model.AssignmentSubmission{}).Error
 }
+
+func (r *repository) UpsertAssignmentSubmission(ctx context.Context, submission *model.AssignmentSubmission) error {
+	return r.db.WithContext(ctx).
+		Where("assignment_id = ? AND student_id = ?", submission.AssignmentID, submission.StudentID).
+		Assign(map[string]any{
+			"attempt_id": submission.AttemptID,
+		}).
+		FirstOrCreate(submission).Error
+}
+
+func (r *repository) UpsertAssignmentSubmissionResult(ctx context.Context, submission *model.AssignmentSubmission) error {
+	return r.db.WithContext(ctx).
+		Where("assignment_id = ? AND student_id = ?", submission.AssignmentID, submission.StudentID).
+		Assign(map[string]any{
+			"attempt_id": submission.AttemptID,
+			"score":      submission.Score,
+		}).
+		FirstOrCreate(submission).Error
+}

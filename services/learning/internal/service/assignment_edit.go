@@ -63,7 +63,7 @@ func (s *service) UpdateAssignmentContent(ctx context.Context, teacherID string,
 	}
 
 	var exam *model.Exam
-	var events []attemptEvent
+	var events []pendingEvent
 	// Tạm dừng các assignment dùng chung đề, nộp bài đang làm, sửa/đính chính đề
 	// và bật lại assignment đều nằm trong một transaction: đề sửa không hợp lệ thì
 	// assignment không bị kẹt ở trạng thái tạm dừng như khi còn gọi qua gRPC.
@@ -125,7 +125,7 @@ func (s *service) UpdateAssignmentContent(ctx context.Context, teacherID string,
 	if err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	s.publishAttemptEvents(events)
+	s.publishPendingEvents(events)
 	return &dto.EditableAssignmentResponse{ID: assignment.ID, ExamID: assignment.ExamID, Title: exam.Title, Description: exam.Description, Questions: dto.ToEditableAssignmentQuestions(exam)}, nil
 }
 

@@ -86,7 +86,7 @@ func (s *service) UpdateAssignmentSchedule(ctx context.Context, teacherID string
 
 func (s *service) SetAssignmentActive(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, active bool) (*dto.AssignmentResponse, *httpx.HTTPError) {
 	var response *dto.AssignmentResponse
-	var events []attemptEvent
+	var events []pendingEvent
 
 	// Tắt assignment và nộp các bài đang làm trong cùng một transaction (thay RPC
 	// SubmitAssignmentAttempts + bật lại assignment khi RPC lỗi).
@@ -146,6 +146,6 @@ func (s *service) SetAssignmentActive(ctx context.Context, teacherID string, cla
 	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	s.publishAttemptEvents(events)
+	s.publishPendingEvents(events)
 	return response, nil
 }

@@ -70,8 +70,8 @@ func (f *assignmentFixture) create(t *testing.T, classroomIDs ...uint) *dto.Crea
 	return created
 }
 
-// startAssignmentAttempt ghi thẳng một attempt đang làm của assignment (route tạo
-// attempt cho assignment có ở P20).
+// startAssignmentAttempt ghi thẳng một attempt đang làm của assignment, không qua
+// CreateAttempt (không tạo submission, không kiểm tra assignment).
 func (f *assignmentFixture) startAssignmentAttempt(t *testing.T, assignmentID, examID uint, userID string) *model.Attempt {
 	t.Helper()
 	duration := 45

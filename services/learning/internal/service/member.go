@@ -238,9 +238,10 @@ func (s *service) RejectMember(ctx context.Context, teacherID string, classroomI
 	return response, nil
 }
 
-// RemoveMember thu hồi rồi xóa member và ghi outbox trong một transaction
-// (trước đây khôi phục Approved bằng tay khi RPC exams lỗi).
+// RemoveMember thu hồi member, nộp bài assignment đang làm, xóa member và ghi outbox
+// trong một transaction (trước đây khôi phục Approved bằng tay khi RPC exams lỗi).
 func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomID uint, userID string) *httpx.HTTPError {
+	var events []pendingEvent
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		classroom, err := repo.GetClassroomByID(ctx, classroomID)
 		if err != nil {
@@ -259,7 +260,13 @@ func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomI
 		if err := repo.UpsertMember(ctx, member); err != nil {
 			return err
 		}
-		// TODO(P20): force-submit bài assignment đang làm của học sinh (SubmitStudentAssignmentAttempts) trong cùng tx.
+		assignmentIDs, err := repo.GetAssignmentIDsByClassroom(ctx, classroomID)
+		if err != nil {
+			return err
+		}
+		if _, err := s.withRepoDeferringEvents(repo, &events).submitStudentAssignmentAttempts(ctx, userID, assignmentIDs); err != nil {
+			return err
+		}
 		if err := repo.DeleteMember(ctx, member); err != nil {
 			return err
 		}
@@ -271,6 +278,7 @@ func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomI
 	if err != nil {
 		return httpx.FromError(err, errClassroomServiceFailed)
 	}
+	s.publishPendingEvents(events)
 	// Gỡ khỏi LiveKit sau khi commit; lỗi bỏ qua như trước vì member đã bị xóa.
 	if s.mediaClient != nil {
 		rooms, err := s.repo.GetLiveRoomsByClassroom(ctx, classroomID)

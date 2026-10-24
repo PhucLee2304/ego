@@ -18,10 +18,13 @@ import (
 )
 
 func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError) {
+	var assignment *model.Assignment
 	if req.ContextType == model.AttemptContextTypeClassroomAssignment {
-		// TODO(P20): kiểm tra assignment (validateAssignmentAttempt), thời hạn theo
-		// assignment, và tạo submission trong cùng transaction.
-		return nil, httpx.NewError(http.StatusNotImplemented, "[ERROR] Classroom assignment attempts are not available yet", nil)
+		var err error
+		assignment, err = s.validateAssignmentAttempt(ctx, s.repo, userID, *req.ContextID, examID)
+		if err != nil {
+			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
+		}
 	}
 
 	activeAttempt, activeErr := s.repo.GetActiveAttemptByUserID(ctx, userID)
@@ -38,6 +41,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 	}
 
 	var attempt *model.Attempt
+	var gradebook *gradebookEvent
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		if _, err := repo.GetActiveAttemptByUserID(ctx, userID); err == nil {
 			return ErrActiveAttemptExists
@@ -62,7 +66,10 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 
 		now := time.Now()
 		var duration *int
-		if req.Mode == model.AttemptModeTest {
+		if req.Mode == model.AttemptModeAssignment {
+			value := assignment.Duration
+			duration = &value
+		} else if req.Mode == model.AttemptModeTest {
 			if exam.Type != model.ExamTypeAssignment {
 				value, ok := model.GetTestDurationByExamType(exam.Type)
 				if !ok {
@@ -79,6 +86,9 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		var expiresAt *time.Time
 		if duration != nil {
 			value := now.Add(time.Duration(*duration) * time.Minute)
+			if assignment != nil {
+				value = assignmentAttemptExpiresAt(now, *duration, assignment.DueAt)
+			}
 			expiresAt = &value
 		}
 
@@ -145,6 +155,13 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		attempt.Exam = *exam
 		attempt.Answers = []model.AttemptAnswer{}
 
+		// Submission ghi cùng tx với attempt (thay RPC CreateAssignmentSubmission + DeleteAttemptRollback).
+		if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil {
+			gradebook, err = createAssignmentSubmission(ctx, repo, userID, *attempt.ContextID, attempt.ID)
+			if err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -155,6 +172,9 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			return nil, ErrContextAttemptAlreadyExists
 		}
 		return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
+	}
+	if gradebook != nil {
+		s.publishGradebookEvents([]*gradebookEvent{gradebook})
 	}
 	return dto.ToAttemptResponseWithQuestions(attempt), nil
 }

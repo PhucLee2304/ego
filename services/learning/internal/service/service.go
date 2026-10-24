@@ -60,6 +60,19 @@ var (
 	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
 )
 
+// Lỗi kiểm tra attempt của assignment (thay ValidateAssignmentAttempt /
+// CreateAssignmentSubmission / UpdateAssignmentSubmissionResult): giữ đúng status
+// + message mà exams cũ trả sau toStatusError + httpx.FromError.
+var (
+	ErrAssignmentNotFound     = httpx.NewError(http.StatusNotFound, "[ERROR] Assignment not found", nil)
+	ErrAssignmentExamMismatch = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment does not belong to exam", nil)
+	ErrAssignmentNotOpen      = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment is not open yet", nil)
+	ErrAssignmentClosed       = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment is closed", nil)
+	ErrAssignmentNotActive    = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment is not active", nil)
+	ErrStudentNotApproved     = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Student is not approved in classroom", nil)
+	ErrInvalidSubmissionScore = httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid submission score", nil)
+)
+
 type Service interface {
 	// Exam
 	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, *httpx.HTTPError)
@@ -204,28 +217,36 @@ func (s *service) withRepo(repo repository.Repository) *service {
 	return &copy
 }
 
-// attemptEvent là một push WebSocket của hub /ws/exams đang chờ commit.
-type attemptEvent struct {
+// pendingEvent là một push WebSocket đang chờ transaction ngoài commit.
+type pendingEvent struct {
+	room    bool // true: hub /ws/classrooms (GRADEBOOK_UPDATED), false: hub /ws/exams
 	userID  string
 	payload any
 }
 
 // withRepoDeferringEvents như withRepo, nhưng gom push ATTEMPT_SUBMITTING/SUBMITTED
-// vào events thay vì gửi ngay: chỉ gửi bằng publishAttemptEvents sau khi transaction
-// ngoài commit, để học sinh không nhận "đã nộp" của một transaction bị rollback.
-func (s *service) withRepoDeferringEvents(repo repository.Repository, events *[]attemptEvent) *service {
+// và GRADEBOOK_UPDATED vào events thay vì gửi ngay: chỉ gửi bằng publishPendingEvents
+// sau khi transaction ngoài commit, để client không nhận "đã nộp" hay điểm của một
+// transaction bị rollback.
+func (s *service) withRepoDeferringEvents(repo repository.Repository, events *[]pendingEvent) *service {
 	copy := s.withRepo(repo)
 	copy.attemptPublisher = func(userID string, payload any) {
-		*events = append(*events, attemptEvent{userID: userID, payload: payload})
+		*events = append(*events, pendingEvent{userID: userID, payload: payload})
+	}
+	copy.roomPublisher = func(userID string, payload any) {
+		*events = append(*events, pendingEvent{room: true, userID: userID, payload: payload})
 	}
 	return copy
 }
 
-func (s *service) publishAttemptEvents(events []attemptEvent) {
-	if s.attemptPublisher == nil {
-		return
-	}
+func (s *service) publishPendingEvents(events []pendingEvent) {
 	for _, event := range events {
-		s.attemptPublisher(event.userID, event.payload)
+		publisher := s.attemptPublisher
+		if event.room {
+			publisher = s.roomPublisher
+		}
+		if publisher != nil {
+			publisher(event.userID, event.payload)
+		}
 	}
 }

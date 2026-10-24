@@ -39,3 +39,37 @@ func (s *service) submitAssignmentAttempts(ctx context.Context, assignmentID uin
 	}
 	return submitted, nil
 }
+
+// submitStudentAssignmentAttempts nộp ngay các bài assignment đang làm của một học
+// sinh (thay RPC SubmitStudentAssignmentAttempts, dùng khi xóa học sinh khỏi lớp).
+// Gọi trong tx qua withRepoDeferringEvents; khác submitAssignmentAttempts, bài nộp
+// lỗi làm hỏng cả tx như khi RPC lỗi trước đây.
+func (s *service) submitStudentAssignmentAttempts(ctx context.Context, studentID string, assignmentIDs []uint) (int, error) {
+	if len(assignmentIDs) == 0 {
+		return 0, nil
+	}
+	if err := s.repo.ExpireActiveAssignmentAttemptsByUser(ctx, assignmentIDs, studentID, time.Now()); err != nil {
+		return 0, err
+	}
+	attempts, err := s.repo.GetActiveAttemptsByAssignmentIDsAndUser(ctx, assignmentIDs, studentID)
+	if err != nil {
+		return 0, err
+	}
+
+	submitted := 0
+	var errs []error
+	for _, attempt := range attempts {
+		if _, err := s.submitAttempt(ctx, studentID, attempt.ID, nil); err != nil {
+			if errors.Is(err, ErrAttemptAlreadySubmitted) || errors.Is(err, ErrAttemptCancelled) {
+				continue
+			}
+			errs = append(errs, err)
+			continue
+		}
+		submitted++
+	}
+	if len(errs) > 0 {
+		return submitted, errors.Join(errs...)
+	}
+	return submitted, nil
+}

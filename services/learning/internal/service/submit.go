@@ -108,6 +108,7 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		})
 	}
 	var response *dto.AttemptResponse
+	var gradebook *gradebookEvent
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		attempt, err := repo.GetAttemptForLifecycle(ctx, attemptID, userID)
 		if err != nil {
@@ -273,8 +274,11 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		}
 		attempt.History = history
 		if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil && attempt.Score != nil {
-			// TODO(P20): ghi điểm vào assignment submission trong cùng transaction
-			// (thay outbox CLASSROOM_ASSIGNMENT_ATTEMPT_SUBMITTED) và gom GRADEBOOK_UPDATED.
+			// Điểm ghi vào submission cùng tx (thay outbox CLASSROOM_ASSIGNMENT_ATTEMPT_SUBMITTED).
+			gradebook, err = updateAssignmentSubmissionResult(ctx, repo, attempt)
+			if err != nil {
+				return err
+			}
 			if err := createNotificationOutbox(ctx, repo, model.NotificationSourceAttempt, fmt.Sprintf("attempt:%d:submitted", attempt.ID), []string{userID},
 				"Assignment graded", "Your assignment was submitted and graded", "ATTEMPT", attempt.ID, 0, time.Time{}); err != nil {
 				return err
@@ -287,6 +291,9 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		return nil, err
 	}
 
+	if gradebook != nil {
+		s.publishGradebookEvents([]*gradebookEvent{gradebook})
+	}
 	if s.attemptPublisher != nil && response != nil {
 		s.attemptPublisher(userID, map[string]any{
 			"type":    "ATTEMPT_SUBMITTED",

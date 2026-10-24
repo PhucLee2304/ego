@@ -19,8 +19,9 @@ import (
 
 // correctPrivateExam là nhánh CorrectionOnly của updatePrivateExam (đề đã có bài
 // làm): chỉ cho đổi đáp án đúng / loại câu khỏi điểm, chấm lại mọi bài đã nộp,
-// gửi thông báo đổi điểm (source EXAM) và ghi audit — tất cả trong tx của repo.
-func (s *service) correctPrivateExam(ctx context.Context, repo repository.Repository, id uint, exam *model.Exam, title string, req dto.UpdatePrivateExamRequest, before []byte) (updated *model.Exam, err error) {
+// gửi thông báo đổi điểm (source EXAM), cập nhật điểm submission và ghi audit — tất
+// cả trong tx của repo. GRADEBOOK_UPDATED gom vào gradebookEvents, gửi sau commit.
+func (s *service) correctPrivateExam(ctx context.Context, repo repository.Repository, id uint, exam *model.Exam, title string, req dto.UpdatePrivateExamRequest, before []byte, gradebookEvents *[]*gradebookEvent) (updated *model.Exam, err error) {
 	if strings.TrimSpace(req.ActorID) == "" || strings.TrimSpace(req.Reason) == "" {
 		return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] Correction actor and reason are required", nil)
 	}
@@ -113,8 +114,13 @@ func (s *service) correctPrivateExam(ctx context.Context, repo repository.Reposi
 		if err := repo.UpsertHistory(ctx, &model.History{Data: datatypes.JSON(data), AttemptID: attempt.ID, ExamTitle: attempt.Exam.Title, ExamType: attempt.Exam.Type, ExamYear: attempt.Exam.Year}); err != nil {
 			return nil, err
 		}
-		// TODO(P20): cập nhật điểm assignment submission trong cùng transaction
-		// (thay outbox CLASSROOM_ASSIGNMENT_ATTEMPT_SUBMITTED) và gom GRADEBOOK_UPDATED.
+		if attempt.ContextType == model.AttemptContextTypeClassroomAssignment && attempt.ContextID != nil {
+			gradebook, err := updateAssignmentSubmissionResult(ctx, repo, attempt)
+			if err != nil {
+				return nil, err
+			}
+			*gradebookEvents = append(*gradebookEvents, gradebook)
+		}
 	}
 	updated, err = repo.GetPrivateAssignmentExam(ctx, id)
 	if err != nil {

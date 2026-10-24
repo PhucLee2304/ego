@@ -108,6 +108,9 @@ type Repository interface {
 	UpdateAssignment(ctx context.Context, assignment *model.Assignment) error
 	UpdateAssignmentsContentAndActive(ctx context.Context, examID uint, title string, description *string, active bool) error
 	RestoreAssignmentActiveStates(ctx context.Context, states map[uint]bool) error
+	GetAssignmentForAttemptValidation(ctx context.Context, id uint) (*model.Assignment, error)
+	GetAssignmentForAttemptValidationForUpdate(ctx context.Context, id uint) (*model.Assignment, error)
+	GetAssignmentIDsByClassroom(ctx context.Context, classroomID uint) ([]uint, error)
 
 	// Assignment attempt
 	GetActiveAttemptsByAssignmentID(ctx context.Context, assignmentID uint) ([]*model.Attempt, error)
@@ -115,10 +118,14 @@ type Repository interface {
 	CountAssignmentAttempts(ctx context.Context, assignmentID uint) (int64, int64, error)
 	UpdateActiveAssignmentAttemptSchedule(ctx context.Context, assignmentID uint, duration int, dueAt time.Time) (int64, error)
 	ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error
+	GetActiveAttemptsByAssignmentIDsAndUser(ctx context.Context, assignmentIDs []uint, userID string) ([]*model.Attempt, error)
+	ExpireActiveAssignmentAttemptsByUser(ctx context.Context, assignmentIDs []uint, userID string, now time.Time) error
 
 	// Submission
 	GetAssignmentSubmissionByAssignmentAndStudent(ctx context.Context, assignmentID uint, studentID string) (*model.AssignmentSubmission, error)
 	DeleteAssignmentSubmission(ctx context.Context, assignmentID uint, studentID string) error
+	UpsertAssignmentSubmission(ctx context.Context, submission *model.AssignmentSubmission) error
+	UpsertAssignmentSubmissionResult(ctx context.Context, submission *model.AssignmentSubmission) error
 
 	// Notification outbox
 	CreateNotificationOutbox(ctx context.Context, event *model.NotificationOutbox) error

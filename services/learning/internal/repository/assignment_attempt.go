@@ -72,3 +72,26 @@ func (r *repository) ResetAssignmentAttempt(ctx context.Context, assignmentID ui
 	}
 	return r.db.WithContext(ctx).Delete(&attempt).Error
 }
+
+func (r *repository) GetActiveAttemptsByAssignmentIDsAndUser(ctx context.Context, assignmentIDs []uint, userID string) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	if len(assignmentIDs) == 0 {
+		return attempts, nil
+	}
+	if err := r.db.WithContext(ctx).
+		Where("context_type = ? AND context_id IN ? AND user_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentIDs, userID, model.AttemptStatusInProgress).
+		Order("id ASC").
+		Find(&attempts).Error; err != nil {
+		return nil, err
+	}
+	return attempts, nil
+}
+
+func (r *repository) ExpireActiveAssignmentAttemptsByUser(ctx context.Context, assignmentIDs []uint, userID string, now time.Time) error {
+	if len(assignmentIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.Attempt{}).
+		Where("context_type = ? AND context_id IN ? AND user_id = ? AND status = ?", model.AttemptContextTypeClassroomAssignment, assignmentIDs, userID, model.AttemptStatusInProgress).
+		Update("expires_at", now).Error
+}
