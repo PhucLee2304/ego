@@ -47,6 +47,7 @@ type ExamQuestion struct {
 	ID                uint                  `json:"id"`
 	Content           string                `json:"content"`
 	Part              *string               `json:"part"`
+	Number            *int                  `json:"number,omitempty"` // số câu gốc (TOEIC 1–200)
 	Explanation       string                `json:"explanation"`
 	Order             int                   `json:"order"`
 	ExcludedFromScore *bool                 `json:"excludedFromScore,omitempty"`
@@ -189,6 +190,7 @@ func toExamQuestion(question model.Question) *ExamQuestion {
 		Part: valuex.MapPtr(question.Part, func(value model.PartCode) string {
 			return string(value)
 		}),
+		Number:      question.Number,
 		Explanation: question.Explanation,
 		Order:       question.Order,
 		Options:     options,

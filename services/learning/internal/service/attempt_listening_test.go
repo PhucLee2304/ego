@@ -78,4 +78,16 @@ func TestStrictSubmittedAnswers(t *testing.T) {
 			t.Fatalf("question %d = %d, want %d", answer.QuestionID, *answer.SelectedOptionID, want[answer.QuestionID])
 		}
 	}
+
+	// Câu đang mở mà body không nhắc tới giữ đáp án đã lưu.
+	got = strictSubmittedAnswers(attempt, nil)
+	want = map[uint]uint{1: 100, 2: 200}
+	if len(got) != len(want) {
+		t.Fatalf("answers without body = %+v", got)
+	}
+	for _, answer := range got {
+		if want[answer.QuestionID] != *answer.SelectedOptionID {
+			t.Fatalf("question %d = %d, want %d", answer.QuestionID, *answer.SelectedOptionID, want[answer.QuestionID])
+		}
+	}
 }
