@@ -19,7 +19,7 @@ type AppConfig struct {
 	DSN        string
 
 	IdentityServiceAddr      string
-	ClassroomsServiceAddr    string
+	LearningServiceAddr      string
 	NotificationsServiceAddr string
 	StorageServiceAddr       string
 
@@ -43,7 +43,7 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBName:     getEnv("DB_NAME", "postsdb"),
 
 		IdentityServiceAddr:      getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
-		ClassroomsServiceAddr:    getEnv("CLASSROOMS_SERVICE_ADDR", "classrooms:50057"),
+		LearningServiceAddr:      getEnv("LEARNING_SERVICE_ADDR", "learning:50059"),
 		NotificationsServiceAddr: getEnv("NOTIFICATIONS_SERVICE_ADDR", "notifications:50058"),
 		StorageServiceAddr:       getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
 		ImageMaxBytes:            getEnvInt64("POST_IMAGE_MAX_BYTES", 5*1024*1024),

@@ -30,15 +30,10 @@ services:
     environment:
       SERVICE: topics
 
-  exams:
+  learning:
     <<: *air-service
     environment:
-      SERVICE: exams
-
-  classrooms:
-    <<: *air-service
-    environment:
-      SERVICE: classrooms
+      SERVICE: learning
 
   notifications:
     <<: *air-service

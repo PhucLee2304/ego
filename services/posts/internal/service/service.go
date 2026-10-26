@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	classrooms "ego/api/gen/go/classrooms"
 	identityClient "ego/api/gen/go/identity"
+	learning "ego/api/gen/go/learning"
 	notifications "ego/api/gen/go/notifications"
 	storage "ego/api/gen/go/storage"
 	"ego/platform/httpx"
@@ -37,7 +37,7 @@ var (
 
 type Service struct {
 	repo          *repository.Repository
-	classrooms    classrooms.ClassroomServiceClient
+	learning      learning.LearningServiceClient
 	identity      identityClient.IdentityServiceClient
 	notifications notifications.NotificationServiceClient
 	storage       storage.StorageServiceClient
@@ -47,14 +47,14 @@ type Service struct {
 func New(
 	repo *repository.Repository,
 	appConfig *postsConfig.AppConfig,
-	classroomsClient classrooms.ClassroomServiceClient,
+	learningClient learning.LearningServiceClient,
 	identityClient identityClient.IdentityServiceClient,
 	notificationsClient notifications.NotificationServiceClient,
 	storageClient storage.StorageServiceClient,
 ) *Service {
 	return &Service{
 		repo:          repo,
-		classrooms:    classroomsClient,
+		learning:      learningClient,
 		identity:      identityClient,
 		notifications: notificationsClient,
 		storage:       storageClient,
@@ -214,8 +214,8 @@ func (s *Service) CleanupExpiredUploads(ctx context.Context, limit int) (int, er
 	return cleaned, nil
 }
 
-func (s *Service) classroomAccess(ctx context.Context, classroomID uint, userID string) (*classrooms.GetClassroomPostAccessResponse, error) {
-	access, err := s.classrooms.GetClassroomPostAccess(ctx, &classrooms.GetClassroomPostAccessRequest{
+func (s *Service) classroomAccess(ctx context.Context, classroomID uint, userID string) (*learning.GetClassroomPostAccessResponse, error) {
+	access, err := s.learning.GetClassroomPostAccess(ctx, &learning.GetClassroomPostAccessRequest{
 		ClassroomId: uint64(classroomID),
 		UserId:      userID,
 	})

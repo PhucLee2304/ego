@@ -20,8 +20,7 @@ services:
           { "url": "/identity/docs/doc.json", "name": "Identity" },
           { "url": "/storage/docs/doc.json", "name": "Storage" },
           { "url": "/topics/docs/doc.json", "name": "Topics" },
-          { "url": "/exams/docs/doc.json", "name": "Exams" },
-          { "url": "/classrooms/docs/doc.json", "name": "Classrooms" },
+          { "url": "/learning/docs/doc.json", "name": "Learning" },
           { "url": "/notifications/docs/doc.json", "name": "Notifications" }
         ]
     networks:
@@ -43,9 +42,7 @@ services:
         condition: service_healthy
       topics:
         condition: service_healthy
-      exams:
-        condition: service_healthy
-      classrooms:
+      learning:
         condition: service_healthy
       notifications:
         condition: service_healthy
@@ -177,74 +174,15 @@ services:
       timeout: 5s
       retries: 5
 
-  exams:
+  learning:
     <<: *go-service
-    container_name: ego-exams
+    container_name: ego-learning
     build:
       context: .
-      dockerfile: services/exams/Dockerfile
+      dockerfile: services/learning/Dockerfile
       target: server
     env_file:
-      - ./services/exams/.env
-    depends_on:
-      exams-db:
-        condition: service_healthy
-      identity:
-        condition: service_healthy
-      notifications:
-        condition: service_healthy
-
-  exams-seed:
-    build:
-      context: .
-      dockerfile: services/exams/Dockerfile
-      target: seed
-    container_name: ego-exams-seed
-    profiles:
-      - seed
-    env_file:
-      - ./services/exams/.env
-    volumes:
-      - ./services/exams/seed:/app/services/exams/seed:ro
-    depends_on:
-      exams-db:
-        condition: service_healthy
-      storage:
-        condition: service_healthy
-      identity:
-        condition: service_healthy
-    networks:
-      - ego-network
-
-  exams-db:
-    image: postgres:15.8-alpine
-    container_name: ego-exams-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${EXAMS_DB_USER}
-      POSTGRES_PASSWORD: ${EXAMS_DB_PASSWORD}
-      POSTGRES_DB: ${EXAMS_DB_NAME}
-    ports:
-      - "${EXAMS_DB_PORT}:5432"
-    volumes:
-      - ./data/exams-db:/var/lib/postgresql/data
-    networks:
-      - ego-network
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${EXAMS_DB_USER:-postgres}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  classrooms:
-    <<: *go-service
-    container_name: ego-classrooms
-    build:
-      context: .
-      dockerfile: services/classrooms/Dockerfile
-      target: server
-    env_file:
-      - ./services/classrooms/.env
+      - ./services/learning/.env
     environment:
       LIVEKIT_URL: ${LIVEKIT_INTERNAL_URL}
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
@@ -252,33 +190,51 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       LIVEKIT_JOIN_TOKEN_TTL: ${LIVEKIT_JOIN_TOKEN_TTL}
     depends_on:
-      classrooms-db:
+      learning-db:
         condition: service_healthy
       identity:
-        condition: service_healthy
-      exams:
         condition: service_healthy
       notifications:
         condition: service_healthy
       livekit:
         condition: service_healthy
 
-  classrooms-db:
+  learning-seed:
+    build:
+      context: .
+      dockerfile: services/learning/Dockerfile
+      target: seed
+    container_name: ego-learning-seed
+    profiles:
+      - seed
+    env_file:
+      - ./services/learning/.env
+    volumes:
+      - ./services/learning/seed:/app/services/learning/seed:ro
+    depends_on:
+      learning-db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    networks:
+      - ego-network
+
+  learning-db:
     image: postgres:15.8-alpine
-    container_name: ego-classrooms-db
+    container_name: ego-learning-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${CLASSROOMS_DB_USER}
-      POSTGRES_PASSWORD: ${CLASSROOMS_DB_PASSWORD}
-      POSTGRES_DB: ${CLASSROOMS_DB_NAME}
+      POSTGRES_USER: ${LEARNING_DB_USER}
+      POSTGRES_PASSWORD: ${LEARNING_DB_PASSWORD}
+      POSTGRES_DB: ${LEARNING_DB_NAME}
     ports:
-      - "${CLASSROOMS_DB_PORT}:5432"
+      - "${LEARNING_DB_PORT}:5432"
     volumes:
-      - ./data/classrooms-db:/var/lib/postgresql/data
+      - ./data/learning-db:/var/lib/postgresql/data
     networks:
       - ego-network
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${CLASSROOMS_DB_USER:-postgres}"]
+      test: ["CMD", "pg_isready", "-U", "${LEARNING_DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -363,7 +319,7 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
-      classrooms:
+      learning:
         condition: service_healthy
       notifications:
         condition: service_healthy

@@ -7,7 +7,7 @@ data/
 db/
 storage/
 services/topics/seed/
-services/exams/seed/
+services/learning/seed/
 
 # IDE and OS files
 .idea/
