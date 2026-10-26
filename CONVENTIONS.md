@@ -55,9 +55,9 @@ internal/
 - struct private;
 - constructor trả về **interface**;
 - sentinel error;
-- các interface hẹp tới phụ thuộc bên ngoài.
+- các interface hẹp tới phụ thuộc bên ngoài: chỉ khai báo method thực sự dùng, để test bằng fake.
 
-Method được tách theo domain ra `<domain>.go` trong cùng package.
+Method được tách theo domain ra `<domain>.go` trong cùng package. Mẫu: `services/identity/internal/service/service.go` (sentinel, `Service`, `StorageClient` hẹp, `service`, `New`).
 
 | Layer | Constructor |
 |---|---|
@@ -65,34 +65,6 @@ Method được tách theo domain ra `<domain>.go` trong cùng package.
 | service | `func New(...) Service` |
 | repository | `func NewRepository(db *gorm.DB) Repository` |
 | rpc | `func New(svc service.Service) <pkg>.<Xxx>ServiceServer` |
-
-```go
-// service/service.go
-var ErrUserNotFound = errors.New("user not found")
-
-type Service interface {
-	// Auth
-	Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResponse, *httpx.HTTPError)
-
-	// User
-	GetMe(ctx context.Context, userID string) (*dto.User, *httpx.HTTPError)
-	GetRole(ctx context.Context, userID string) (string, error)
-}
-
-// Interface hẹp: chỉ khai báo method thực sự dùng, để test bằng fake.
-type StorageClient interface {
-	GetPublicURL(ctx context.Context, in *storageClient.GetPublicURLRequest, opts ...grpc.CallOption) (*storageClient.GetPublicURLResponse, error)
-}
-
-type service struct {
-	repo          repository.Repository
-	storageClient StorageClient
-}
-
-func New(repo repository.Repository, storageClient StorageClient) Service {
-	return &service{repo: repo, storageClient: storageClient}
-}
-```
 
 **Kích thước file:**
 - Nên ≤ 300 dòng.
@@ -115,49 +87,14 @@ func New(repo repository.Repository, storageClient StorageClient) Service {
 
 ## 4. Handler và route
 
-```go
-func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
-	mux.HandleFunc("POST /login", h.Login)
-	mux.HandleFunc("GET /me", mw.Handle(h.GetMe))
-	mux.HandleFunc("GET /users", mw.Handle(rm.RequireRole("admin")(h.GetList)))
-}
+Mẫu: `RegisterRoutes` trong `services/identity/internal/handler/handler.go`, `UpdateMe` (kèm godoc) trong `services/identity/internal/handler/user.go`.
 
-func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-
-	var body dto.UpdateUserBody
-	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-
-	user, httpErr := h.service.UpdateMe(r.Context(), userID, body)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-
-	httpx.JSON(w, http.StatusOK, user)
-}
-```
-
-- Route dùng pattern Go 1.22 dạng `"METHOD /path"`, trên mux `api` đã mount `/api/v1/` bằng `http.StripPrefix`.
+- Route dùng pattern Go 1.22 dạng `"METHOD /path"`, trên mux `api` đã mount `/api/v1/` bằng `http.StripPrefix`. Route cần đăng nhập bọc `mw.Handle(...)`, cần role thì thêm `rm.RequireRole("admin")(...)`.
+- User hiện tại lấy bằng `jwt.GetUserID(r.Context())`. Body decode bằng `httpx.DecodeJSON`, lỗi decode trả `httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err)`. Lỗi ghi bằng `httpx.Error`, kết quả ghi bằng `httpx.JSON`.
 - Path param đọc bằng `httpx.ParsePathID`. Query đọc bằng `httpx.DecodeQuery`.
 - Phân trang dùng `httpx.PaginationQuery` → `query.Normalize()` → `httpx.ToPaginatedResponse`.
 - Handler không chứa logic nghiệp vụ. Mỗi method gồm decode, gọi service, ghi response.
-- Mỗi handler có Swagger godoc đầy đủ:
-
-  ```go
-  // GetMe godoc
-  // @Summary      Get current user info
-  // @Tags         Users
-  // @Accept       json
-  // @Produce      json
-  // @Security     BearerAuth
-  // @Success      200  {object}  dto.User
-  // @Failure      401  {object}  httpx.HTTPError
-  // @Router       /me [get]
-  ```
+- Mỗi handler có Swagger godoc đầy đủ: `@Summary`, `@Tags`, `@Accept`, `@Produce`, `@Security BearerAuth` (nếu cần đăng nhập), `@Success`, `@Failure {object} httpx.HTTPError`, `@Router`.
 
 - `main.go` khai báo `@title`, `@BasePath /<svc>/api/v1` và `@securityDefinitions.apikey BearerAuth`.
 
@@ -182,32 +119,11 @@ func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 - Mọi truy vấn đều dùng `r.db.WithContext(ctx)`.
 - Phân trang nhận `limit, offset int32`, trả `([]*model.X, int64, error)`.
 - Raw SQL (partial index, trigger, constraint) đặt thành hằng trong `model/index.go` và chạy trong `Migrate`.
-- **Transaction:** một kiểu duy nhất, như identity (kể cả service nhiều domain):
-
-  ```go
-  func (r *repository) Transaction(ctx context.Context, fn func(Repository) error) error {
-  	return platformdb.WithTx(ctx, r.db, func(tx *gorm.DB) error { return fn(NewRepository(tx)) })
-  }
-  ```
-
+- **Transaction:** một kiểu duy nhất, như identity (kể cả service nhiều domain): `Repository.Transaction(ctx, fn func(Repository) error)` bọc `platformdb.WithTx` và truyền `NewRepository(tx)` cho `fn`. Mẫu: `services/identity/internal/repository/repository.go`.
   - Vì chỉ có một `Repository`, một transaction ghi được bảng của mọi domain (vd attempt + submission).
-  - Cần gọi logic của service (domain khác) bên trong tx thì dùng bản sao service gắn tx-repo:
-
-    ```go
-    func (s *service) withRepo(repo repository.Repository) *service {
-    	copy := *s
-    	copy.repo = repo
-    	return &copy
-    }
-
-    err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
-    	exam, err := s.withRepo(repo).createPrivateExam(ctx, req) // Transaction bên trong thành SAVEPOINT
-    	...
-    })
-    ```
-
+  - Cần gọi logic của service (domain khác) bên trong tx thì dùng bản sao service gắn tx-repo, `s.withRepo(repo)`. `Transaction` lồng bên trong thành SAVEPOINT. Mẫu: `withRepo` trong `services/learning/internal/service/service.go`, dùng ở `assignment.go` (`createPrivateExam`).
   - Không dùng rollback bù (xóa bản ghi vừa tạo, khôi phục field) khi mọi thứ nằm trong một DB: gom vào một tx.
-  - Side effect ra ngoài (push WebSocket, LiveKit, gọi gRPC) phải chạy **sau khi commit**: gom event trong tx, publish sau.
+  - Side effect ra ngoài (push WebSocket, LiveKit, gọi gRPC) phải chạy **sau khi commit**: gom event trong tx, publish sau. Mẫu: `withRepoDeferringEvents` + `publishPendingEvents` trong cùng file.
 
 ---
 
@@ -253,14 +169,7 @@ func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 ## 10. Test
 
 - **Unit test** đặt cạnh code, cùng package, viết table-driven với `t.Run`.
-- **Fake** viết tay, embed interface để chỉ cài các method cần. Không dùng thư viện mock.
-
-  ```go
-  type fakeRepository struct {
-  	repository.Repository
-  	user *model.User
-  }
-  ```
+- **Fake** viết tay, embed interface để chỉ cài các method cần. Không dùng thư viện mock. Mẫu: `fakeUserRepository` trong `services/identity/internal/service/auth_test.go`.
 
 - Phụ thuộc không dùng tới thì truyền `nil`.
 - **Integration test** đặt trong `services/<svc>/integration/`:

@@ -18,7 +18,7 @@ COPY --from=server-builder /app/server .
 CMD ["./server"]
 
 FROM alpine:3.19 AS seed
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates ffmpeg
 WORKDIR /app
 COPY --from=seed-builder /app/seed .
 CMD ["./seed"]

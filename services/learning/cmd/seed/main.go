@@ -183,13 +183,18 @@ func main() {
 		Int("retries", appConfig.SeedUploadRetries).
 		Msg("[SEED] Loaded exams seed data")
 
+	audio, err := probeAudioFiles(ctx, appConfig.SeedDir, data.manifest, appConfig.SeedUploadWorkers)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[SEED] Failed to probe audio files")
+	}
+
 	uploads, err := uploadMedia(ctx, storage, jobs, appConfig.SeedUploadWorkers, appConfig.SeedUploadRetries)
 	if err != nil {
 		cleanupExams(ctx, storage, err)
 		logger.Log.Fatal().Err(err).Msg("[SEED] Failed to upload exam media")
 	}
 
-	if err := importData(db, data, uploads); err != nil {
+	if err := importData(db, data, uploads, audio); err != nil {
 		cleanupExams(ctx, storage, err)
 		logger.Log.Fatal().Err(err).Msg("[SEED] Failed to import exam data")
 	}

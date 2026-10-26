@@ -45,3 +45,4 @@ services/topics/seed/**
 services/learning/seed
 services/learning/seed/**
 **/PLAN**
+CLAUDE.md

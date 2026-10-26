@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func importTOEIC(tx *gorm.DB, data *seedData, uploads *uploadResult) error {
+func importTOEIC(tx *gorm.DB, data *seedData, uploads *uploadResult, audio map[string]audioInfo) error {
 	questionsByTest := make(map[string][]toeicQuestionRow)
 	for _, row := range data.toeicQuestions {
 		questionsByTest[row.TestSetID] = append(questionsByTest[row.TestSetID], row)
@@ -83,6 +83,11 @@ func importTOEIC(tx *gorm.DB, data *seedData, uploads *uploadResult) error {
 				return fmt.Errorf("toeic question %s has unsupported section %q", row.QuestionID, row.Section)
 			}
 
+			partCode, err := parsePartCode(row.Part)
+			if err != nil {
+				return fmt.Errorf("toeic question %s: %w", row.QuestionID, err)
+			}
+
 			var groupID *uint
 			if strings.TrimSpace(row.GroupID) != "" {
 				groupKey := test.TestSetID + ":" + row.GroupID
@@ -99,7 +104,12 @@ func importTOEIC(tx *gorm.DB, data *seedData, uploads *uploadResult) error {
 						Transcript:  row.AudioTranscript,
 						Explanation: row.Explanation,
 						Order:       row.GroupOrder,
+						Part:        &partCode,
 						SectionID:   sectionID,
+					}
+					if info, ok := audio[row.AudioURL]; ok && row.AudioURL != "" {
+						group.AudioDurationMs = &info.DurationMs
+						group.TrailingSilenceMs = &info.TrailingSilenceMs
 					}
 					if err := tx.Create(&group).Error; err != nil {
 						return fmt.Errorf("create toeic group %s: %w", groupKey, err)
@@ -109,17 +119,13 @@ func importTOEIC(tx *gorm.DB, data *seedData, uploads *uploadResult) error {
 				}
 			}
 
-			partCode, err := parsePartCode(row.Part)
-			if err != nil {
-				return fmt.Errorf("toeic question %s: %w", row.QuestionID, err)
-			}
-
 			sectionOrderCounters[sectionID]++
 			question := model.Question{
 				Content:     row.QuestionText,
 				Part:        &partCode,
 				Explanation: row.Explanation,
 				Order:       sectionOrderCounters[sectionID],
+				Number:      toeicQuestionNumber(row),
 				SectionID:   sectionID,
 				GroupID:     groupID,
 			}
@@ -162,6 +168,16 @@ func importTOEIC(tx *gorm.DB, data *seedData, uploads *uploadResult) error {
 	}
 
 	return nil
+}
+
+// toeicQuestionNumber trả số câu 1–200: question_number trong CSV là thứ tự trong group,
+// còn group_order là số câu đầu tiên của group (PLAN_TOEIC_ATTEMPT.md mục 5).
+func toeicQuestionNumber(row toeicQuestionRow) *int {
+	if row.GroupOrder <= 0 || row.QuestionNo <= 0 {
+		return nil
+	}
+	number := row.GroupOrder + row.QuestionNo - 1
+	return &number
 }
 
 func buildGroupTitle(part string, groupOrder int) string {

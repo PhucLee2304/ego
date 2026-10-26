@@ -8,6 +8,7 @@ type Question struct {
 	Part              *PartCode `gorm:"type:text;index"`
 	Explanation       string    `gorm:"type:text"`
 	Order             int       `gorm:"not null"`
+	Number            *int      // số câu gốc của đề (TOEIC 1–200)
 	ExcludedFromScore bool      `gorm:"not null;default:false;index"`
 
 	SectionID uint    `gorm:"not null;index"`

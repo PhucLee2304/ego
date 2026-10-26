@@ -29,6 +29,13 @@ type Attempt struct {
 	ContextType AttemptContextType `gorm:"type:text;not null;default:STANDALONE;index"`
 	ContextID   *uint              `gorm:"index"`
 
+	// Luồng làm bài, chốt lúc tạo attempt (PLAN_TOEIC_ATTEMPT.md mục 1.1–1.3).
+	Flow                   AttemptFlow                      `gorm:"type:text;not null;default:FREE"`
+	Stage                  *AttemptStage                    `gorm:"type:text"`
+	Layout                 datatypes.JSONSlice[AttemptPage] `gorm:"type:jsonb"`
+	ListeningPage          int                              `gorm:"not null;default:0"`
+	ListeningPageStartedAt *time.Time
+
 	Answers []AttemptAnswer `gorm:"foreignKey:AttemptID;references:ID"`
 	History *History        `gorm:"foreignKey:AttemptID;references:ID"`
 }
@@ -57,4 +64,21 @@ const (
 
 	// CLASSROOM_ASSIGNMENT means the attempt belongs to a classroom assignment; ContextID is the assignment ID.
 	AttemptContextTypeClassroomAssignment AttemptContextType = "CLASSROOM_ASSIGNMENT"
+)
+
+type AttemptFlow string
+
+const (
+	// FREE: làm tự do, áp cho THPT và assignment.
+	AttemptFlowFree AttemptFlow = "FREE"
+
+	// TOEIC_STRICT: làm theo trang, phần nghe tuần tự, phần đọc tự do.
+	AttemptFlowTOEICStrict AttemptFlow = "TOEIC_STRICT"
+)
+
+type AttemptStage string
+
+const (
+	AttemptStageListening AttemptStage = "LISTENING"
+	AttemptStageReading   AttemptStage = "READING"
 )

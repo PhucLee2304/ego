@@ -82,6 +82,7 @@ func ToGetExamQuestionsResponse(exam *model.Exam, query GetExamQuestionsQuery) *
 			Questions: []*ExamQuestion{},
 		}
 
+		groupParts := make(map[*ExamQuestionGroup]string, len(section.Groups))
 		for _, group := range section.Groups {
 			groupResp := &ExamQuestionGroup{
 				ID:          group.ID,
@@ -106,6 +107,7 @@ func ToGetExamQuestionsResponse(exam *model.Exam, query GetExamQuestionsQuery) *
 				sort.Slice(groupResp.Questions, func(i, j int) bool {
 					return groupResp.Questions[i].Order < groupResp.Questions[j].Order
 				})
+				groupParts[groupResp] = groupPart(group)
 				sectionResp.Groups = append(sectionResp.Groups, groupResp)
 			}
 		}
@@ -120,8 +122,12 @@ func ToGetExamQuestionsResponse(exam *model.Exam, query GetExamQuestionsQuery) *
 			sectionResp.Questions = append(sectionResp.Questions, toExamQuestion(question))
 		}
 
-		sort.Slice(sectionResp.Groups, func(i, j int) bool {
-			return sectionResp.Groups[i].Order < sectionResp.Groups[j].Order
+		sort.SliceStable(sectionResp.Groups, func(i, j int) bool {
+			left, right := sectionResp.Groups[i], sectionResp.Groups[j]
+			if groupParts[left] != groupParts[right] {
+				return groupParts[left] < groupParts[right]
+			}
+			return left.Order < right.Order
 		})
 		sort.Slice(sectionResp.Questions, func(i, j int) bool {
 			return sectionResp.Questions[i].Order < sectionResp.Questions[j].Order
@@ -144,6 +150,20 @@ func ToGetExamQuestionsResponse(exam *model.Exam, query GetExamQuestionsQuery) *
 		Year:        exam.Year,
 		Sections:    sections,
 	}
+}
+
+// groupPart lấy Part của group; group cũ chưa có cột Part thì lấy theo câu đầu tiên.
+// Part là "1".."7" nên so sánh chuỗi đúng thứ tự; group không có part ("") xếp trước.
+func groupPart(group model.Group) string {
+	if group.Part != nil {
+		return string(*group.Part)
+	}
+	for _, question := range group.Questions {
+		if question.Part != nil {
+			return string(*question.Part)
+		}
+	}
+	return ""
 }
 
 func toExamQuestion(question model.Question) *ExamQuestion {

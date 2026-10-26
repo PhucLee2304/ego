@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func importData(db *gorm.DB, data *seedData, uploads *uploadResult) error {
+func importData(db *gorm.DB, data *seedData, uploads *uploadResult, audio map[string]audioInfo) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := resetExams(tx); err != nil {
 			return err
@@ -19,7 +19,7 @@ func importData(db *gorm.DB, data *seedData, uploads *uploadResult) error {
 		if err := importTHPT(tx, data); err != nil {
 			return err
 		}
-		if err := importTOEIC(tx, data, uploads); err != nil {
+		if err := importTOEIC(tx, data, uploads, audio); err != nil {
 			return err
 		}
 
