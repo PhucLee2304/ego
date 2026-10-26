@@ -16,6 +16,7 @@ var errFlowAttemptExpired = errors.New("attempt expired")
 
 // withFlowAttempt khóa attempt, chạy lazy advance (ghi lại con trỏ nếu đổi) rồi gọi fn trong cùng tx.
 func (s *service) withFlowAttempt(ctx context.Context, userID string, attemptID uint, fn func(repo repository.Repository, attempt *model.Attempt, now time.Time) error) *httpx.HTTPError {
+	finished := false
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		attempt, err := repo.GetAttemptForFlowUpdate(ctx, attemptID, userID)
 		if err != nil {
@@ -33,8 +34,12 @@ func (s *service) withFlowAttempt(ctx context.Context, userID string, attemptID 
 				return err
 			}
 		}
+		finished = listeningOnlyFinished(attempt)
 		return fn(repo, attempt, now)
 	})
+	if submitErr := s.submitIfListeningFinished(ctx, userID, attemptID, finished); submitErr != nil {
+		return httpx.FromError(submitErr, "[ERROR] Failed to submit finished attempt")
+	}
 	if errors.Is(err, errFlowAttemptExpired) {
 		if _, submitErr := s.submitAttempt(ctx, userID, attemptID, nil); submitErr != nil &&
 			!errors.Is(submitErr, ErrAttemptAlreadySubmitted) {

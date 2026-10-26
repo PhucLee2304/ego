@@ -77,6 +77,13 @@ func advanceListening(attempt *model.Attempt, now time.Time, grace time.Duration
 	return changed
 }
 
+// listeningOnlyFinished: attempt strict chỉ gồm trang nghe (vd luyện Part 1) đã nghe hết.
+// Không còn trang nào để làm nên server nộp bài ngay, như khi hết giờ.
+func listeningOnlyFinished(attempt *model.Attempt) bool {
+	return isStrict(attempt) && !inListening(attempt) && len(attempt.Layout) > 0 &&
+		listeningPageCount(attempt.Layout) == len(attempt.Layout)
+}
+
 // pageAccess cho biết trang index có mở được không (bảng ở mục 1.4). Flow FREE mở mọi trang.
 func pageAccess(attempt *model.Attempt, index int) bool {
 	if index < 0 || index >= len(attempt.Layout) {

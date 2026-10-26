@@ -54,7 +54,7 @@ func (s *service) createPrivateExam(ctx context.Context, req dto.CreatePrivateEx
 			Content:           strings.TrimSpace(input.Content),
 			Explanation:       explanation,
 			Order:             i + 1,
-			ExcludedFromScore: false,
+			ExcludedFromScore: input.ExcludedFromScore,
 			Options:           options,
 		}
 	}

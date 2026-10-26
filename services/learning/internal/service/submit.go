@@ -40,6 +40,11 @@ func (s *service) AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int
 	if err != nil {
 		return 0, err
 	}
+	finished, err := s.finishedListeningOnlyAttempts(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	attempts = mergeAttempts(attempts, finished)
 	if len(attempts) == 0 {
 		return 0, nil
 	}
@@ -87,6 +92,37 @@ func (s *service) AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int
 	close(errs)
 
 	return int(submitted.Load()), errors.Join(readErrors(errs)...)
+}
+
+// finishedListeningOnlyAttempts: attempt chỉ có phần nghe đã quá hạn trang nghe cuối
+// (người dùng đóng tab nên không còn request nào kích hoạt lazy advance).
+func (s *service) finishedListeningOnlyAttempts(ctx context.Context, limit int) ([]*model.Attempt, error) {
+	candidates, err := s.repo.GetActiveListeningOnlyAttempts(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	now := s.clock()
+	finished := make([]*model.Attempt, 0, len(candidates))
+	for _, attempt := range candidates {
+		advanceListening(attempt, now, s.listeningGrace())
+		if listeningOnlyFinished(attempt) {
+			finished = append(finished, attempt)
+		}
+	}
+	return finished, nil
+}
+
+func mergeAttempts(first, second []*model.Attempt) []*model.Attempt {
+	seen := make(map[uint]bool, len(first))
+	for _, attempt := range first {
+		seen[attempt.ID] = true
+	}
+	for _, attempt := range second {
+		if !seen[attempt.ID] {
+			first = append(first, attempt)
+		}
+	}
+	return first
 }
 
 func readErrors(errs <-chan error) []error {

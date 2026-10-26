@@ -58,6 +58,8 @@ type AttemptPageQuestion struct {
 	Content          string               `json:"content"`
 	Options          []*AttemptPageOption `json:"options"`
 	SelectedOptionID *uint                `json:"selectedOptionId,omitempty"`
+	// Câu không tính điểm (bài giao do giáo viên đánh dấu): client hiện nhãn "Not scored".
+	ExcludedFromScore bool `json:"excludedFromScore,omitempty"`
 }
 
 type AttemptPageOption struct {
@@ -97,11 +99,12 @@ func ToAttemptPageQuestions(questions []*model.Question, numbers map[uint]int, a
 	result := make([]*AttemptPageQuestion, 0, len(questions))
 	for _, question := range questions {
 		item := &AttemptPageQuestion{
-			ID:               question.ID,
-			Number:           numbers[question.ID],
-			Content:          question.Content,
-			Options:          make([]*AttemptPageOption, 0, len(question.Options)),
-			SelectedOptionID: answers[question.ID],
+			ID:                question.ID,
+			Number:            numbers[question.ID],
+			Content:           question.Content,
+			Options:           make([]*AttemptPageOption, 0, len(question.Options)),
+			SelectedOptionID:  answers[question.ID],
+			ExcludedFromScore: question.ExcludedFromScore,
 		}
 		if hideContent {
 			item.Content = ""

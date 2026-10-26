@@ -138,3 +138,84 @@ func TestStrictAttemptEnforcement(t *testing.T) {
 		}
 	}
 }
+
+// Luyện chỉ phần nghe (Part 2 + 3): nghe xong trang cuối thì server nộp bài như hết giờ, qua
+// cả ba đường: client gửi advance, lazy advance khi có request, và worker khi đóng tab.
+func TestListeningOnlyAttemptAutoSubmit(t *testing.T) {
+	db := learningTestDB(t)
+	ctx := context.Background()
+	exam := seedTOEIC(t, db)
+	if err := db.Model(&model.Group{}).Where("1 = 1").Update("audio_duration_ms", 10000).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(repository.NewRepository(db), &config.AppConfig{
+		TOEICStrictFlowEnabled: true,
+		TOEICListeningGapMs:    [4]int{5000, 5000, 8000, 8000},
+	}, nil, testIdentityClient{}, nil, nil, nil)
+
+	start := func(userID string) (uint, time.Time) {
+		t.Helper()
+		created, httpErr := svc.CreateAttempt(ctx, userID, exam.ID, dto.CreateExamAttemptRequest{
+			Mode: model.AttemptModePractice, Parts: []model.PartCode{model.Part2, model.Part3},
+			ContextType: model.AttemptContextTypeStandalone,
+		})
+		if httpErr != nil {
+			t.Fatal(httpErr)
+		}
+		var startedAt time.Time
+		if err := db.Model(&model.Attempt{}).Select("listening_page_started_at").Where("id = ?", created.ID).Scan(&startedAt).Error; err != nil {
+			t.Fatal(err)
+		}
+		return created.ID, startedAt
+	}
+	requireStatus := func(attemptID uint, want model.AttemptStatus) {
+		t.Helper()
+		var status model.AttemptStatus
+		if err := db.Model(&model.Attempt{}).Select("status").Where("id = ?", attemptID).Scan(&status).Error; err != nil {
+			t.Fatal(err)
+		}
+		if status != want {
+			t.Fatalf("attempt %d status = %s, want %s", attemptID, status, want)
+		}
+	}
+
+	t.Run("advance on last page submits", func(t *testing.T) {
+		id, startedAt := start("listen-advance")
+		now := startedAt
+		service.SetClock(svc, func() time.Time { return now })
+		if _, err := svc.AdvanceListening(ctx, "listen-advance", id, 0); err != nil {
+			t.Fatal(err)
+		}
+		requireStatus(id, model.AttemptStatusInProgress)
+		now = now.Add(10 * time.Second)
+		state, err := svc.AdvanceListening(ctx, "listen-advance", id, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Stage != string(model.AttemptStageReading) {
+			t.Fatalf("stage = %s, want READING", state.Stage)
+		}
+		requireStatus(id, model.AttemptStatusSubmitted)
+	})
+
+	t.Run("lazy advance on request submits", func(t *testing.T) {
+		id, startedAt := start("listen-lazy")
+		service.SetClock(svc, func() time.Time { return startedAt.Add(5 * time.Minute) })
+		_, _ = svc.GetAttemptNavigator(ctx, "listen-lazy", id)
+		requireStatus(id, model.AttemptStatusSubmitted)
+	})
+
+	t.Run("worker submits after tab closed", func(t *testing.T) {
+		id, startedAt := start("listen-worker")
+		service.SetClock(svc, func() time.Time { return startedAt.Add(time.Second) })
+		if _, err := svc.AutoSubmitExpiredAttempts(ctx, 10); err != nil {
+			t.Fatal(err)
+		}
+		requireStatus(id, model.AttemptStatusInProgress)
+		service.SetClock(svc, func() time.Time { return startedAt.Add(5 * time.Minute) })
+		if _, err := svc.AutoSubmitExpiredAttempts(ctx, 10); err != nil {
+			t.Fatal(err)
+		}
+		requireStatus(id, model.AttemptStatusSubmitted)
+	})
+}

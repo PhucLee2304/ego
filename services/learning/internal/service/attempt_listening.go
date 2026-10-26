@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	platformsocket "ego/platform/socket"
@@ -16,6 +17,7 @@ import (
 // startedAt của trang mới = now để độ trễ tải audio không cộng dồn (mục 1.3).
 func (s *service) AdvanceListening(ctx context.Context, userID string, attemptID uint, page int) (*dto.ListeningStateResponse, error) {
 	var response *dto.ListeningStateResponse
+	finished := false
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		attempt, err := repo.GetAttemptForFlowUpdate(ctx, attemptID, userID)
 		if err != nil {
@@ -31,6 +33,7 @@ func (s *service) AdvanceListening(ctx context.Context, userID string, attemptID
 
 		// Từ chối thì tx rollback, kể cả lazy advance: lần đọc sau tính lại y hệt.
 		advanceListening(attempt, now, s.listeningGrace())
+		finished = listeningOnlyFinished(attempt)
 		if accepted, rejectCode := acceptListeningAdvance(attempt, page, now); !accepted {
 			message := "[SOCKET] Listening page does not match current page"
 			if rejectCode == socket.ErrorCodeListeningAdvanceTooEarly {
@@ -42,8 +45,13 @@ func (s *service) AdvanceListening(ctx context.Context, userID string, attemptID
 			return err
 		}
 		response = toListeningState(attempt, now)
+		finished = listeningOnlyFinished(attempt)
 		return nil
 	})
+	// Nộp sau khi tx đóng (submitAttempt mở tx riêng); client nhận ATTEMPT_SUBMITTED.
+	if submitErr := s.submitIfListeningFinished(ctx, userID, attemptID, finished); submitErr != nil {
+		return nil, submitErr
+	}
 	if err != nil {
 		return nil, toAnswerSocketError(err)
 	}
@@ -72,6 +80,18 @@ func acceptListeningAdvance(attempt *model.Attempt, page int, now time.Time) (bo
 		attempt.Stage = &stage
 	}
 	return true, ""
+}
+
+// submitIfListeningFinished nộp attempt chỉ có phần nghe vừa nghe hết (listeningOnlyFinished).
+func (s *service) submitIfListeningFinished(ctx context.Context, userID string, attemptID uint, finished bool) error {
+	if !finished {
+		return nil
+	}
+	if _, err := s.submitAttempt(ctx, userID, attemptID, nil); err != nil &&
+		!errors.Is(err, ErrAttemptAlreadySubmitted) && !errors.Is(err, ErrAttemptCancelled) {
+		return err
+	}
+	return nil
 }
 
 func toListeningState(attempt *model.Attempt, now time.Time) *dto.ListeningStateResponse {

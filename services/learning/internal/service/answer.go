@@ -17,6 +17,7 @@ import (
 // *platformsocket.HandlerError mang mã lỗi WS, handler gửi thẳng cho client.
 func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error) {
 	var response *dto.UpdateAttemptAnswerResponse
+	finished := false
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		attempt, err := repo.GetAttemptForAnswerUpdate(ctx, attemptID, userID)
 		if err != nil {
@@ -40,6 +41,7 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 					return err
 				}
 			}
+			finished = listeningOnlyFinished(attempt)
 			if pageOfQuestion(attempt, questionID) >= 0 && !questionAccess(attempt, questionID) {
 				return platformsocket.NewHandlerError(socket.ErrorCodeQuestionLocked, "[SOCKET] Question is locked")
 			}
@@ -135,6 +137,9 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 		}
 		return nil
 	})
+	if submitErr := s.submitIfListeningFinished(ctx, userID, attemptID, finished); submitErr != nil {
+		return nil, submitErr
+	}
 	if err != nil {
 		return nil, toAnswerSocketError(err)
 	}

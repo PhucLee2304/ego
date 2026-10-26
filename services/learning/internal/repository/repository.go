@@ -35,6 +35,7 @@ type Repository interface {
 	CreateAttempt(ctx context.Context, attempt *model.Attempt) error
 	UpdateAttempt(ctx context.Context, attempt *model.Attempt) error
 	GetExpiredActiveAttempts(ctx context.Context, now time.Time, limit int) ([]*model.Attempt, error)
+	GetActiveListeningOnlyAttempts(ctx context.Context, limit int) ([]*model.Attempt, error)
 
 	// Attempt page (luồng theo trang)
 	GetAttemptForFlowUpdate(ctx context.Context, id uint, userID string) (*model.Attempt, error)

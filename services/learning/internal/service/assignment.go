@@ -55,6 +55,7 @@ func (s *service) CreateAssignments(ctx context.Context, teacherID string, req d
 			Explanation:        question.Explanation,
 			Options:            options,
 			CorrectOptionIndex: question.CorrectOptionIndex,
+			ExcludedFromScore:  question.ExcludedFromScore,
 		}
 	}
 

@@ -108,3 +108,42 @@ func TestPageAndQuestionAccess(t *testing.T) {
 		t.Fatal("out-of-range page or foreign question must be denied")
 	}
 }
+
+func TestListeningOnlyFinished(t *testing.T) {
+	start := time.Date(2026, 10, 26, 8, 0, 0, 0, time.UTC)
+	listeningOnly := func(page int) *model.Attempt {
+		attempt := flowTestAttempt(page, start)
+		attempt.Layout = attempt.Layout[:3]
+		return attempt
+	}
+	reading := model.AttemptStageReading
+
+	tests := []struct {
+		name    string
+		attempt func() *model.Attempt
+		advance time.Duration
+		want    bool
+	}{
+		{name: "listening-only still listening", attempt: func() *model.Attempt { return listeningOnly(1) }, want: false},
+		{name: "listening-only lazily advanced past last page", attempt: func() *model.Attempt { return listeningOnly(2) }, advance: time.Minute, want: true},
+		{name: "has reading pages", attempt: func() *model.Attempt {
+			attempt := flowTestAttempt(3, start)
+			attempt.Stage = &reading
+			return attempt
+		}, want: false},
+		{name: "free flow", attempt: func() *model.Attempt {
+			attempt := listeningOnly(0)
+			attempt.Flow = model.AttemptFlowFree
+			return attempt
+		}, advance: time.Hour, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attempt := tt.attempt()
+			advanceListening(attempt, start.Add(tt.advance), 20*time.Second)
+			if got := listeningOnlyFinished(attempt); got != tt.want {
+				t.Fatalf("listeningOnlyFinished = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

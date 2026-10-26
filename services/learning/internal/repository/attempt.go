@@ -122,6 +122,22 @@ func (r *repository) UpdateAttempt(ctx context.Context, attempt *model.Attempt) 
 		Updates(attempt).Error
 }
 
+// GetActiveListeningOnlyAttempts lấy attempt TOEIC_STRICT đang làm mà layout chỉ gồm
+// trang nghe (vd luyện Part 1), kèm các field để service tính lazy advance.
+func (r *repository) GetActiveListeningOnlyAttempts(ctx context.Context, limit int) ([]*model.Attempt, error) {
+	var attempts []*model.Attempt
+	if err := r.db.WithContext(ctx).
+		Select("id", "user_id", "flow", "stage", "layout", "started_at", "listening_page", "listening_page_started_at").
+		Where("status = ? AND flow = ?", model.AttemptStatusInProgress, model.AttemptFlowTOEICStrict).
+		Where("NOT EXISTS (SELECT 1 FROM jsonb_array_elements(layout) page WHERE page->>'section' <> ?)", model.SectionCodeListening).
+		Order("id ASC").
+		Limit(limit).
+		Find(&attempts).Error; err != nil {
+		return nil, err
+	}
+	return attempts, nil
+}
+
 func (r *repository) GetExpiredActiveAttempts(ctx context.Context, now time.Time, limit int) ([]*model.Attempt, error) {
 	var attempts []*model.Attempt
 	if err := r.db.WithContext(ctx).

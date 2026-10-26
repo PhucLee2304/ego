@@ -33,4 +33,5 @@ type CreatePrivateExamQuestionRequest struct {
 	Explanation        *string  `validate:"omitempty"`
 	Options            []string `validate:"required,len=4,dive,notblank"`
 	CorrectOptionIndex int      `validate:"gte=0,lte=3"`
+	ExcludedFromScore  bool
 }

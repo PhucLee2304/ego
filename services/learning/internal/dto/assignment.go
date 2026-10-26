@@ -43,6 +43,7 @@ type CreateAssignmentQuestionRequest struct {
 	Explanation        *string  `json:"explanation,omitempty"`
 	Options            []string `json:"options" validate:"required,len=4,dive,notblank"`
 	CorrectOptionIndex int      `json:"correctOptionIndex" validate:"gte=0,lte=3"`
+	ExcludedFromScore  bool     `json:"excludedFromScore"`
 }
 
 type SetAssignmentActiveRequest struct {
