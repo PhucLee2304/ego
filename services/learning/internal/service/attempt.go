@@ -147,6 +147,16 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			UserID:         userID,
 			ContextType:    req.ContextType,
 			ContextID:      req.ContextID,
+			Flow:           s.attemptFlowFor(exam, req.Mode),
+			Layout:         buildAttemptLayout(exam, sectionCode, partCodes, s.listeningGap()),
+		}
+		if attempt.Flow == model.AttemptFlowTOEICStrict {
+			stage := model.AttemptStageReading
+			if hasListeningPage(attempt.Layout) {
+				stage = model.AttemptStageListening
+				attempt.ListeningPageStartedAt = &now
+			}
+			attempt.Stage = &stage
 		}
 
 		if err := repo.CreateAttempt(ctx, attempt); err != nil {
@@ -176,6 +186,10 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 	if gradebook != nil {
 		s.publishGradebookEvents([]*gradebookEvent{gradebook})
 	}
+	// Flow strict lấy nội dung theo trang (T3), không trả cả cây đề.
+	if attempt.Flow == model.AttemptFlowTOEICStrict {
+		return dto.ToAttemptResponse(attempt, time.Now()), nil
+	}
 	return dto.ToAttemptResponseWithQuestions(attempt), nil
 }
 
@@ -202,6 +216,9 @@ func (s *service) GetAttemptQuestions(ctx context.Context, userID string, id uin
 
 	if attempt.Status != model.AttemptStatusInProgress {
 		return nil, ErrAttemptNotActive
+	}
+	if attempt.Flow == model.AttemptFlowTOEICStrict {
+		return nil, ErrAttemptPagedFlow
 	}
 
 	if attempt.ExpiresAt != nil && !time.Now().Before(*attempt.ExpiresAt) {

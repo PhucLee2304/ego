@@ -131,6 +131,11 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		if submittedAnswers != nil && attempt.ExpiresAt != nil && !time.Now().Before(*attempt.ExpiresAt) {
 			return ErrAttemptExpired
 		}
+		if submittedAnswers != nil && isStrict(attempt) {
+			advanceListening(attempt, s.clock(), s.listeningGrace())
+			filtered := strictSubmittedAnswers(attempt, *submittedAnswers)
+			submittedAnswers = &filtered
+		}
 
 		questions := make(map[uint]*model.Question, attempt.TotalQuestions)
 		for sectionIdx := range attempt.Exam.Sections {
@@ -301,4 +306,24 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		})
 	}
 	return response, nil
+}
+
+// strictSubmittedAnswers chặn lách khóa qua body submit ở flow strict: câu đang khóa giữ
+// đáp án đã lưu (bỏ qua body), câu đang mở lấy theo body. Câu chưa tới trang không có
+// đáp án đã lưu nên bị bỏ qua và tính sai. Câu không thuộc attempt giữ lại để kiểm tra
+// phía sau trả ErrQuestionNotBelongToAttempt như cũ.
+func strictSubmittedAnswers(attempt *model.Attempt, submitted []dto.SubmitAttemptAnswer) []dto.SubmitAttemptAnswer {
+	result := make([]dto.SubmitAttemptAnswer, 0, len(submitted)+len(attempt.Answers))
+	for _, item := range submitted {
+		if pageOfQuestion(attempt, item.QuestionID) < 0 || questionAccess(attempt, item.QuestionID) {
+			result = append(result, item)
+		}
+	}
+	for _, saved := range attempt.Answers {
+		if saved.SelectedOptionID == nil || pageOfQuestion(attempt, saved.QuestionID) < 0 || questionAccess(attempt, saved.QuestionID) {
+			continue
+		}
+		result = append(result, dto.SubmitAttemptAnswer{QuestionID: saved.QuestionID, SelectedOptionID: saved.SelectedOptionID})
+	}
+	return result
 }

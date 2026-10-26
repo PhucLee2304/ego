@@ -36,6 +36,13 @@ type Repository interface {
 	UpdateAttempt(ctx context.Context, attempt *model.Attempt) error
 	GetExpiredActiveAttempts(ctx context.Context, now time.Time, limit int) ([]*model.Attempt, error)
 
+	// Attempt page (luồng theo trang)
+	GetAttemptForFlowUpdate(ctx context.Context, id uint, userID string) (*model.Attempt, error)
+	UpdateAttemptListening(ctx context.Context, attempt *model.Attempt) error
+	GetQuestionNumbers(ctx context.Context, ids []uint) (map[uint]int, error)
+	GetPageQuestions(ctx context.Context, ids []uint) ([]*model.Question, error)
+	GetGroupByID(ctx context.Context, id uint) (*model.Group, error)
+
 	// Answer
 	GetAttemptForAnswerUpdate(ctx context.Context, id uint, userID string) (*model.Attempt, error)
 	UpsertAttemptAnswer(ctx context.Context, answer *model.AttemptAnswer) error

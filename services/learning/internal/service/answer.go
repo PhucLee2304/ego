@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"time"
 
 	platformsocket "ego/platform/socket"
 	"ego/services/learning/internal/dto"
@@ -28,9 +27,22 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 			return platformsocket.NewHandlerError(socket.ErrorCodeAttemptNotActive, ErrAttemptNotActive.Message)
 		}
 
-		now := time.Now()
+		now := s.clock()
 		if attempt.ExpiresAt != nil && !now.Before(*attempt.ExpiresAt) {
 			return platformsocket.NewHandlerError(socket.ErrorCodeAttemptExpired, ErrAttemptExpired.Message)
+		}
+
+		// Flow strict: chỉ chọn được đáp án ở trang đang mở (mục 1.4). Câu không thuộc
+		// attempt để kiểm tra bên dưới trả QUESTION_NOT_IN_ATTEMPT như cũ.
+		if isStrict(attempt) {
+			if advanceListening(attempt, now, s.listeningGrace()) {
+				if err := repo.UpdateAttemptListening(ctx, attempt); err != nil {
+					return err
+				}
+			}
+			if pageOfQuestion(attempt, questionID) >= 0 && !questionAccess(attempt, questionID) {
+				return platformsocket.NewHandlerError(socket.ErrorCodeQuestionLocked, "[SOCKET] Question is locked")
+			}
 		}
 
 		var matchedQuestion *model.Question

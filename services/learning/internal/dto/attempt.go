@@ -141,6 +141,8 @@ type AttemptResponse struct {
 	ExamID         uint                    `json:"examId"`
 	Exam           *AttemptExamSummary     `json:"exam,omitempty"`
 	Mode           string                  `json:"mode"`
+	Flow           string                  `json:"flow"`
+	Stage          *string                 `json:"stage,omitempty"`
 	Status         string                  `json:"status"`
 	Section        *string                 `json:"section,omitempty"`
 	Parts          []string                `json:"parts,omitempty"`
@@ -187,6 +189,10 @@ func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 		ExamID: attempt.ExamID,
 		Exam:   exam,
 		Mode:   string(attempt.Mode),
+		Flow:   string(attemptFlow(attempt.Flow)),
+		Stage: valuex.MapPtr(attempt.Stage, func(value model.AttemptStage) string {
+			return string(value)
+		}),
 		Status: string(attempt.Status),
 		Section: valuex.MapPtr(attempt.SectionCode, func(value model.SectionCode) string {
 			return string(value)
@@ -204,6 +210,14 @@ func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 		UpdatedAt:      attempt.UpdatedAt,
 		Sections:       nil,
 	}
+}
+
+// attemptFlow: attempt tạo trước khi có cột Flow (hoặc struct dựng tay) coi là FREE.
+func attemptFlow(flow model.AttemptFlow) model.AttemptFlow {
+	if flow == "" {
+		return model.AttemptFlowFree
+	}
+	return flow
 }
 
 func ToAttemptResponseWithQuestions(attempt *model.Attempt) *AttemptResponse {
@@ -227,13 +241,7 @@ func UnmarshalAttemptHistory(data []byte) (*AttemptResponse, error) {
 }
 
 func toAttemptResponseWithQuestions(attempt *model.Attempt, includeResults bool) *AttemptResponse {
-	query := GetExamQuestionsQuery{}
-	if attempt.SectionCode != nil {
-		query.Section = *attempt.SectionCode
-	}
-
-	questionsResp := ToGetExamQuestionsResponse(&attempt.Exam, query)
-	questionsResp.Sections = filterSectionsByParts(questionsResp.Sections, attempt.PartCodes)
+	questionsResp := &GetExamQuestionsResponse{Sections: ToAttemptSections(&attempt.Exam, attempt.SectionCode, attempt.PartCodes)}
 	hideSolutions := attempt.Status == model.AttemptStatusInProgress
 	answers := make(map[uint]model.AttemptAnswer, len(attempt.Answers))
 	for _, answer := range attempt.Answers {
@@ -265,6 +273,16 @@ func toAttemptResponseWithQuestions(attempt *model.Attempt, includeResults bool)
 	resp.Sections = questionsResp.Sections
 
 	return resp
+}
+
+// ToAttemptSections trả cây đề đã lọc theo section/parts của attempt, đã sắp thứ tự
+// (section.order → part → group.order → question.order). Dùng cho response và cho layout.
+func ToAttemptSections(exam *model.Exam, sectionCode *model.SectionCode, parts []model.PartCode) []*ExamQuestionsSection {
+	query := GetExamQuestionsQuery{}
+	if sectionCode != nil {
+		query.Section = *sectionCode
+	}
+	return filterSectionsByParts(ToGetExamQuestionsResponse(exam, query).Sections, parts)
 }
 
 func applyAttemptAnswer(question *ExamQuestion, answer model.AttemptAnswer, includeResults bool) {

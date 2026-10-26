@@ -30,6 +30,8 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /exams/{id}/attempts", mw.Handle(h.CreateAttempt))
 	mux.HandleFunc("GET /attempts", mw.Handle(h.GetAttempts))
 	mux.HandleFunc("GET /attempts/{id}/questions", mw.Handle(h.GetAttemptQuestions))
+	mux.HandleFunc("GET /attempts/{id}/navigator", mw.Handle(h.GetAttemptNavigator))
+	mux.HandleFunc("GET /attempts/{id}/pages/{index}", mw.Handle(h.GetAttemptPage))
 	mux.HandleFunc("POST /attempts/{id}/submit", mw.Handle(h.SubmitAttempt))
 	mux.HandleFunc("POST /attempts/{id}/cancel", mw.Handle(h.CancelAttempt))
 	mux.HandleFunc("GET /attempts/{id}/history", mw.Handle(h.GetAttemptHistory))

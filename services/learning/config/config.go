@@ -32,6 +32,12 @@ type AppConfig struct {
 
 	MaxStudentsPerClass int
 
+	// Luồng TOEIC strict (PLAN_TOEIC_ATTEMPT.md T2). Tắt thì attempt TOEIC tạo ra với Flow = FREE.
+	TOEICStrictFlowEnabled bool
+	// Thời gian trả lời mục tiêu sau audio của mỗi trang nghe, theo part 1..4 (ms).
+	TOEICListeningGapMs   [4]int
+	TOEICListeningGraceMs int
+
 	SeedDir           string
 	SeedUploadWorkers int
 	SeedUploadRetries int
@@ -60,6 +66,15 @@ func LoadAppConfig() (*AppConfig, error) {
 		LiveKitJoinTokenTTL: getDurationEnv("LIVEKIT_JOIN_TOKEN_TTL", 5*time.Minute),
 
 		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
+
+		TOEICStrictFlowEnabled: getBoolEnv("TOEIC_STRICT_FLOW_ENABLED", false),
+		TOEICListeningGapMs: [4]int{
+			getIntEnv("TOEIC_LISTENING_GAP_PART1_MS", 5000, 60000),
+			getIntEnv("TOEIC_LISTENING_GAP_PART2_MS", 5000, 60000),
+			getIntEnv("TOEIC_LISTENING_GAP_PART3_MS", 8000, 60000),
+			getIntEnv("TOEIC_LISTENING_GAP_PART4_MS", 8000, 60000),
+		},
+		TOEICListeningGraceMs: getIntEnv("TOEIC_LISTENING_GRACE_MS", 20000, 120000),
 
 		SeedDir:           getEnv("SEED_DIR", "services/learning/seed"),
 		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
@@ -95,6 +110,18 @@ func getIntEnv(key string, fallback, max int) int {
 	}
 	if parsed > max {
 		return max
+	}
+	return parsed
+}
+
+func getBoolEnv(key string, fallback bool) bool {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
 	}
 	return parsed
 }

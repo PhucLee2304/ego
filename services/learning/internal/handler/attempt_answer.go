@@ -14,4 +14,7 @@ func (h *handler) RegisterSocketHandlers(examsHub *platformsocket.Server) {
 		// Service đã trả lỗi kèm mã WS (ATTEMPT_NOT_FOUND, ATTEMPT_EXPIRED…).
 		return h.service.UpdateAttemptAnswer(ctx, client.UserID(), payload.AttemptID, payload.QuestionID, payload.OptionID)
 	}))
+	examsHub.Handle(socket.EventAttemptListeningAdvance, platformsocket.JSONHandler(func(ctx context.Context, client *platformsocket.Client, payload socket.AttemptListeningAdvancePayload) (any, error) {
+		return h.service.AdvanceListening(ctx, client.UserID(), payload.AttemptID, payload.Page)
+	}))
 }

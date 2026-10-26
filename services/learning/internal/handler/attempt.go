@@ -105,6 +105,7 @@ func (h *handler) GetAttempts(w http.ResponseWriter, r *http.Request) {
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
 // @Failure      404  {object}  httpx.HTTPError
+// @Failure      409  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
 // @Router       /attempts/{id}/questions [get]
 func (h *handler) GetAttemptQuestions(w http.ResponseWriter, r *http.Request) {

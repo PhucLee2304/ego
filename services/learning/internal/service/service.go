@@ -57,6 +57,9 @@ var (
 	ErrAttemptHistoryNotFound      = httpx.NewError(http.StatusNotFound, "[ERROR] Attempt history not found", nil)
 	ErrContextAttemptAlreadyExists = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt already exists for this context", nil)
 	ErrActiveAttemptExists         = httpx.NewError(http.StatusConflict, "[CONFLICT] Active attempt already exists", nil)
+	ErrAttemptPagedFlow            = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt uses paged flow", nil)
+	ErrAttemptPageNotFound         = httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Attempt page not found", nil)
+	ErrAttemptPageLocked           = httpx.NewError(http.StatusConflict, "[CONFLICT] PAGE_LOCKED: Attempt page is locked", nil)
 	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
 )
 
@@ -86,6 +89,11 @@ type Service interface {
 	GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError)
 	SubmitAttempt(ctx context.Context, userID string, attemptID uint, req dto.SubmitAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError)
 	AutoSubmitExpiredAttempts(ctx context.Context, limit int) (int, error)
+
+	// Attempt page (luồng theo trang)
+	GetAttemptNavigator(ctx context.Context, userID string, attemptID uint) (*dto.AttemptNavigatorResponse, *httpx.HTTPError)
+	GetAttemptPage(ctx context.Context, userID string, attemptID uint, index int) (*dto.AttemptPageResponse, *httpx.HTTPError)
+	AdvanceListening(ctx context.Context, userID string, attemptID uint, page int) (*dto.ListeningStateResponse, error)
 
 	// Answer
 	UpdateAttemptAnswer(ctx context.Context, userID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error)
@@ -194,6 +202,7 @@ type service struct {
 	mediaClient        media.Client
 	roomPublisher      EventPublisher // hub /ws/classrooms
 	attemptPublisher   EventPublisher // hub /ws/exams
+	now                func() time.Time
 }
 
 func New(
@@ -213,7 +222,22 @@ func New(
 		mediaClient:        mediaClient,
 		roomPublisher:      roomPublisher,
 		attemptPublisher:   attemptPublisher,
+		now:                time.Now,
 	}
+}
+
+// SetClock thay đồng hồ của service; chỉ dùng trong test (luồng nghe phụ thuộc thời gian).
+func SetClock(svc Service, now func() time.Time) {
+	if s, ok := svc.(*service); ok {
+		s.now = now
+	}
+}
+
+func (s *service) clock() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }
 
 // withRepo trả bản sao service dùng repo của transaction đang mở, để gọi logic
