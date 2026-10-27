@@ -31,7 +31,7 @@ type attemptEvents struct {
 func (e *attemptEvents) publish(userID string, payload any) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.events = append(e.events, publishedEvent{userID: userID, eventType: payload.(map[string]any)["type"].(string)})
+	e.events = append(e.events, publishedEvent{userID: userID, eventType: pushType(payload)})
 }
 
 func (e *attemptEvents) types() []string {

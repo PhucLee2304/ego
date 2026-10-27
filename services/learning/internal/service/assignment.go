@@ -70,14 +70,16 @@ func (s *service) CreateAssignments(ctx context.Context, teacherID string, req d
 		assignments = make([]*model.Assignment, 0, len(req.Schedules))
 		for _, schedule := range req.Schedules {
 			assignments = append(assignments, &model.Assignment{
-				ClassroomID: schedule.ClassroomID,
-				Title:       strings.TrimSpace(req.Title),
-				Description: req.Description,
-				ExamID:      exam.ID,
-				Duration:    schedule.Duration,
-				OpensAt:     schedule.OpensAt,
-				DueAt:       schedule.DueAt,
-				Active:      true,
+				ClassroomID:   schedule.ClassroomID,
+				Title:         strings.TrimSpace(req.Title),
+				Description:   req.Description,
+				ExamID:        exam.ID,
+				Duration:      schedule.Duration,
+				OpensAt:       schedule.OpensAt,
+				DueAt:         schedule.DueAt,
+				Active:        true,
+				Proctored:     schedule.Proctored,
+				MaxViolations: maxViolationsOrDefault(schedule.MaxViolations),
 			})
 		}
 
@@ -164,14 +166,16 @@ func (s *service) AssignExistingExam(ctx context.Context, teacherID string, clas
 		assignments = make([]*model.Assignment, 0, len(req.Schedules))
 		for _, schedule := range req.Schedules {
 			assignments = append(assignments, &model.Assignment{
-				ClassroomID: schedule.ClassroomID,
-				Title:       source.Title,
-				Description: source.Description,
-				ExamID:      source.ExamID,
-				Duration:    schedule.Duration,
-				OpensAt:     schedule.OpensAt,
-				DueAt:       schedule.DueAt,
-				Active:      true,
+				ClassroomID:   schedule.ClassroomID,
+				Title:         source.Title,
+				Description:   source.Description,
+				ExamID:        source.ExamID,
+				Duration:      schedule.Duration,
+				OpensAt:       schedule.OpensAt,
+				DueAt:         schedule.DueAt,
+				Active:        true,
+				Proctored:     schedule.Proctored,
+				MaxViolations: maxViolationsOrDefault(schedule.MaxViolations),
 			})
 		}
 		if err := repo.CreateAssignments(ctx, assignments); err != nil {
@@ -312,4 +316,14 @@ func (s *service) GetAssignment(ctx context.Context, userID string, classroomID 
 		currentUserID = ""
 	}
 	return dto.ToAssignmentResponse(assignment, time.Now(), currentUserID, isTeacher, users), nil
+}
+
+// defaultMaxViolations là số lần vi phạm được phép mặc định (PLAN_ATTEMPT_INTEGRITY.md Q1).
+const defaultMaxViolations = 2
+
+func maxViolationsOrDefault(value *int) int {
+	if value == nil || *value < 1 {
+		return defaultMaxViolations
+	}
+	return *value
 }

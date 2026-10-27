@@ -25,6 +25,9 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		if err != nil {
 			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
 		}
+		if err := s.checkIntegrityConsent(assignment, req.IntegrityConsent); err != nil {
+			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
+		}
 	}
 
 	activeAttempt, activeErr := s.repo.GetActiveAttemptByUserID(ctx, userID)
@@ -158,6 +161,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			}
 			attempt.Stage = &stage
 		}
+		s.applyIntegrityPolicy(attempt, assignment, now)
 
 		if err := repo.CreateAttempt(ctx, attempt); err != nil {
 			return err

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,9 @@ import (
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
+	"ego/services/learning/internal/socket"
+
+	"gorm.io/gorm"
 )
 
 func (s *service) GetEditableAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.EditableAssignmentResponse, *httpx.HTTPError) {
@@ -141,8 +145,15 @@ func (s *service) ResetAssignmentAttempt(ctx context.Context, teacherID string, 
 	if classroom.TeacherID != teacherID {
 		return ErrClassroomForbidden
 	}
-	// Xóa attempt (kèm đáp án, history) và submission trong một transaction.
+	// Xóa attempt (kèm đáp án, history) và submission trong một transaction. Khóa
+	// attempt trước như mọi luồng sửa attempt (PLAN_ATTEMPT_INTEGRITY.md mục 1.6).
+	var resetAttemptID uint
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
+		if attempt, err := repo.GetAssignmentAttemptForIntegrity(ctx, assignment.ID, studentID); err == nil {
+			resetAttemptID = attempt.ID
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 		if _, err := repo.GetAssignmentSubmissionByAssignmentAndStudent(ctx, assignment.ID, studentID); err != nil {
 			return err
 		}
@@ -152,6 +163,13 @@ func (s *service) ResetAssignmentAttempt(ctx context.Context, teacherID string, 
 		return repo.DeleteAssignmentSubmission(ctx, assignment.ID, studentID)
 	}); err != nil {
 		return httpx.FromError(err, errClassroomServiceFailed)
+	}
+	// Học sinh đang làm được mở khóa ngay thay vì kẹt ở màn làm bài.
+	if resetAttemptID != 0 {
+		s.integrity.clearAttempt(resetAttemptID)
+		if s.attemptPublisher != nil {
+			s.attemptPublisher(studentID, socket.AttemptEvent{Type: socket.EventAttemptReset, Payload: socket.AttemptResetPayload{AttemptID: resetAttemptID}})
+		}
 	}
 	return nil
 }

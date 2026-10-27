@@ -46,6 +46,13 @@ func (s *service) UpdateAssignmentSchedule(ctx context.Context, teacherID string
 		assignment.Duration = req.Duration
 		assignment.OpensAt = req.OpensAt
 		assignment.DueAt = req.DueAt
+		// Giám sát chỉ áp cho attempt tạo sau (snapshot, Q4).
+		if req.Proctored != nil {
+			assignment.Proctored = *req.Proctored
+		}
+		if req.MaxViolations != nil {
+			assignment.MaxViolations = *req.MaxViolations
+		}
 		if err := repo.UpdateAssignment(ctx, assignment); err != nil {
 			return err
 		}

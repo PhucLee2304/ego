@@ -14,6 +14,7 @@ import (
 	"ego/services/learning/internal/media"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
+	"ego/services/learning/internal/socket"
 
 	"google.golang.org/grpc"
 )
@@ -61,6 +62,18 @@ var (
 	ErrAttemptPageNotFound         = httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Attempt page not found", nil)
 	ErrAttemptPageLocked           = httpx.NewError(http.StatusConflict, "[CONFLICT] PAGE_LOCKED: Attempt page is locked", nil)
 	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
+)
+
+// Lỗi giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md).
+var (
+	ErrIntegrityConsentRequired   = httpx.NewError(http.StatusBadRequest, "[ERROR] Integrity consent is required for a proctored assignment", nil)
+	ErrIntegrityConsentOutdated   = httpx.NewError(http.StatusConflict, "[CONFLICT] Consent version outdated", nil)
+	ErrAttemptNotProctored        = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt is not proctored", nil)
+	ErrAttemptNotTerminated       = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt is not suspended", nil)
+	ErrIntegrityEventNotFound     = httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Integrity event not found", nil)
+	ErrIntegrityEventNotViolation = httpx.NewError(http.StatusBadRequest, "[ERROR] Only violations can be reviewed", nil)
+	ErrIntegrityReviewConflict    = httpx.NewError(http.StatusConflict, "[CONFLICT] Integrity event was already reviewed with another action", nil)
+	ErrIntegrityLevelInvalid      = httpx.NewError(http.StatusBadRequest, "[ERROR] Level must be LOG, WARNING or VIOLATION", nil)
 )
 
 // Lỗi kiểm tra attempt của assignment (thay ValidateAssignmentAttempt /
@@ -178,6 +191,16 @@ type Service interface {
 
 	// Notification outbox
 	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
+
+	// Attempt integrity (giám sát; WS phía học sinh, REST phía giáo viên)
+	ClaimAttemptSession(ctx context.Context, userID, connectionID string, payload socket.AttemptSessionClaimPayload) (*dto.AttemptSessionClaimResponse, error)
+	RecordIntegrityEvent(ctx context.Context, userID, connectionID string, payload socket.AttemptIntegrityEventPayload) (*dto.IntegrityEventAckResponse, error)
+	ReleaseAttemptConnection(ctx context.Context, connectionID string)
+	GetIntegrityEvents(ctx context.Context, teacherID string, classroomID, assignmentID uint, query dto.IntegrityEventsQuery) ([]*dto.AttemptIntegrityEventResponse, int, *httpx.HTTPError)
+	ReviewIntegrityEvent(ctx context.Context, teacherID string, classroomID, assignmentID uint, eventID string, req dto.ReviewIntegrityEventRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
+	BanAttempt(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string, req dto.BanAttemptRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
+	ReleaseAttemptSession(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
+	ReinstateAttempt(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string, req dto.ReinstateAttemptRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
 }
 
 // NotificationClient là interface hẹp tới notifications service, để test bằng fake.
@@ -202,6 +225,7 @@ type service struct {
 	mediaClient        media.Client
 	roomPublisher      EventPublisher // hub /ws/classrooms
 	attemptPublisher   EventPublisher // hub /ws/exams
+	integrity          *integrityRegistry
 	now                func() time.Time
 }
 
@@ -222,6 +246,7 @@ func New(
 		mediaClient:        mediaClient,
 		roomPublisher:      roomPublisher,
 		attemptPublisher:   attemptPublisher,
+		integrity:          newIntegrityRegistry(),
 		now:                time.Now,
 	}
 }

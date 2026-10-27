@@ -90,3 +90,19 @@ type AttemptIntegrityEvent struct {
 	ReviewedAt *time.Time
 	ReviewedBy *string `gorm:"type:text"`
 }
+
+// AttemptIntegrityEventRow là event kèm học sinh của attempt (kết quả join, không phải bảng).
+type AttemptIntegrityEventRow struct {
+	AttemptIntegrityEvent `gorm:"embedded"`
+	StudentID             string
+}
+
+// AttemptIntegritySummary là tóm tắt giám sát của một attempt cho gradebook.
+type AttemptIntegritySummary struct {
+	AttemptID         uint
+	Proctored         bool
+	ViolationCount    int
+	PendingViolations int
+	IntegrityOutcome  IntegrityOutcome
+	TerminationReason *IntegrityTerminationReason
+}

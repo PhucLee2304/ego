@@ -59,6 +59,19 @@ func (s *service) GetGradebook(ctx context.Context, teacherID string, classroomI
 
 	now := time.Now()
 	response := dto.ToAssignmentResponse(assignment, now, "", true, users)
+	if len(response.Submissions) > 0 {
+		summaries, err := s.repo.GetAssignmentIntegritySummaries(ctx, assignment.ID)
+		if err != nil {
+			return nil, httpx.FromError(err, errClassroomServiceFailed)
+		}
+		byAttempt := make(map[uint]*model.AttemptIntegritySummary, len(summaries))
+		for _, summary := range summaries {
+			byAttempt[summary.AttemptID] = summary
+		}
+		for _, submission := range response.Submissions {
+			dto.ApplySubmissionIntegrity(submission, byAttempt[submission.AttemptID])
+		}
+	}
 	usersByID := dto.ToUserInfoMap(users)
 	submittedStudents := make(map[string]struct{}, len(response.Submissions))
 	for _, submission := range response.Submissions {

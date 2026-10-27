@@ -137,7 +137,20 @@ func readErrors(errs <-chan error) []error {
 // thay toàn bộ đáp án đã lưu) hoặc auto-submit/lazy auto-submit (nil, chấm lại
 // đáp án đã lưu qua WS).
 func (s *service) submitAttempt(ctx context.Context, userID string, attemptID uint, submittedAnswers *[]dto.SubmitAttemptAnswer) (*dto.AttemptResponse, error) {
-	if submittedAnswers == nil && s.attemptPublisher != nil {
+	return s.finishAttempt(ctx, userID, attemptID, submittedAnswers, nil)
+}
+
+// attemptTermination là thông tin đình chỉ khi finishAttempt chốt bài vì vi phạm
+// (PLAN_ATTEMPT_INTEGRITY.md mục 1.2): bài vẫn được chấm (RawScore) nhưng Score = 0.
+type attemptTermination struct {
+	reason model.IntegrityTerminationReason
+	actor  string
+}
+
+// finishAttempt là submitAttempt kèm đình chỉ tùy chọn. Đình chỉ chỉ chốt được bài
+// còn ACTIVE; bài đã nộp hoặc đã hủy trả ErrAttemptAlreadySubmitted / ErrAttemptCancelled.
+func (s *service) finishAttempt(ctx context.Context, userID string, attemptID uint, submittedAnswers *[]dto.SubmitAttemptAnswer, termination *attemptTermination) (*dto.AttemptResponse, error) {
+	if submittedAnswers == nil && termination == nil && s.attemptPublisher != nil {
 		s.attemptPublisher(userID, map[string]any{
 			"type":    "ATTEMPT_SUBMITTING",
 			"payload": map[string]any{"attemptId": attemptID},
@@ -151,6 +164,9 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 			return err
 		}
 
+		if termination != nil && attempt.Status == model.AttemptStatusSubmitted {
+			return ErrAttemptAlreadySubmitted
+		}
 		switch attempt.Status {
 		case model.AttemptStatusSubmitted:
 			if attempt.History == nil {
@@ -291,6 +307,13 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		score = valuex.RoundFloat(score, 2)
 
 		attempt.SubmittedAt = &now
+		if termination != nil {
+			reason := termination.reason
+			attempt.IntegrityOutcome = model.IntegrityOutcomeTerminated
+			attempt.TerminatedAt = &now
+			attempt.TerminationReason = &reason
+			attempt.TerminatedBy = &termination.actor
+		}
 		applyScore(attempt, correctAnswers, score)
 		attempt.Answers = answers
 		if err := finalizeAttempt(ctx, repo, attempt); err != nil {
@@ -318,8 +341,12 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 			if err != nil {
 				return err
 			}
+			title, body := "Assignment graded", "Your assignment was submitted and graded"
+			if termination != nil {
+				title, body = "Assignment suspended", "Your assignment was suspended for violating the exam rules"
+			}
 			if err := createNotificationOutbox(ctx, repo, model.NotificationSourceAttempt, fmt.Sprintf("attempt:%d:submitted", attempt.ID), []string{userID},
-				"Assignment graded", "Your assignment was submitted and graded", "ATTEMPT", attempt.ID, 0, time.Time{}); err != nil {
+				title, body, "ATTEMPT", attempt.ID, 0, time.Time{}); err != nil {
 				return err
 			}
 		}

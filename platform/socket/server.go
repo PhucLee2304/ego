@@ -195,7 +195,7 @@ func (s *Server) dispatch(ctx context.Context, client *Client, message Message) 
 				Str("code", string(handlerErr.Code)).
 				Dur("duration", time.Since(startedAt)).
 				Msg("[SOCKET] Message completed")
-			client.SendError(message.RequestID, handlerErr.Code, handlerErr.Message)
+			client.sendError(message.RequestID, handlerErr.Code, handlerErr.Message, handlerErr.Details)
 			return
 		}
 

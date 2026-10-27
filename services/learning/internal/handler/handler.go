@@ -64,6 +64,13 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("DELETE /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt", mw.Handle(h.ResetAssignmentAttempt))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/audits", mw.Handle(h.GetAssignmentAudits))
 
+	// Attempt integrity (giám sát)
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/integrity-events", mw.Handle(h.GetIntegrityEvents))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/integrity-events/{eventId}/review", mw.Handle(h.ReviewIntegrityEvent))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt/ban", mw.Handle(h.BanAttempt))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt/release-session", mw.Handle(h.ReleaseAttemptSession))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt/reinstate", mw.Handle(h.ReinstateAttempt))
+
 	// Gradebook
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/gradebook", mw.Handle(h.GetGradebook))
 	mux.HandleFunc("GET /classrooms/{id}/gradebook", mw.Handle(h.GetClassGradebook))

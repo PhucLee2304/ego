@@ -63,3 +63,13 @@ Server trả về khi xử lý lỗi:
 
 `ack` nghĩa là server đã chạy handler tương ứng thành công. Với các event cập nhật answer,
 handler chỉ nên trả thành công sau khi upsert database thành công.
+
+Handler có thể kèm dữ liệu máy đọc được qua `NewHandlerError(code, msg).WithDetails(v)`;
+server gửi nó trong field `details` (bỏ qua khi rỗng), ví dụ
+`{"code": "SESSION_RECOVERING", "details": {"retryAfterMs": 20000}}`.
+
+## Kết nối và ngắt kết nối
+
+- Mỗi kết nối có id riêng `Client.ID()` (một user có thể mở nhiều kết nối).
+- `Server.OnDisconnect(func(*Client))` chạy sau khi kết nối bị gỡ khỏi server, ngoài khóa,
+  nên hook được phép gọi lại `BroadcastToUser`.

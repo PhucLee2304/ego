@@ -35,6 +35,20 @@ type Repository interface {
 	CreateAttempt(ctx context.Context, attempt *model.Attempt) error
 	UpdateAttempt(ctx context.Context, attempt *model.Attempt) error
 	FinalizeAttempt(ctx context.Context, attempt *model.Attempt) (bool, error)
+
+	// Attempt integrity (giám sát)
+	GetAttemptForIntegrity(ctx context.Context, id uint) (*model.Attempt, error)
+	GetAssignmentAttemptForIntegrity(ctx context.Context, assignmentID uint, studentID string) (*model.Attempt, error)
+	UpdateAttemptSession(ctx context.Context, attempt *model.Attempt) error
+	UpdateAttemptIntegrity(ctx context.Context, attempt *model.Attempt) error
+	TouchAttemptSession(ctx context.Context, attemptID uint, at time.Time) error
+	CreateIntegrityEvent(ctx context.Context, event *model.AttemptIntegrityEvent) error
+	GetIntegrityEvent(ctx context.Context, attemptID uint, eventID string) (*model.AttemptIntegrityEvent, error)
+	HasIntegrityViolationForEpisode(ctx context.Context, attemptID uint, startEventID string) (bool, error)
+	GetAssignmentIntegrityEvent(ctx context.Context, assignmentID uint, eventID string) (*model.AttemptIntegrityEventRow, error)
+	MarkIntegrityEventReviewed(ctx context.Context, id uint, review model.IntegrityReview, by string, at time.Time) (bool, error)
+	GetAssignmentIntegrityEvents(ctx context.Context, assignmentID uint, filter IntegrityEventFilter, limit, offset int32) ([]*model.AttemptIntegrityEventRow, int64, error)
+	GetAssignmentIntegritySummaries(ctx context.Context, assignmentID uint) ([]*model.AttemptIntegritySummary, error)
 	GetExpiredActiveAttempts(ctx context.Context, now time.Time, limit int) ([]*model.Attempt, error)
 	GetActiveListeningOnlyAttempts(ctx context.Context, limit int) ([]*model.Attempt, error)
 

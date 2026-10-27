@@ -38,10 +38,19 @@ type AppConfig struct {
 	TOEICListeningGapMs   [4]int
 	TOEICListeningGraceMs int
 
+	// Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md mục 1.3–1.7).
+	IntegrityAwayGraceMs     int
+	IntegrityGraceMs         int
+	IntegrityTakeoverDelayMs int
+	IntegrityConsentVersion  string
+
 	SeedDir           string
 	SeedUploadWorkers int
 	SeedUploadRetries int
 }
+
+// DefaultIntegrityConsentVersion phải khớp hằng integrityConsentVersion của FE.
+const DefaultIntegrityConsentVersion = "2026-10-v1"
 
 func LoadAppConfig() (*AppConfig, error) {
 	config := &AppConfig{
@@ -75,6 +84,11 @@ func LoadAppConfig() (*AppConfig, error) {
 			getIntEnv("TOEIC_LISTENING_GAP_PART4_MS", 8000, 60000),
 		},
 		TOEICListeningGraceMs: getIntEnv("TOEIC_LISTENING_GRACE_MS", 20000, 120000),
+
+		IntegrityAwayGraceMs:     getIntEnv("INTEGRITY_AWAY_GRACE_MS", 3000, 60000),
+		IntegrityGraceMs:         getIntEnv("INTEGRITY_GRACE_MS", 10000, 60000),
+		IntegrityTakeoverDelayMs: getIntEnv("INTEGRITY_TAKEOVER_DELAY_MS", 30000, 600000),
+		IntegrityConsentVersion:  getEnv("INTEGRITY_CONSENT_VERSION", DefaultIntegrityConsentVersion),
 
 		SeedDir:           getEnv("SEED_DIR", "services/learning/seed"),
 		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),

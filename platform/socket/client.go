@@ -78,12 +78,17 @@ func (c *Client) SendAck(requestID string, payload any) {
 }
 
 func (c *Client) SendError(requestID string, code ErrorCode, message string) {
+	c.sendError(requestID, code, message, nil)
+}
+
+func (c *Client) sendError(requestID string, code ErrorCode, message string, details any) {
 	c.Send(Error{
 		Type:      MessageTypeError,
 		RequestID: requestID,
 		Success:   false,
 		Code:      string(code),
 		Message:   message,
+		Details:   details,
 	})
 }
 
