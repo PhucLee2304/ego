@@ -22,6 +22,9 @@ services:
           { "url": "/topics/docs/doc.json", "name": "Topics" },
           { "url": "/learning/docs/doc.json", "name": "Learning" },
           { "url": "/notifications/docs/doc.json", "name": "Notifications" }
+          { "url": "/exams/docs/doc.json", "name": "Exams" },
+          { "url": "/dictionary/docs/doc.json", "name": "Dictionary" },
+          { "url": "/grammar/docs/doc.json", "name": "Grammar" }
         ]
     networks:
       - ego-network
@@ -35,6 +38,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - C:\Users\Admin\Desktop\AppTiengAnh\assets:/etc/nginx/assets:ro
     depends_on:
       identity:
         condition: service_healthy
@@ -47,6 +51,10 @@ services:
       notifications:
         condition: service_healthy
       posts:
+        condition: service_healthy
+      dictionary:
+        condition: service_healthy
+      grammar:
         condition: service_healthy
     networks:
       - ego-network
@@ -342,6 +350,115 @@ services:
       - ego-network
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${POSTS_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  dictionary:
+    <<: *go-service
+    build:
+      context: .
+      dockerfile: services/dictionary/Dockerfile
+      target: server
+    container_name: dictionary
+    env_file:
+      - ./services/dictionary/.env
+    volumes:
+      - C:\Users\Admin\Desktop\AppTiengAnh\assets:/app/assets:ro
+    depends_on:
+      dictionary-db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+
+  dictionary-seed:
+    build:
+      context: .
+      dockerfile: services/dictionary/Dockerfile
+      target: seed
+    container_name: dictionary-seed
+    profiles:
+      - seed
+    env_file:
+      - ./services/dictionary/.env
+    volumes:
+      - C:\Users\Admin\Desktop\AppTiengAnh\assets:/app/assets:ro
+      - C:\Users\Admin\Desktop\AppTiengAnh:/app/services/dictionary/cmd/seed:ro
+    depends_on:
+      dictionary-db:
+        condition: service_healthy
+    networks:
+      - ego-network
+
+  dictionary-db:
+    image: postgres:15.8-alpine
+    container_name: dictionary-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DICTIONARY_DB_USER}
+      POSTGRES_PASSWORD: ${DICTIONARY_DB_PASSWORD}
+      POSTGRES_DB: ${DICTIONARY_DB_NAME}
+    ports:
+      - "${DICTIONARY_DB_PORT}:5432"
+    volumes:
+      - ./data/dictionary-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DICTIONARY_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  grammar:
+    <<: *go-service
+    build:
+      context: .
+      dockerfile: services/grammar/Dockerfile
+      target: server
+    container_name: grammar
+    env_file:
+      - ./services/grammar/.env
+    depends_on:
+      grammar-db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+
+  grammar-seed:
+    build:
+      context: .
+      dockerfile: services/grammar/Dockerfile
+      target: seed
+    container_name: grammar-seed
+    profiles:
+      - seed
+    env_file:
+      - ./services/grammar/.env
+    volumes:
+      - C:\Users\Admin\NguPhapTiengAnh:/app/services/grammar/cmd/seed:ro
+    depends_on:
+      grammar-db:
+        condition: service_healthy
+    networks:
+      - ego-network
+
+  grammar-db:
+    image: postgres:15.8-alpine
+    container_name: grammar-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${GRAMMAR_DB_USER}
+      POSTGRES_PASSWORD: ${GRAMMAR_DB_PASSWORD}
+      POSTGRES_DB: ${GRAMMAR_DB_NAME}
+    ports:
+      - "${GRAMMAR_DB_PORT}:5432"
+    volumes:
+      - ./data/grammar-db:/var/lib/postgresql/data
+    networks:
+      - ego-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${GRAMMAR_DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5
