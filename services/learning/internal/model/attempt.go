@@ -36,6 +36,28 @@ type Attempt struct {
 	ListeningPage          int                              `gorm:"not null;default:0"`
 	ListeningPageStartedAt *time.Time
 
+	// Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md mục 1.2–1.8). Policy chụp lúc tạo
+	// attempt, sửa assignment sau đó không ảnh hưởng.
+	Proctored               bool                                         `gorm:"not null;default:false"`
+	IntegrityPolicy         *datatypes.JSONType[IntegrityPolicySnapshot] `gorm:"type:jsonb"`
+	IntegrityConsentAt      *time.Time
+	IntegrityConsentVersion *string `gorm:"type:text"`
+	ViolationCount          int     `gorm:"not null;default:0"`
+	SessionTokenHash        *string `gorm:"type:text"`
+	SessionEpoch            int     `gorm:"not null;default:0"`
+	SessionLastSeenAt       *time.Time
+	GraceUntil              *time.Time
+
+	// RawScore là điểm chấm từ đáp án; Score là điểm cuối, chỉ ghi qua applyScore.
+	RawScore          *float64         `gorm:"type:numeric(5,2)"`
+	IntegrityOutcome  IntegrityOutcome `gorm:"type:text;not null;default:NONE"`
+	TerminatedAt      *time.Time
+	TerminationReason *IntegrityTerminationReason `gorm:"type:text"`
+	TerminatedBy      *string                     `gorm:"type:text"`
+	ReinstatedAt      *time.Time
+	ReinstatedBy      *string `gorm:"type:text"`
+	ReinstateNote     *string `gorm:"type:text"`
+
 	Answers []AttemptAnswer `gorm:"foreignKey:AttemptID;references:ID"`
 	History *History        `gorm:"foreignKey:AttemptID;references:ID"`
 }

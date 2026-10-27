@@ -27,9 +27,10 @@ type Server struct {
 	readLimit             int64
 	sendBuffer            int
 
-	mu       sync.RWMutex
-	handlers map[MessageType]HandlerFunc
-	clients  map[string]map[*Client]struct{}
+	mu           sync.RWMutex
+	handlers     map[MessageType]HandlerFunc
+	clients      map[string]map[*Client]struct{}
+	onDisconnect []func(*Client)
 }
 
 func NewServer(identityServiceClient identityClient.IdentityServiceClient) *Server {
@@ -52,6 +53,13 @@ func (s *Server) Handle(messageType MessageType, handler HandlerFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.handlers[messageType] = handler
+}
+
+// OnDisconnect đăng ký hàm chạy sau khi một kết nối bị gỡ khỏi server.
+func (s *Server) OnDisconnect(fn func(*Client)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onDisconnect = append(s.onDisconnect, fn)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -109,13 +117,18 @@ func (s *Server) register(client *Client) {
 
 func (s *Server) unregister(client *Client) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if userClients, ok := s.clients[client.userID]; ok {
 		delete(userClients, client)
 		if len(userClients) == 0 {
 			delete(s.clients, client.userID)
 		}
+	}
+	hooks := append([]func(*Client){}, s.onDisconnect...)
+	s.mu.Unlock()
+
+	// Gọi ngoài khóa để hook được phép dùng lại server (vd BroadcastToUser).
+	for _, fn := range hooks {
+		fn(client)
 	}
 }
 

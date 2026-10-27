@@ -2,6 +2,8 @@ package socket
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 type Client struct {
 	server *Server
 	conn   *websocket.Conn
+	id     string
 	userID string
 	send   chan any
 	mu     sync.RWMutex
@@ -26,6 +29,7 @@ func newClient(server *Server, conn *websocket.Conn, userID string) *Client {
 	return &Client{
 		server: server,
 		conn:   conn,
+		id:     newClientID(),
 		userID: userID,
 		send:   make(chan any, server.sendBuffer),
 		done:   make(chan struct{}),
@@ -34,6 +38,17 @@ func newClient(server *Server, conn *websocket.Conn, userID string) *Client {
 
 func (c *Client) UserID() string {
 	return c.userID
+}
+
+// ID định danh riêng từng kết nối (một user có thể có nhiều kết nối).
+func (c *Client) ID() string {
+	return c.id
+}
+
+func newClientID() string {
+	buf := make([]byte, 16)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
 }
 
 func (c *Client) Send(payload any) {

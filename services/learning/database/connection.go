@@ -47,6 +47,7 @@ func Migrate(db *gorm.DB) error {
 		&model.RoomParticipantState{},
 		&model.RoomModerationAudit{},
 		&model.NotificationOutbox{},
+		&model.AttemptIntegrityEvent{},
 	)
 	if err != nil {
 		return err
@@ -59,6 +60,9 @@ func Migrate(db *gorm.DB) error {
 		model.CreateOptionQuestionKeyUniqueIndexSQL,
 		model.CreateAssignmentQuestionOptionsConstraintSQL,
 		model.CreateRoomParticipantOpenSessionUniqueIndexSQL,
+		model.CreateAttemptIntegrityEventUniqueIndexSQL,
+		model.CreateAttemptIntegrityViolationEpisodeUniqueIndexSQL,
+		model.CreateIntegrityConstraintsSQL,
 	} {
 		if err := db.Exec(sql).Error; err != nil {
 			return err

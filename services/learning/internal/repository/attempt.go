@@ -118,8 +118,23 @@ func (r *repository) CreateAttempt(ctx context.Context, attempt *model.Attempt) 
 func (r *repository) UpdateAttempt(ctx context.Context, attempt *model.Attempt) error {
 	return r.db.WithContext(ctx).
 		Model(attempt).
-		Select("status", "submitted_at", "correct_answers", "score", "updated_at").
+		Select("status", "submitted_at", "correct_answers", "raw_score", "score", "updated_at").
 		Updates(attempt).Error
+}
+
+// FinalizeAttempt ghi kết quả chốt chỉ khi attempt còn ACTIVE; false nếu đã bị
+// transaction khác chốt trước.
+func (r *repository) FinalizeAttempt(ctx context.Context, attempt *model.Attempt) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Attempt{}).
+		Where("id = ? AND status = ?", attempt.ID, model.AttemptStatusInProgress).
+		Select("status", "submitted_at", "correct_answers", "raw_score", "score",
+			"integrity_outcome", "terminated_at", "termination_reason", "terminated_by", "updated_at").
+		Updates(attempt)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 // GetActiveListeningOnlyAttempts lấy attempt TOEIC_STRICT đang làm mà layout chỉ gồm

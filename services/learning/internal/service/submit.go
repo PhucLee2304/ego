@@ -290,12 +290,10 @@ func (s *service) submitAttempt(ctx context.Context, userID string, attemptID ui
 		}
 		score = valuex.RoundFloat(score, 2)
 
-		attempt.Status = model.AttemptStatusSubmitted
 		attempt.SubmittedAt = &now
-		attempt.CorrectAnswers = &correctAnswers
-		attempt.Score = &score
+		applyScore(attempt, correctAnswers, score)
 		attempt.Answers = answers
-		if err := repo.UpdateAttempt(ctx, attempt); err != nil {
+		if err := finalizeAttempt(ctx, repo, attempt); err != nil {
 			return err
 		}
 

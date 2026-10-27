@@ -96,8 +96,8 @@ func (s *service) correctPrivateExam(ctx context.Context, repo repository.Reposi
 			return nil, err
 		}
 		score = valuex.RoundFloat(score, 2)
-		attempt.CorrectAnswers, attempt.Score = &correctAnswers, &score
-		afterScore := score
+		applyScore(attempt, correctAnswers, score)
+		afterScore := *attempt.Score
 		scoreChanges = append(scoreChanges, model.ExamAuditScoreChange{AttemptID: attempt.ID, StudentID: attempt.UserID, BeforeScore: beforeScore, AfterScore: &afterScore})
 		if err := repo.UpdateAttempt(ctx, attempt); err != nil {
 			return nil, err

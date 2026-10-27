@@ -109,3 +109,30 @@ const CreateRoomParticipantOpenSessionUniqueIndexSQL = `
 	ON room_participants (room_id, user_id)
 	WHERE left_at IS NULL AND deleted_at IS NULL;
 `
+
+const CreateAttemptIntegrityEventUniqueIndexSQL = `
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_integrity_events_event
+	ON attempt_integrity_events (attempt_id, event_id);
+`
+
+// Một episode rời màn chỉ được tính vi phạm một lần.
+const CreateAttemptIntegrityViolationEpisodeUniqueIndexSQL = `
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_integrity_events_violation_episode
+	ON attempt_integrity_events (attempt_id, start_event_id)
+	WHERE level = 'VIOLATION' AND start_event_id IS NOT NULL;
+`
+
+// Lớp bảo vệ cuối cho điểm: bài bị đình chỉ luôn 0 điểm; MaxViolations ≥ 1.
+const CreateIntegrityConstraintsSQL = `
+	DO $$
+	BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_attempts_terminated_score') THEN
+			ALTER TABLE attempts ADD CONSTRAINT chk_attempts_terminated_score
+			CHECK (integrity_outcome <> 'TERMINATED' OR score = 0);
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_assignments_max_violations') THEN
+			ALTER TABLE assignments ADD CONSTRAINT chk_assignments_max_violations
+			CHECK (max_violations >= 1);
+		END IF;
+	END $$;
+`
