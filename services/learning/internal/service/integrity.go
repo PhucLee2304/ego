@@ -88,12 +88,6 @@ func (s *service) integrityCfg() integrityConfig {
 	if s.cfg == nil {
 		return cfg
 	}
-	if s.cfg.IntegrityAwayGraceMs > 0 {
-		cfg.AwayGrace = time.Duration(s.cfg.IntegrityAwayGraceMs) * time.Millisecond
-	}
-	if s.cfg.IntegrityGraceMs > 0 {
-		cfg.Grace = time.Duration(s.cfg.IntegrityGraceMs) * time.Millisecond
-	}
 	if s.cfg.IntegrityTakeoverDelayMs > 0 {
 		cfg.TakeoverDelay = time.Duration(s.cfg.IntegrityTakeoverDelayMs) * time.Millisecond
 	}
@@ -134,18 +128,14 @@ func (s *service) applyIntegrityPolicy(attempt *model.Attempt, assignment *model
 	version := s.integrityConsentVersion()
 	policy := model.IntegrityPolicySnapshot{
 		MaxViolations:   maxViolations,
-		AwayGraceMs:     int(cfg.AwayGrace / time.Millisecond),
-		GraceMs:         int(cfg.Grace / time.Millisecond),
 		TakeoverDelayMs: int(cfg.TakeoverDelay / time.Millisecond),
 		ConsentVersion:  version,
 	}
 	snapshot := datatypes.NewJSONType(policy)
-	grace := now.Add(cfg.Grace)
 	attempt.Proctored = true
 	attempt.IntegrityPolicy = &snapshot
 	attempt.IntegrityConsentAt = &now
 	attempt.IntegrityConsentVersion = &version
-	attempt.GraceUntil = &grace
 }
 
 func integrityNotFound() error {
@@ -200,11 +190,9 @@ func (s *service) ClaimAttemptSession(ctx context.Context, userID, connectionID 
 			return err
 		}
 		previousEpoch := attempt.SessionEpoch
-		grace := now.Add(cfg.Grace)
 		attempt.SessionTokenHash = &hash
 		attempt.SessionEpoch = decision.Epoch
 		attempt.SessionLastSeenAt = &now
-		attempt.GraceUntil = &grace
 		if err := repo.UpdateAttemptSession(ctx, attempt); err != nil {
 			return err
 		}
@@ -223,7 +211,6 @@ func (s *service) ClaimAttemptSession(ctx context.Context, userID, connectionID 
 		response = &dto.AttemptSessionClaimResponse{
 			SessionToken: token,
 			SessionEpoch: attempt.SessionEpoch,
-			GraceUntil:   attempt.GraceUntil,
 			State:        dto.ToIntegrityState(attempt),
 		}
 		return nil
@@ -275,7 +262,6 @@ func (s *service) RecordIntegrityEvent(ctx context.Context, userID, connectionID
 		return nil, platformsocket.NewHandlerError(socket.ErrorCodeIntegrityEventInvalid, "[SOCKET] AWAY_END requires startEventId")
 	}
 
-	cfg := s.integrityCfg()
 	var response *dto.IntegrityEventAckResponse
 	var events []pendingEvent
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
@@ -315,42 +301,14 @@ func (s *service) RecordIntegrityEvent(ctx context.Context, userID, connectionID
 		}
 		switch eventType {
 		case model.IntegrityEventAwayStart:
-			event.GraceUntil = attempt.GraceUntil
+			event.Level = classifyAwayStart(event, attempt)
 		case model.IntegrityEventAwayEnd:
-			if err := classifyAwayEnd(ctx, repo, attempt, event, cfg); err != nil {
+			if err := recordAwayDuration(ctx, repo, attempt, event); err != nil {
 				return err
 			}
 		}
-		if event.Level == model.IntegrityLevelViolation {
-			attempt.ViolationCount++
-			violationNo := attempt.ViolationCount
-			event.ViolationNo = &violationNo
-			if err := repo.UpdateAttemptIntegrity(ctx, attempt); err != nil {
-				return err
-			}
-		}
-		if err := repo.CreateIntegrityEvent(ctx, event); err != nil {
+		if attempt, err = s.storeIntegrityEvent(ctx, repo, attempt, event, &events); err != nil {
 			return err
-		}
-
-		if event.Level == model.IntegrityLevelViolation {
-			events = append(events, pendingEvent{userID: attempt.UserID, payload: socket.AttemptEvent{
-				Type: socket.EventAttemptViolation,
-				Payload: socket.AttemptViolationPayload{
-					AttemptID: attempt.ID, EventID: event.EventID,
-					ViolationCount: attempt.ViolationCount, MaxViolations: dto.ToIntegrityState(attempt).MaxViolations,
-				},
-			}})
-		}
-		if exceededMaxViolations(attempt) {
-			if attempt, err = s.terminateAttempt(ctx, repo, attempt, model.IntegrityTerminationMaxViolations, "system", &events); err != nil {
-				return err
-			}
-		}
-		if !event.Stale {
-			if err := s.queueIntegrityUpdate(ctx, repo, attempt, event, &events); err != nil {
-				return err
-			}
 		}
 		response = integrityAck(event, attempt, false)
 		return nil
@@ -362,15 +320,49 @@ func (s *service) RecordIntegrityEvent(ctx context.Context, userID, connectionID
 	return response, nil
 }
 
-// classifyAwayEnd đặt mức cho AWAY_END theo AWAY_START tương ứng (mục 1.3).
-func classifyAwayEnd(ctx context.Context, repo repository.Repository, attempt *model.Attempt, end *model.AttemptIntegrityEvent, cfg integrityConfig) error {
-	if end.Stale {
-		return nil
+// storeIntegrityEvent ghi event trong tx đã khóa attempt. Event mức VIOLATION thì
+// tăng ViolationCount, push ATTEMPT_VIOLATION và đình chỉ khi vượt ngưỡng. Gom push
+// cho giáo viên (trừ event stale). Trả attempt sau cùng (đã đọc lại nếu bị đình chỉ).
+func (s *service) storeIntegrityEvent(ctx context.Context, repo repository.Repository, attempt *model.Attempt, event *model.AttemptIntegrityEvent, events *[]pendingEvent) (*model.Attempt, error) {
+	if event.Level == model.IntegrityLevelViolation {
+		attempt.ViolationCount++
+		violationNo := attempt.ViolationCount
+		event.ViolationNo = &violationNo
+		if err := repo.UpdateAttemptIntegrity(ctx, attempt); err != nil {
+			return nil, err
+		}
 	}
+	if err := repo.CreateIntegrityEvent(ctx, event); err != nil {
+		return nil, err
+	}
+	if event.Level == model.IntegrityLevelViolation {
+		*events = append(*events, pendingEvent{userID: attempt.UserID, payload: socket.AttemptEvent{
+			Type: socket.EventAttemptViolation,
+			Payload: socket.AttemptViolationPayload{
+				AttemptID: attempt.ID, EventID: event.EventID,
+				ViolationCount: attempt.ViolationCount, MaxViolations: dto.ToIntegrityState(attempt).MaxViolations,
+			},
+		}})
+	}
+	if exceededMaxViolations(attempt) {
+		var err error
+		if attempt, err = s.terminateAttempt(ctx, repo, attempt, model.IntegrityTerminationMaxViolations, "system", events); err != nil {
+			return nil, err
+		}
+	}
+	if !event.Stale {
+		if err := s.queueIntegrityUpdate(ctx, repo, attempt, event, events); err != nil {
+			return nil, err
+		}
+	}
+	return attempt, nil
+}
+
+// recordAwayDuration ghi thời lượng rời màn (đo phía server) vào AWAY_END để giáo
+// viên xem. AWAY_END chỉ là LOG: vi phạm đã được tính lúc nhận AWAY_START.
+func recordAwayDuration(ctx context.Context, repo repository.Repository, attempt *model.Attempt, end *model.AttemptIntegrityEvent) error {
 	start, err := repo.GetIntegrityEvent(ctx, attempt.ID, *end.StartEventID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// Không thấy lúc bắt đầu rời (offline, gửi bù): không quan sát trọn vẹn.
-		end.Level = model.IntegrityLevelWarning
 		return nil
 	}
 	if err != nil {
@@ -381,16 +373,6 @@ func classifyAwayEnd(ctx context.Context, repo repository.Repository, attempt *m
 	}
 	duration := int(end.ReceivedAt.Sub(start.ReceivedAt) / time.Millisecond)
 	end.ServerDurationMs = &duration
-	end.Level = classifyEpisode(start, end, attempt, cfg)
-	if end.Level == model.IntegrityLevelViolation {
-		counted, err := repo.HasIntegrityViolationForEpisode(ctx, attempt.ID, *end.StartEventID)
-		if err != nil {
-			return err
-		}
-		if counted {
-			end.Level = model.IntegrityLevelLog
-		}
-	}
 	return nil
 }
 

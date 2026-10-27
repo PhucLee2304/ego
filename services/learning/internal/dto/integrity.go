@@ -39,7 +39,6 @@ func ToIntegrityState(attempt *model.Attempt) IntegrityState {
 type AttemptSessionClaimResponse struct {
 	SessionToken string         `json:"sessionToken"`
 	SessionEpoch int            `json:"sessionEpoch"`
-	GraceUntil   *time.Time     `json:"graceUntil,omitempty"`
 	State        IntegrityState `json:"state"`
 }
 

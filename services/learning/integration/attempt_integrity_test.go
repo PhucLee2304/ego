@@ -143,17 +143,20 @@ func (f *integrityFixture) send(attemptID uint, conn string, epoch int, eventTyp
 	})
 }
 
-// away gửi một episode rời màn dài d; trả ACK của AWAY_END.
-func (f *integrityFixture) away(t *testing.T, attemptID uint, conn string, epoch int, id string, d time.Duration) *dto.IntegrityEventAckResponse {
+// awayEpisode gửi một lần rời màn dài d; trả ACK của AWAY_START (vi phạm được tính
+// lúc đó). AWAY_END chỉ gửi khi bài còn đang làm.
+func (f *integrityFixture) awayEpisode(t *testing.T, attemptID uint, conn string, epoch int, id string, d time.Duration) *dto.IntegrityEventAckResponse {
 	t.Helper()
 	start := id + "-start"
-	if _, err := f.send(attemptID, conn, epoch, "AWAY_START", start, nil, false); err != nil {
+	ack, err := f.send(attemptID, conn, epoch, "AWAY_START", start, nil, false)
+	if err != nil {
 		t.Fatalf("AWAY_START %s: %v", id, err)
 	}
 	f.clock.advance(d)
-	ack, err := f.send(attemptID, conn, epoch, "AWAY_END", id+"-end", &start, false)
-	if err != nil {
-		t.Fatalf("AWAY_END %s: %v", id, err)
+	if ack.State.Status == "ACTIVE" {
+		if _, err := f.send(attemptID, conn, epoch, "AWAY_END", id+"-end", &start, false); err != nil {
+			t.Fatalf("AWAY_END %s: %v", id, err)
+		}
 	}
 	return ack
 }
@@ -193,7 +196,7 @@ func TestIntegrityConsent(t *testing.T) {
 	}
 	stored := f.attempt(t, attempt.ID)
 	if stored.IntegrityConsentAt == nil || stored.IntegrityConsentVersion == nil || *stored.IntegrityConsentVersion != config.DefaultIntegrityConsentVersion ||
-		stored.IntegrityPolicy == nil || stored.IntegrityPolicy.Data().MaxViolations != 2 || stored.IntegrityPolicy.Data().AwayGraceMs != 3000 {
+		stored.IntegrityPolicy == nil || stored.IntegrityPolicy.Data().MaxViolations != 2 || stored.IntegrityPolicy.Data().TakeoverDelayMs != 30000 {
 		t.Fatalf("consent/snapshot = %#v", stored)
 	}
 }
@@ -206,12 +209,12 @@ func TestIntegrityViolationsTerminate(t *testing.T) {
 	f.clock.advance(11 * time.Second)
 
 	for i := 1; i <= 2; i++ {
-		ack := f.away(t, attempt.ID, "c1", claim.SessionEpoch, fmt.Sprintf("v%d", i), 5*time.Second)
+		ack := f.awayEpisode(t, attempt.ID, "c1", claim.SessionEpoch, fmt.Sprintf("v%d", i), 5*time.Second)
 		if ack.Level != "VIOLATION" || ack.ViolationNo == nil || *ack.ViolationNo != i || ack.State.Status != "ACTIVE" {
 			t.Fatalf("violation %d ack = %#v", i, ack)
 		}
 	}
-	ack := f.away(t, attempt.ID, "c1", claim.SessionEpoch, "v3", 5*time.Second)
+	ack := f.awayEpisode(t, attempt.ID, "c1", claim.SessionEpoch, "v3", 5*time.Second)
 	if ack.Level != "VIOLATION" || ack.State.Status != "SUBMITTED" || ack.State.Outcome != "TERMINATED" {
 		t.Fatalf("third violation ack = %#v", ack)
 	}
@@ -261,53 +264,48 @@ func TestIntegrityViolationsTerminate(t *testing.T) {
 	}
 }
 
-// Phân loại episode (mục 1.3) và idempotency (mục 1.5).
+// Rời màn là vi phạm ngay (mục 1.3) và idempotency (mục 1.5).
 func TestIntegrityEpisodeClassification(t *testing.T) {
 	f := newIntegrityFixture(t, 10)
 	attempt := f.start(t)
 	claim := f.mustClaim(t, attempt.ID, "c1", "", false)
 	epoch := claim.SessionEpoch
 
-	// Nằm gọn trong ân hạn 10s sau claim → WARNING.
-	if ack := f.away(t, attempt.ID, "c1", epoch, "grace", 5*time.Second); ack.Level != "WARNING" {
-		t.Fatalf("within grace = %#v", ack)
-	}
-	f.clock.advance(10 * time.Second)
-	if ack := f.away(t, attempt.ID, "c1", epoch, "short", 2*time.Second); ack.Level != "LOG" {
-		t.Fatalf("short = %#v", ack)
-	}
-	// Gửi bù: AWAY_START không tới server.
-	start := "offline-start"
-	if ack, err := f.send(attempt.ID, "c1", epoch, "AWAY_END", "offline-end", &start, true); err != nil || ack.Level != "WARNING" {
-		t.Fatalf("replayed = %#v err=%v", ack, err)
-	}
-
-	// Vi phạm thật, rồi gửi lại cùng eventId → duplicate, không tính lại.
-	ack := f.away(t, attempt.ID, "c1", epoch, "real", 5*time.Second)
+	// Rời màn ngay sau claim, dù chỉ 1s → VIOLATION (không ân hạn, không ngưỡng).
+	ack := f.awayEpisode(t, attempt.ID, "c1", epoch, "real", time.Second)
 	if ack.Level != "VIOLATION" || *ack.ViolationNo != 1 {
-		t.Fatalf("real = %#v", ack)
+		t.Fatalf("away = %#v", ack)
 	}
-	realStart := "real-start"
-	dup, err := f.send(attempt.ID, "c1", epoch, "AWAY_END", "real-end", &realStart, false)
+	var end model.AttemptIntegrityEvent
+	if err := f.db.Where("attempt_id = ? AND event_id = ?", attempt.ID, "real-end").First(&end).Error; err != nil ||
+		end.Level != model.IntegrityLevelLog || end.ServerDurationMs == nil || *end.ServerDurationMs != 1000 {
+		t.Fatalf("AWAY_END = %#v err=%v", end, err)
+	}
+	// Gửi lại cùng eventId → duplicate, không tính lại.
+	dup, err := f.send(attempt.ID, "c1", epoch, "AWAY_START", "real-start", nil, false)
 	if err != nil || !dup.Duplicate || dup.Level != "VIOLATION" || *dup.ViolationNo != 1 || dup.State.ViolationCount != 1 {
 		t.Fatalf("duplicate = %#v err=%v", dup, err)
 	}
-	// AWAY_END khác eventId nhưng cùng episode → không thêm vi phạm.
-	if again, err := f.send(attempt.ID, "c1", epoch, "AWAY_END", "real-end-2", &realStart, false); err != nil || again.Level != "LOG" || again.State.ViolationCount != 1 {
-		t.Fatalf("same episode = %#v err=%v", again, err)
+	// Gửi bù (offline) → WARNING, không tính.
+	if ack, err := f.send(attempt.ID, "c1", epoch, "AWAY_START", "offline-start", nil, true); err != nil || ack.Level != "WARNING" || ack.State.ViolationCount != 1 {
+		t.Fatalf("replayed = %#v err=%v", ack, err)
+	}
+	start := "missing-start"
+	if ack, err := f.send(attempt.ID, "c1", epoch, "AWAY_END", "orphan-end", &start, true); err != nil || ack.Level != "LOG" {
+		t.Fatalf("orphan end = %#v err=%v", ack, err)
 	}
 
-	// F5: kết nối ngắt, claim lại bằng token, rời ngay 2 phút → vẫn VIOLATION.
+	// F5: kết nối ngắt, claim lại bằng token, rời màn → VIOLATION.
 	f.svc.ReleaseAttemptConnection(context.Background(), "c1")
 	claim = f.mustClaim(t, attempt.ID, "c2", claim.SessionToken, false)
 	if claim.SessionEpoch != epoch {
 		t.Fatalf("resume must keep epoch: %d", claim.SessionEpoch)
 	}
-	if ack := f.away(t, attempt.ID, "c2", epoch, "f5", 2*time.Minute); ack.Level != "VIOLATION" || *ack.ViolationNo != 2 {
+	if ack := f.awayEpisode(t, attempt.ID, "c2", epoch, "f5", time.Second); ack.Level != "VIOLATION" || *ack.ViolationNo != 2 {
 		t.Fatalf("F5 then away = %#v", ack)
 	}
 	// Event từ kết nối cũ → stale, LOG.
-	if ack := f.away(t, attempt.ID, "c1", epoch, "stale", time.Minute); ack.Level != "LOG" || ack.State.ViolationCount != 2 {
+	if ack := f.awayEpisode(t, attempt.ID, "c1", epoch, "stale", time.Minute); ack.Level != "LOG" || ack.State.ViolationCount != 2 {
 		t.Fatalf("stale = %#v", ack)
 	}
 	if _, err := f.send(attempt.ID, "c2", epoch, "SCREENSHOT", "bad", nil, false); err == nil {
@@ -386,14 +384,14 @@ func TestIntegritySessionClaims(t *testing.T) {
 	}
 }
 
-// Review: CONTINUE không giảm count; lặp lại cùng action 200, đổi action 409; Cấm → 0 điểm.
+// Review: CONTINUE lúc đang làm trừ count 1 (lặp lại không trừ nữa); lặp lại cùng action 200, đổi action 409; Cấm → 0 điểm.
 func TestIntegrityReviewAndBan(t *testing.T) {
 	f := newIntegrityFixture(t, 5)
 	ctx := context.Background()
 	attempt := f.start(t)
 	claim := f.mustClaim(t, attempt.ID, "c1", "", false)
 	f.clock.advance(11 * time.Second)
-	f.away(t, attempt.ID, "c1", claim.SessionEpoch, "v1", 5*time.Second)
+	f.awayEpisode(t, attempt.ID, "c1", claim.SessionEpoch, "v1", 5*time.Second)
 
 	review := func(eventID, action string) (*dto.AttemptIntegrityResponse, error) {
 		resp, httpErr := f.svc.ReviewIntegrityEvent(ctx, "teacher-1", f.classroom.ID, f.assignmentID, eventID, dto.ReviewIntegrityEventRequest{Action: action})
@@ -402,22 +400,22 @@ func TestIntegrityReviewAndBan(t *testing.T) {
 		}
 		return resp, nil
 	}
-	resp, err := review("v1-end", "CONTINUE")
-	if err != nil || resp.ViolationCount != 1 || resp.Status != "ACTIVE" {
+	resp, err := review("v1-start", "CONTINUE")
+	if err != nil || resp.ViolationCount != 0 || resp.Status != "ACTIVE" {
 		t.Fatalf("continue = %#v err=%v", resp, err)
 	}
-	if _, err := review("v1-end", "CONTINUE"); err != nil {
-		t.Fatalf("same action again must be 200: %v", err)
+	if resp, err := review("v1-start", "CONTINUE"); err != nil || resp.ViolationCount != 0 {
+		t.Fatalf("same action again must be 200 without decrement: %#v %v", resp, err)
 	}
-	if _, httpErr := f.svc.ReviewIntegrityEvent(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "v1-end", dto.ReviewIntegrityEventRequest{Action: "BAN"}); httpErr == nil || httpErr.StatusCode != http.StatusConflict {
+	if _, httpErr := f.svc.ReviewIntegrityEvent(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "v1-start", dto.ReviewIntegrityEventRequest{Action: "BAN"}); httpErr == nil || httpErr.StatusCode != http.StatusConflict {
 		t.Fatalf("changing action must be 409, got %v", httpErr)
 	}
-	if _, httpErr := f.svc.ReviewIntegrityEvent(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "v1-start", dto.ReviewIntegrityEventRequest{Action: "CONTINUE"}); httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
+	if _, httpErr := f.svc.ReviewIntegrityEvent(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "v1-end", dto.ReviewIntegrityEventRequest{Action: "CONTINUE"}); httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("reviewing a non-violation must be 400, got %v", httpErr)
 	}
 
-	f.away(t, attempt.ID, "c1", claim.SessionEpoch, "v2", 5*time.Second)
-	resp, err = review("v2-end", "BAN")
+	f.awayEpisode(t, attempt.ID, "c1", claim.SessionEpoch, "v2", 5*time.Second)
+	resp, err = review("v2-start", "BAN")
 	if err != nil || resp.Status != "SUBMITTED" || resp.IntegrityOutcome != "TERMINATED" || resp.TerminationReason == nil || *resp.TerminationReason != "TEACHER_BANNED" || resp.Score == nil || *resp.Score != 0 {
 		t.Fatalf("ban = %#v err=%v", resp, err)
 	}
@@ -531,22 +529,14 @@ func TestIntegrityConcurrentDuplicateAndDistinctEvents(t *testing.T) {
 	f := newIntegrityFixture(t, 10)
 	for round := 0; round < concurrencyRounds; round++ {
 		attempt, claim, conn := f.resetAndStart(t, round)
-		starts := []string{"a-start", "b-start"}
-		for _, start := range starts {
-			if _, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", start, nil, false); err != nil {
-				t.Fatal(err)
-			}
-		}
-		f.clock.advance(5 * time.Second)
-
 		// Cùng eventId gửi song song: chỉ một lần không phải duplicate. Đồng thời một
-		// episode khác: count tăng đúng 2.
+		// lần rời màn khác: count tăng đúng 2.
 		var mu sync.Mutex
 		fresh := 0
 		var fns []func()
 		for i := 0; i < 8; i++ {
 			fns = append(fns, func() {
-				ack, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_END", "a-end", &starts[0], false)
+				ack, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", "a-start", nil, false)
 				if err != nil {
 					t.Errorf("round %d: %v", round, err)
 					return
@@ -559,7 +549,7 @@ func TestIntegrityConcurrentDuplicateAndDistinctEvents(t *testing.T) {
 			})
 		}
 		fns = append(fns, func() {
-			if _, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_END", "b-end", &starts[1], false); err != nil {
+			if _, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", "b-start", nil, false); err != nil {
 				t.Errorf("round %d: %v", round, err)
 			}
 		})
@@ -631,14 +621,9 @@ func TestIntegrityConcurrentThresholdAndSubmit(t *testing.T) {
 	ctx := context.Background()
 	for round := 0; round < concurrencyRounds; round++ {
 		attempt, claim, conn := f.resetAndStart(t, round)
-		f.away(t, attempt.ID, conn, claim.SessionEpoch, "first", 5*time.Second)
-		start := "second-start"
-		if _, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", start, nil, false); err != nil {
-			t.Fatal(err)
-		}
-		f.clock.advance(5 * time.Second)
+		f.awayEpisode(t, attempt.ID, conn, claim.SessionEpoch, "first", 5*time.Second)
 		runConcurrently(
-			func() { _, _ = f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_END", "second-end", &start, false) },
+			func() { _, _ = f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", "second-start", nil, false) },
 			func() { _, _ = f.svc.SubmitAttempt(ctx, "student-1", attempt.ID, dto.SubmitAttemptRequest{}) },
 		)
 		f.requireConsistentFinish(t, round, attempt.ID)

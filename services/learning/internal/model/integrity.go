@@ -9,8 +9,6 @@ import (
 // IntegrityPolicySnapshot là cấu hình giám sát chụp vào attempt lúc tạo.
 type IntegrityPolicySnapshot struct {
 	MaxViolations   int    `json:"maxViolations"`
-	AwayGraceMs     int    `json:"awayGraceMs"`
-	GraceMs         int    `json:"graceMs"`
 	TakeoverDelayMs int    `json:"takeoverDelayMs"`
 	ConsentVersion  string `json:"consentVersion"`
 }
@@ -76,8 +74,6 @@ type AttemptIntegrityEvent struct {
 	StartEventID *string `gorm:"type:text"`
 
 	ServerDurationMs *int
-	// GraceUntil chụp từ attempt lúc nhận AWAY_START.
-	GraceUntil       *time.Time
 	ClientDurationMs *int
 	Replayed         bool    `gorm:"not null;default:false"`
 	Stale            bool    `gorm:"not null;default:false"`

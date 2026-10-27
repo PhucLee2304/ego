@@ -46,7 +46,6 @@ type Attempt struct {
 	SessionTokenHash        *string `gorm:"type:text"`
 	SessionEpoch            int     `gorm:"not null;default:0"`
 	SessionLastSeenAt       *time.Time
-	GraceUntil              *time.Time
 
 	// RawScore là điểm chấm từ đáp án; Score là điểm cuối, chỉ ghi qua applyScore.
 	RawScore          *float64         `gorm:"type:numeric(5,2)"`

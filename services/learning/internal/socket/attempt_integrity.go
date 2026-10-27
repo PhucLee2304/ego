@@ -22,11 +22,13 @@ const (
 
 // Push tới học sinh (/ws/exams) và giáo viên (/ws/classrooms).
 const (
-	EventAttemptViolation      = "ATTEMPT_VIOLATION"
-	EventAttemptTerminated     = "ATTEMPT_TERMINATED"
-	EventAttemptSessionRevoked = "ATTEMPT_SESSION_REVOKED"
-	EventAttemptReset          = "ATTEMPT_RESET"
-	EventAttemptIntegrity      = "ATTEMPT_INTEGRITY_UPDATED"
+	EventAttemptViolation  = "ATTEMPT_VIOLATION"
+	EventAttemptTerminated = "ATTEMPT_TERMINATED"
+	// Giáo viên cho tiếp tục làm bài: vi phạm được xóa, ViolationCount giảm 1.
+	EventAttemptViolationCleared = "ATTEMPT_VIOLATION_CLEARED"
+	EventAttemptSessionRevoked   = "ATTEMPT_SESSION_REVOKED"
+	EventAttemptReset            = "ATTEMPT_RESET"
+	EventAttemptIntegrity        = "ATTEMPT_INTEGRITY_UPDATED"
 )
 
 type AttemptSessionClaimPayload struct {

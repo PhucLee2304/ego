@@ -39,8 +39,6 @@ type AppConfig struct {
 	TOEICListeningGraceMs int
 
 	// Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md mục 1.3–1.7).
-	IntegrityAwayGraceMs     int
-	IntegrityGraceMs         int
 	IntegrityTakeoverDelayMs int
 	IntegrityConsentVersion  string
 
@@ -50,7 +48,7 @@ type AppConfig struct {
 }
 
 // DefaultIntegrityConsentVersion phải khớp hằng integrityConsentVersion của FE.
-const DefaultIntegrityConsentVersion = "2026-10-v1"
+const DefaultIntegrityConsentVersion = "2026-10-v2"
 
 func LoadAppConfig() (*AppConfig, error) {
 	config := &AppConfig{
@@ -85,8 +83,6 @@ func LoadAppConfig() (*AppConfig, error) {
 		},
 		TOEICListeningGraceMs: getIntEnv("TOEIC_LISTENING_GRACE_MS", 20000, 120000),
 
-		IntegrityAwayGraceMs:     getIntEnv("INTEGRITY_AWAY_GRACE_MS", 3000, 60000),
-		IntegrityGraceMs:         getIntEnv("INTEGRITY_GRACE_MS", 10000, 60000),
 		IntegrityTakeoverDelayMs: getIntEnv("INTEGRITY_TAKEOVER_DELAY_MS", 30000, 600000),
 		IntegrityConsentVersion:  getEnv("INTEGRITY_CONSENT_VERSION", DefaultIntegrityConsentVersion),
 

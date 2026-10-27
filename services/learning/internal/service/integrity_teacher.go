@@ -57,7 +57,8 @@ func (s *service) GetIntegrityEvents(ctx context.Context, teacherID string, clas
 
 // ReviewIntegrityEvent: giáo viên bấm "Cho tiếp tục làm bài" (CONTINUE) hoặc Cấm (BAN)
 // trên thẻ vi phạm. Review idempotent: cùng action → 200, đổi action → 409. CONTINUE
-// không giảm ViolationCount (Q5).
+// lúc bài còn đang làm thì trừ ViolationCount đi 1 (xóa vi phạm đó) và push
+// ATTEMPT_VIOLATION_CLEARED cho học sinh; bài đã kết thúc thì chỉ đánh dấu đã xem.
 func (s *service) ReviewIntegrityEvent(ctx context.Context, teacherID string, classroomID, assignmentID uint, eventID string, req dto.ReviewIntegrityEventRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError) {
 	assignment, err := s.teacherAssignment(ctx, teacherID, classroomID, assignmentID)
 	if err != nil {
@@ -109,6 +110,19 @@ func (s *service) ReviewIntegrityEvent(ctx context.Context, teacherID string, cl
 			return ErrIntegrityReviewConflict
 		}
 		event.Review, event.ReviewedAt, event.ReviewedBy = &review, &now, &teacherID
+		if review == model.IntegrityReviewContinueAllowed && attempt.Status == model.AttemptStatusInProgress && attempt.ViolationCount > 0 {
+			attempt.ViolationCount--
+			if err := repo.UpdateAttemptIntegrity(ctx, attempt); err != nil {
+				return err
+			}
+			events = append(events, pendingEvent{userID: attempt.UserID, payload: socket.AttemptEvent{
+				Type: socket.EventAttemptViolationCleared,
+				Payload: socket.AttemptViolationPayload{
+					AttemptID: attempt.ID, EventID: event.EventID,
+					ViolationCount: attempt.ViolationCount, MaxViolations: dto.ToIntegrityState(attempt).MaxViolations,
+				},
+			}})
+		}
 		if review == model.IntegrityReviewBanned {
 			if attempt, err = s.terminateAttempt(ctx, repo, attempt, model.IntegrityTerminationTeacherBanned, teacherID, &events); err != nil {
 				return err
