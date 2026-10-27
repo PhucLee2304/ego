@@ -39,12 +39,12 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 // @Produce      json
 // @Security     BearerAuth
 // @Success      200  {object}  dto.GetTopicsResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /topics [get]
 func (h *handler) GetTopics(w http.ResponseWriter, r *http.Request) {
-	topics, err := h.service.GetTopics(r.Context())
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	topics, httpErr := h.service.GetTopics(r.Context())
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -60,19 +60,19 @@ func (h *handler) GetTopics(w http.ResponseWriter, r *http.Request) {
 // @Security     BearerAuth
 // @Param        id   path      int  true  "Topic ID"
 // @Success      200  {object}  dto.GetSectionsResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /topics/{id} [get]
 func (h *handler) GetSectionsByTopic(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid topic ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid topic ID", err))
 		return
 	}
 
-	sections, err := h.service.GetSectionsByTopic(r.Context(), id)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	sections, httpErr := h.service.GetSectionsByTopic(r.Context(), id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -88,19 +88,19 @@ func (h *handler) GetSectionsByTopic(w http.ResponseWriter, r *http.Request) {
 // @Security     BearerAuth
 // @Param        id   path      int  true  "Section ID"
 // @Success      200  {object}  dto.GetLessonsResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /sections/{id}/lessons [get]
 func (h *handler) GetLessonsBySection(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid section ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid section ID", err))
 		return
 	}
 
-	lessons, err := h.service.GetLessonsBySection(r.Context(), id)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	lessons, httpErr := h.service.GetLessonsBySection(r.Context(), id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 
@@ -116,20 +116,20 @@ func (h *handler) GetLessonsBySection(w http.ResponseWriter, r *http.Request) {
 // @Security     BearerAuth
 // @Param        id   path      int  true  "Lesson ID"
 // @Success      200  {object}  dto.GetLessonByIDResponse
-// @Failure      400  {object}  httpx.ErrorResponse
-// @Failure      404  {object}  httpx.ErrorResponse
-// @Failure      500  {object}  httpx.ErrorResponse
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      500  {object}  httpx.HTTPError
 // @Router       /lessons/{id} [get]
 func (h *handler) GetLessonByID(w http.ResponseWriter, r *http.Request) {
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid lesson ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid lesson ID", err))
 		return
 	}
 
-	resp, err := h.service.GetLessonByID(r.Context(), id)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	resp, httpErr := h.service.GetLessonByID(r.Context(), id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 

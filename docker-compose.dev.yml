@@ -1,0 +1,46 @@
+x-air-service: &air-service
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+    target: ""
+  working_dir: /app
+  volumes:
+    - .:/app
+    - /app/tmp
+  command: ["air", "-c", ".air.toml"]
+  healthcheck:
+    start_period: 120s
+    interval: 5s
+    timeout: 5s
+    retries: 5
+
+services:
+  identity:
+    <<: *air-service
+    environment:
+      SERVICE: identity
+
+  storage:
+    <<: *air-service
+    environment:
+      SERVICE: storage
+
+  topics:
+    <<: *air-service
+    environment:
+      SERVICE: topics
+
+  learning:
+    <<: *air-service
+    environment:
+      SERVICE: learning
+
+  notifications:
+    <<: *air-service
+    environment:
+      SERVICE: notifications
+
+  posts:
+    <<: *air-service
+    environment:
+      SERVICE: posts

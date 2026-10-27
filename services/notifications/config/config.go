@@ -14,7 +14,7 @@ type AppConfig struct {
 	DBPassword              string
 	DBName                  string
 	DSN                     string
-	AuthServiceAddr         string
+	IdentityServiceAddr     string
 	FirebaseCredentialsPath string
 }
 
@@ -27,7 +27,7 @@ func LoadAppConfig() *AppConfig {
 		DBUser:                  getEnv("DB_USER", "postgres"),
 		DBPassword:              getEnv("DB_PASSWORD", "23042004"),
 		DBName:                  getEnv("DB_NAME", "notificationsdb"),
-		AuthServiceAddr:         getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		IdentityServiceAddr:     getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
 		FirebaseCredentialsPath: os.Getenv("FIREBASE_CREDENTIALS_PATH"),
 	}
 	cfg.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)

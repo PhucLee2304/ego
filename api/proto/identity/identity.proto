@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package identity;
+
+option go_package = "ego/api/gen/go/identity";
+
+service IdentityService {
+  // token
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+
+  // user
+  rpc GetUserRole(GetUserRoleRequest) returns (GetUserRoleResponse);
+  rpc GetUsersInfo(GetUsersInfoRequest) returns (GetUsersInfoResponse);
+  rpc SearchUserIDsByName(SearchUserIDsByNameRequest) returns (SearchUserIDsByNameResponse);
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool is_valid = 1;
+  string user_id = 2;
+}
+
+message GetUserRoleRequest {
+  string id = 1;
+}
+
+message GetUserRoleResponse {
+  string role = 1;
+}
+
+message GetUsersInfoRequest {
+  repeated string ids = 1;
+}
+
+message UserInfo {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string avatar = 4;
+}
+
+message GetUsersInfoResponse {
+  repeated UserInfo users = 1;
+}
+
+message SearchUserIDsByNameRequest {
+  string query = 1;
+}
+
+message SearchUserIDsByNameResponse {
+  repeated string ids = 1;
+}

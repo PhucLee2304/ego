@@ -9,11 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	classroomsClient "ego/api/gen/go/classrooms"
+	identityClient "ego/api/gen/go/identity"
+	learningClient "ego/api/gen/go/learning"
 	notificationsClient "ego/api/gen/go/notifications"
 	storageClient "ego/api/gen/go/storage"
-	tokenClient "ego/api/gen/go/token"
-	usersClient "ego/api/gen/go/users"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -49,35 +48,25 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[DATABASE] Failed to migrate database")
 	}
 
-	authConn, err := grpc.NewClient(
-		appConfig.AuthServiceAddr,
+	identityConn, err := grpc.NewClient(
+		appConfig.IdentityServiceAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(rpcTimeout)),
 	)
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create auth client")
+		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create identity client")
 	}
-	defer authConn.Close()
+	defer identityConn.Close()
 
-	usersConn, err := grpc.NewClient(
-		appConfig.UsersServiceAddr,
+	learningConn, err := grpc.NewClient(
+		appConfig.LearningServiceAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(rpcTimeout)),
 	)
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create users client")
+		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create learning client")
 	}
-	defer usersConn.Close()
-
-	classroomsConn, err := grpc.NewClient(
-		appConfig.ClassroomsServiceAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(rpcTimeout)),
-	)
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[RPC] Failed to create classrooms client")
-	}
-	defer classroomsConn.Close()
+	defer learningConn.Close()
 
 	notificationsConn, err := grpc.NewClient(
 		appConfig.NotificationsServiceAddr,
@@ -99,14 +88,14 @@ func main() {
 	}
 	defer storageConn.Close()
 
-	usersServiceClient := usersClient.NewUserServiceClient(usersConn)
-	authMiddleware := jwt.NewAuthMiddleware(tokenClient.NewTokenServiceClient(authConn))
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
-		response, err := usersServiceClient.GetUserRole(ctx, &usersClient.GetUserRoleRequest{Id: userID})
+		userResp, err := identityServiceClient.GetUserRole(ctx, &identityClient.GetUserRoleRequest{Id: userID})
 		if err != nil {
 			return "", err
 		}
-		return response.Role, nil
+		return userResp.Role, nil
 	})
 
 	repo := repository.NewRepository(db)
@@ -114,8 +103,8 @@ func main() {
 	service := service.New(
 		repo,
 		appConfig,
-		classroomsClient.NewClassroomServiceClient(classroomsConn),
-		usersServiceClient,
+		learningClient.NewLearningServiceClient(learningConn),
+		identityServiceClient,
 		notificationsClient.NewNotificationServiceClient(notificationsConn),
 		storageServiceClient,
 	)

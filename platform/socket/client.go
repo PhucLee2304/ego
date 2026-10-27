@@ -104,7 +104,7 @@ func (c *Client) readPump(parent context.Context) {
 
 		_, data, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
 				logger.Log.Warn().Err(err).Str("userID", c.userID).Msg("[SOCKET] Unexpected close")
 			}
 			return

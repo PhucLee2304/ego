@@ -33,6 +33,8 @@ go.work.sum
 .idea/
 .vscode/
 data/
+tmp/
+build-errors.log
 api/gen/
 **/credentials/
 **/credentials/*
@@ -40,6 +42,7 @@ api/gen/
 **/docs/*
 services/topics/seed
 services/topics/seed/**
-services/exams/seed
-services/exams/seed/**
+services/learning/seed
+services/learning/seed/**
 **/PLAN**
+CLAUDE.md

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	usersClient "ego/api/gen/go/users"
+	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
 	postsConfig "ego/services/posts/config"
 	"ego/services/posts/internal/model"
@@ -226,7 +226,7 @@ func ToAuditResponses(audits []*model.PostModerationAudit) []*AuditResponse {
 	return responses
 }
 
-func ToUserInfoMap(users []*usersClient.UserInfo) map[string]*UserInfo {
+func ToUserInfoMap(users []*identityClient.UserInfo) map[string]*UserInfo {
 	result := make(map[string]*UserInfo, len(users))
 	for _, user := range users {
 		var avatar *string

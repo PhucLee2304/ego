@@ -4,11 +4,10 @@ package integration_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	classrooms "ego/api/gen/go/classrooms"
+	learning "ego/api/gen/go/learning"
 	"ego/services/posts/config"
 	"ego/services/posts/internal/dto"
 	"ego/services/posts/internal/model"
@@ -16,22 +15,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+// classroomClient cài learning.LearningServiceClient.
 type classroomClient struct{}
 
-func (classroomClient) GetClassroomPostAccess(_ context.Context, req *classrooms.GetClassroomPostAccessRequest, _ ...grpc.CallOption) (*classrooms.GetClassroomPostAccessResponse, error) {
-	return &classrooms.GetClassroomPostAccessResponse{ClassroomId: req.ClassroomId, ClassroomName: "Class 1", TeacherId: "teacher", Active: true, IsTeacher: req.UserId == "teacher", IsApprovedMember: req.UserId != "teacher", ApprovedStudentIds: []string{"student-a", "student-b"}}, nil
-}
-func (classroomClient) ValidateAssignmentAttempt(context.Context, *classrooms.ValidateAssignmentAttemptRequest, ...grpc.CallOption) (*classrooms.ValidateAssignmentAttemptResponse, error) {
-	return nil, errors.New("unused")
-}
-func (classroomClient) CreateAssignmentSubmission(context.Context, *classrooms.CreateAssignmentSubmissionRequest, ...grpc.CallOption) (*classrooms.AssignmentSubmissionResponse, error) {
-	return nil, errors.New("unused")
-}
-func (classroomClient) UpdateAssignmentSubmissionResult(context.Context, *classrooms.UpdateAssignmentSubmissionResultRequest, ...grpc.CallOption) (*classrooms.AssignmentSubmissionResponse, error) {
-	return nil, errors.New("unused")
-}
-func (classroomClient) GetAssignmentSubmissionSyncStatus(context.Context, *classrooms.GetAssignmentSubmissionSyncStatusRequest, ...grpc.CallOption) (*classrooms.GetAssignmentSubmissionSyncStatusResponse, error) {
-	return nil, errors.New("unused")
+func (classroomClient) GetClassroomPostAccess(_ context.Context, req *learning.GetClassroomPostAccessRequest, _ ...grpc.CallOption) (*learning.GetClassroomPostAccessResponse, error) {
+	return &learning.GetClassroomPostAccessResponse{ClassroomId: req.ClassroomId, ClassroomName: "Class 1", TeacherId: "teacher", Active: true, IsTeacher: req.UserId == "teacher", IsApprovedMember: req.UserId != "teacher", ApprovedStudentIds: []string{"student-a", "student-b"}}, nil
 }
 
 func TestInteractionAndPinNotificationsUseDirectOwner(t *testing.T) {
@@ -70,9 +58,9 @@ func TestInteractionAndPinNotificationsUseDirectOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := repo.ClaimOutbox(ctx, time.Now().Add(time.Second), 20)
-	if err != nil {
-		t.Fatal(err)
+	events, claimErr := repo.ClaimOutbox(ctx, time.Now().Add(time.Second), 20)
+	if claimErr != nil {
+		t.Fatal(claimErr)
 	}
 	if len(events) != 5 {
 		t.Fatalf("expected 5 notifications, got %d", len(events))

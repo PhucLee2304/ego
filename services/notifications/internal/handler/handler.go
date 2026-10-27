@@ -30,21 +30,17 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 // @Accept json
 // @Param request body dto.RegisterDeviceTokenRequest true "Device token"
 // @Success 204
-// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 400 {object} httpx.HTTPError
 // @Router /notifications/device-tokens [post]
 func (h *Handler) RegisterDeviceToken(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwt.GetUserID(r.Context())
 	var req dto.RegisterDeviceTokenRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
-	if err := h.service.RegisterDeviceToken(r.Context(), userID, req); err != nil {
-		if errors.Is(err, service.ErrDeviceTokenConflict) {
-			httpx.Error(w, http.StatusConflict, err.Error())
-		} else {
-			httpx.Error(w, http.StatusInternalServerError, err.Error())
-		}
+	if httpErr := h.service.RegisterDeviceToken(r.Context(), userID, req); httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -62,11 +58,11 @@ func (h *Handler) DeleteDeviceToken(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwt.GetUserID(r.Context())
 	var req dto.DeleteDeviceTokenRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
-	if err := h.service.DeleteDeviceToken(r.Context(), userID, req.Token); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	if httpErr := h.service.DeleteDeviceToken(r.Context(), userID, req.Token); httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -85,13 +81,13 @@ func (h *Handler) GetNotifications(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwt.GetUserID(r.Context())
 	var query dto.NotificationsQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid query parameters")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
 		return
 	}
 	query.Normalize()
-	response, err := h.service.GetNotifications(r.Context(), userID, query)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	response, httpErr := h.service.GetNotifications(r.Context(), userID, query)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, response)
@@ -109,11 +105,11 @@ func (h *Handler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwt.GetUserID(r.Context())
 	var req dto.NotificationIDsRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
-	if err := h.service.MarkRead(r.Context(), userID, req.IDs); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	if httpErr := h.service.MarkRead(r.Context(), userID, req.IDs); httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -131,11 +127,11 @@ func (h *Handler) DeleteNotifications(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwt.GetUserID(r.Context())
 	var req dto.DeleteNotificationsRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
-	if err := h.service.DeleteNotifications(r.Context(), userID, req.IDs); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	if httpErr := h.service.DeleteNotifications(r.Context(), userID, req.IDs); httpErr != nil {
+		httpx.Error(w, httpErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

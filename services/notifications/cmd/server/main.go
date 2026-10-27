@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
-	tokenClient "ego/api/gen/go/token"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -52,12 +52,13 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[NOTIFICATIONS] Failed to migrate database")
 	}
 
-	authConn, err := grpc.NewClient(cfg.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
+	identityConn, err := grpc.NewClient(cfg.IdentityServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[NOTIFICATIONS] Failed to connect auth service")
+		logger.Log.Fatal().Err(err).Msg("[NOTIFICATIONS] Failed to connect identity service")
 	}
-	defer authConn.Close()
-	authMiddleware := jwt.NewAuthMiddleware(tokenClient.NewTokenServiceClient(authConn))
+	defer identityConn.Close()
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 
 	var sender *push.FCMSender
 	if cfg.FirebaseCredentialsPath != "" {

@@ -6,7 +6,11 @@ import (
 	"strings"
 
 	notificationsClient "ego/api/gen/go/notifications"
+	"ego/platform/logger"
 	"ego/services/notifications/internal/dto"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const maxRecipients = 500
@@ -49,7 +53,8 @@ func (s *Server) CreateNotifications(ctx context.Context, req *notificationsClie
 		})
 	}
 	if err := s.service.CreateNotifications(ctx, requests); err != nil {
-		return nil, err
+		logger.Log.Error().Err(err).Msg("[NOTIFICATIONS] Failed to create notifications")
+		return nil, status.Error(codes.Internal, "[ERROR] Failed to create notifications")
 	}
 	return &notificationsClient.CreateNotificationsResponse{CreatedCount: uint32(len(requests))}, nil
 }

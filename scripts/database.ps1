@@ -4,10 +4,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$databases = @{ users = "users-db"; topics = "topics-db"; exams = "exams-db"; classrooms = "classrooms-db"; notifications = "notifications-db" }
+$databases = @{ identity = "ego-users-db"; users = "ego-users-db"; topics = "ego-topics-db"; learning = "ego-learning-db"; notifications = "ego-notifications-db" }
 
 if ($Action -eq "seed") {
-    if ($Service -notin @("topics", "exams")) { throw "Seed is only available for topics and exams" }
+    if ($Service -notin @("topics", "learning")) { throw "Seed is only available for topics and learning" }
     docker compose --profile seed run --rm "$Service-seed"
     if ($LASTEXITCODE -ne 0) { throw "Seed failed for $Service" }
     exit
@@ -16,4 +16,5 @@ if ($Action -eq "seed") {
 if (-not $databases.ContainsKey($Service)) { throw "Unsupported service: $Service" }
 docker exec $databases[$Service] sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
 if ($LASTEXITCODE -ne 0) { throw "Reset failed for $Service" }
-docker compose restart $Service
+$container = if ($Service -in @("users", "identity")) { "identity" } else { $Service }
+docker compose restart $container
