@@ -324,7 +324,12 @@ func (h *Handler) ListPostComments(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
 		return
 	}
-	response, httpErr := h.service.ListPostComments(r.Context(), userID, postID)
+	var query dto.CommentsQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil {
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
+		return
+	}
+	response, httpErr := h.service.ListPostComments(r.Context(), userID, postID, query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return

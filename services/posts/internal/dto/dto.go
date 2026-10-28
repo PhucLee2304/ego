@@ -14,6 +14,13 @@ type PostsQuery struct {
 	httpx.PaginationQuery
 }
 
+// CommentsQuery: không có parentId → trang comment gốc; có parentId → trang
+// reply của comment gốc đó.
+type CommentsQuery struct {
+	httpx.PaginationQuery
+	ParentID *uint `schema:"parentId" validate:"omitempty,gt=0"`
+}
+
 type ModerationPostsQuery struct {
 	httpx.PaginationQuery
 	Status model.PostStatus `schema:"status" validate:"omitempty,oneof=PUBLISHED HIDDEN"`
@@ -189,6 +196,7 @@ type CommentResponse struct {
 	ReplyToUserID *string   `json:"replyToUserId,omitempty"`
 	ReplyToUser   *UserInfo `json:"replyToUser,omitempty"`
 	LikeCount     int64     `json:"likeCount"`
+	ReplyCount    int64     `json:"replyCount"`
 	Liked         bool      `json:"liked"`
 	CanEdit       bool      `json:"canEdit"`
 	CanDelete     bool      `json:"canDelete"`
@@ -206,7 +214,10 @@ func ToCommentResponse(comment *model.PostComment, userID string, teacher bool, 
 }
 
 type CommentsResponse struct {
-	Comments []*CommentResponse `json:"comments"`
+	Comments  []*CommentResponse `json:"comments"`
+	Page      int                `json:"page"`
+	PageCount int                `json:"pageCount"`
+	Total     int64              `json:"total"`
 }
 
 type AuditResponse struct {

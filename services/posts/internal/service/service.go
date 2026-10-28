@@ -543,7 +543,7 @@ func (s *Service) setPostLiked(ctx context.Context, userID string, postID uint, 
 	}
 	return httpx.FromError(s.repo.UnlikePost(ctx, postID, userID), "[ERROR] Failed to update post like")
 }
-func (s *Service) ListPostComments(ctx context.Context, userID string, postID uint) (*dto.CommentsResponse, *httpx.HTTPError) {
+func (s *Service) ListPostComments(ctx context.Context, userID string, postID uint, query dto.CommentsQuery) (*dto.CommentsResponse, *httpx.HTTPError) {
 	p, err := s.repo.GetPost(ctx, postID)
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to list post comments")
@@ -559,17 +559,32 @@ func (s *Service) ListPostComments(ctx context.Context, userID string, postID ui
 		}
 		teacher = access.IsTeacher
 	}
-	items, err := s.repo.ListComments(ctx, postID)
+	query.Normalize()
+	items, total, err := s.repo.ListComments(ctx, postID, query.ParentID, query.Limit(), query.Offset())
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to list post comments")
+	}
+	replyCounts := map[uint]int64{}
+	if query.ParentID == nil {
+		ids := make([]uint, len(items))
+		for i, c := range items {
+			ids[i] = c.ID
+		}
+		if replyCounts, err = s.repo.CountReplies(ctx, ids); err != nil {
+			return nil, httpx.FromError(err, "[ERROR] Failed to list post comments")
+		}
 	}
 	out := make([]*dto.CommentResponse, 0, len(items))
 	for _, c := range items {
 		likes, liked, _ := s.repo.CommentStats(ctx, c.ID, userID)
-		out = append(out, dto.ToCommentResponse(c, userID, teacher, likes, liked))
+		item := dto.ToCommentResponse(c, userID, teacher, likes, liked)
+		item.ReplyCount = replyCounts[c.ID]
+		out = append(out, item)
 	}
 	s.enrichComments(ctx, out)
-	return &dto.CommentsResponse{Comments: out}, nil
+	return &dto.CommentsResponse{
+		Comments: out, Page: int(query.Page), PageCount: httpx.ToPageCounts(total, query.PageSize), Total: total,
+	}, nil
 }
 func (s *Service) CreatePostComment(ctx context.Context, userID string, postID uint, req dto.CreateCommentRequest) (*dto.CommentResponse, *httpx.HTTPError) {
 	p, err := s.repo.GetPost(ctx, postID)
