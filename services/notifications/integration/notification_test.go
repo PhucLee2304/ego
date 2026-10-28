@@ -165,7 +165,7 @@ func TestCreateNotificationCommitsBeforeBestEffortPush(t *testing.T) {
 		t.Fatal(err)
 	}
 	sender := &fakeSender{called: make(chan struct{}), invalid: []string{"invalid-token"}}
-	svc := service.New(repo, sender)
+	svc := service.New(repo, sender, nil)
 	if err := svc.CreateNotifications(ctx, []dto.CreateNotificationRequest{{
 		UserID: "1", Title: "Saved first", Body: "Push is optional", SourceService: "TEST",
 		IdempotencyKey: "saved-before-push", Data: map[string]string{"id": "1", "type": "HOME"},
@@ -220,7 +220,7 @@ func TestCreateNotificationsIsIdempotent(t *testing.T) {
 
 func TestCreateNotificationsRPCCommitsAndDeduplicates(t *testing.T) {
 	repo, db := testRepository(t)
-	server := notificationsRpc.New(service.New(repo, nil))
+	server := notificationsRpc.New(service.New(repo, nil, nil))
 	request := &notificationsClient.CreateNotificationsRequest{
 		Recipients: []string{"1", "2"}, Title: "Assignment", Body: "A new assignment is available",
 		SourceService: "CLASSROOMS", Data: map[string]string{"id": "9", "type": "ASSIGNMENT"}, IdempotencyKey: "assignment:9:created",

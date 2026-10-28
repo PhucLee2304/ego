@@ -15,6 +15,7 @@ import (
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
+	platformsocket "ego/platform/socket"
 	"ego/services/notifications/config"
 	"ego/services/notifications/database"
 	"ego/services/notifications/internal/handler"
@@ -29,6 +30,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	_ "ego/services/notifications/docs"
+
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
@@ -72,11 +74,14 @@ func main() {
 		}
 	}
 
+	notificationsSocket := platformsocket.NewServer(identityServiceClient)
+
 	repo := repository.New(db)
-	svc := service.New(repo, sender)
+	svc := service.New(repo, sender, notificationsSocket.BroadcastToUser)
 	h := handler.New(svc)
 	api := http.NewServeMux()
 	h.RegisterRoutes(api, authMiddleware)
+	api.Handle("/ws/notifications", notificationsSocket)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { httpxJSON(w, http.StatusOK, `{"status":"OK"}`) })
 	mux.Handle("/docs/", httpSwagger.Handler(httpSwagger.PersistAuthorization(true)))

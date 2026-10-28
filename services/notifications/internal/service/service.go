@@ -26,13 +26,20 @@ type Service interface {
 	CreateNotifications(context.Context, []dto.CreateNotificationRequest) error
 }
 
+// Broadcaster đẩy event realtime tới mọi kết nối WebSocket của một user.
+type Broadcaster func(userID string, payload any)
+
+// NotificationCreatedEvent báo client có thông báo mới để tải lại số chưa đọc.
+const NotificationCreatedEvent = "NOTIFICATION_CREATED"
+
 type service struct {
-	repo   *repository.Repository
-	sender push.Sender
+	repo      *repository.Repository
+	sender    push.Sender
+	broadcast Broadcaster
 }
 
-func New(repo *repository.Repository, sender push.Sender) Service {
-	return &service{repo: repo, sender: sender}
+func New(repo *repository.Repository, sender push.Sender, broadcast Broadcaster) Service {
+	return &service{repo: repo, sender: sender, broadcast: broadcast}
 }
 
 func (s *service) GetNotifications(ctx context.Context, userID string, query dto.NotificationsQuery) (*dto.NotificationsResponse, *httpx.HTTPError) {
@@ -90,6 +97,17 @@ func (s *service) CreateNotifications(ctx context.Context, requests []dto.Create
 	}
 	if err := s.repo.CreateNotifications(ctx, items); err != nil {
 		return err
+	}
+	if s.broadcast != nil {
+		notified := map[string]bool{}
+		for _, item := range items {
+			// Chỉ bản ghi vừa insert (ID != 0) mới là thông báo mới.
+			if item.ID == 0 || notified[item.UserID] {
+				continue
+			}
+			notified[item.UserID] = true
+			s.broadcast(item.UserID, map[string]any{"type": NotificationCreatedEvent})
+		}
 	}
 	if s.sender == nil {
 		return nil
