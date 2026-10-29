@@ -7,7 +7,7 @@ type Group struct {
 	Title       string
 	Instruction string    `gorm:"type:text"`
 	AudioURL    *string   `gorm:"type:text"`
-	ImageURL    *string   `gorm:"type:text"`
+	ImageURLs   []string  `gorm:"serializer:json;type:jsonb"`
 	Transcript  string    `gorm:"type:text"`
 	Explanation string    `gorm:"type:text"`
 	Order       int       `gorm:"not null"`

@@ -76,7 +76,7 @@ type toeicQuestionRow struct {
 	AudioTranscript    string
 	Explanation        string
 	CorrectAnswerOrder int
-	ImageURL           string
+	ImageURLs          []string
 	AudioURL           string
 	RowOrder           int
 }

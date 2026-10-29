@@ -62,4 +62,3 @@ type QuestionAnalyticsResponse struct {
 	WrongCount    int64   `json:"wrongCount"`
 	WrongRate     float64 `json:"wrongRate"`
 }
-

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -39,6 +40,10 @@ func loadSeedData(seedDir string) (*seedData, error) {
 
 	toeicAnswers, err := loadTOEICAnswers(filepath.Join(seedDir, "db", "toeic_answers.csv"))
 	if err != nil {
+		return nil, err
+	}
+
+	if err := attachTOEICGroupFiles(filepath.Join(seedDir, "db", "toeic_group_files.csv"), toeicQuestions); err != nil {
 		return nil, err
 	}
 
@@ -212,13 +217,58 @@ func loadTOEICQuestions(path string) ([]toeicQuestionRow, error) {
 			AudioTranscript:    cleanText(record["audio_transcript"]),
 			Explanation:        cleanText(record["explanation"]),
 			CorrectAnswerOrder: correctOrder,
-			ImageURL:           strings.TrimSpace(record["image_url"]),
-			AudioURL:           strings.TrimSpace(record["audio_url"]),
 			RowOrder:           i + 1,
 		})
 	}
 
 	return rows, nil
+}
+
+// attachTOEICGroupFiles gán media của group (toeic_group_files.csv) cho từng câu:
+// audio đầu tiên và mọi ảnh theo file_order.
+func attachTOEICGroupFiles(path string, questions []toeicQuestionRow) error {
+	records, err := readCSV(path)
+	if err != nil {
+		return err
+	}
+
+	type groupFile struct {
+		order int
+		url   string
+	}
+	audio := make(map[string]groupFile)
+	images := make(map[string][]groupFile)
+	for _, record := range records {
+		order, err := parseInt(record["file_order"], "toeic file_order")
+		if err != nil {
+			return err
+		}
+		groupID := strings.TrimSpace(record["group_id"])
+		file := groupFile{order: order, url: strings.TrimSpace(record["url"])}
+		switch strings.ToUpper(strings.TrimSpace(record["file_type"])) {
+		case "AUDIO":
+			if current, ok := audio[groupID]; !ok || order < current.order {
+				audio[groupID] = file
+			}
+		case "IMAGE":
+			images[groupID] = append(images[groupID], file)
+		default:
+			return fmt.Errorf("unsupported toeic file_type %q for group %s", record["file_type"], groupID)
+		}
+	}
+
+	for i := range questions {
+		groupID := questions[i].GroupID
+		questions[i].AudioURL = audio[groupID].url
+		files := images[groupID]
+		sort.Slice(files, func(a, b int) bool { return files[a].order < files[b].order })
+		questions[i].ImageURLs = nil
+		for _, file := range files {
+			questions[i].ImageURLs = append(questions[i].ImageURLs, file.url)
+		}
+	}
+
+	return nil
 }
 
 func loadTOEICAnswers(path string) ([]toeicAnswerRow, error) {
