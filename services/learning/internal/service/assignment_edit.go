@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
 	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
@@ -53,84 +55,179 @@ func (s *service) GetEditableAssignment(ctx context.Context, teacherID string, c
 	return &dto.EditableAssignmentResponse{ID: assignment.ID, ExamID: assignment.ExamID, Title: exam.Title, Description: exam.Description, Questions: dto.ToEditableAssignmentQuestions(exam), HasAttempts: hasAttempts, ActiveAttempts: activeAttempts, SubmittedAttempts: submittedAttempts, AffectedAssignments: affected}, nil
 }
 
-func (s *service) UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, *httpx.HTTPError) {
-	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
-	if err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
-	}
-	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
-	if err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
-	}
-	if classroom.TeacherID != teacherID {
-		return nil, ErrClassroomForbidden
-	}
-
-	var exam *model.Exam
+// UpdateAssignment lưu màn sửa bài trong một transaction. Client gửi cả form như lúc tạo;
+// backend so với dữ liệu hiện có và chỉ ghi phần thay đổi: nội dung đề, lịch của lớp đã có
+// bài, rồi giao thêm lớp chưa có. Một bước lỗi hay cần xác nhận (409) thì không bước nào
+// được ghi; sự kiện socket chỉ publish sau khi commit.
+func (s *service) UpdateAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentRequest) (*dto.AssignmentResponse, *httpx.HTTPError) {
+	var response *dto.AssignmentResponse
 	var events []pendingEvent
-	// Tạm dừng các assignment dùng chung đề, nộp bài đang làm, sửa/đính chính đề
-	// và bật lại assignment đều nằm trong một transaction: đề sửa không hợp lệ thì
-	// assignment không bị kẹt ở trạng thái tạm dừng như khi còn gọi qua gRPC.
-	err = s.repo.Transaction(ctx, func(repo repository.Repository) error {
-		assignments, err := repo.GetAssignmentsByExamID(ctx, assignment.ExamID)
+	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
+		classroom, err := repo.GetClassroomByID(ctx, classroomID)
 		if err != nil {
 			return err
 		}
-		activeStates := make(map[uint]bool, len(assignments))
-		var totalAttempts int64
-		for _, related := range assignments {
-			if related.Classroom.TeacherID != teacherID {
-				return ErrClassroomForbidden
-			}
-			activeStates[related.ID] = related.Active
-			_, totalCount, err := repo.CountAssignmentAttempts(ctx, related.ID)
-			if err != nil {
+		if classroom.TeacherID != teacherID {
+			return ErrClassroomForbidden
+		}
+		assignment, err := repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+		if err != nil {
+			return err
+		}
+		exam, err := repo.GetPrivateAssignmentExam(ctx, assignment.ExamID)
+		if err != nil {
+			return err
+		}
+		if assignmentContentChanged(exam, req) {
+			content := dto.UpdateAssignmentContentRequest{Title: req.Title, Description: req.Description, Questions: req.Questions, Confirm: req.Confirm, Reason: req.Reason}
+			if _, err := s.updateAssignmentContentTx(ctx, repo, &events, teacherID, assignment, content); err != nil {
 				return err
 			}
-			totalAttempts += totalCount
-		}
-		if totalAttempts > 0 && !req.Confirm {
-			return ErrAssignmentContentConfirmation
-		}
-		if totalAttempts > 0 && strings.TrimSpace(req.Reason) == "" {
-			return httpx.NewError(http.StatusBadRequest, "[ERROR] A reason is required when changing an exam with attempts", nil)
-		}
-		if err := repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, assignment.Title, assignment.Description, false); err != nil {
-			return err
-		}
-		txService := s.withRepoDeferringEvents(repo, &events)
-		if totalAttempts > 0 {
-			for _, related := range assignments {
-				if _, err := txService.submitAssignmentAttempts(ctx, related.ID); err != nil {
-					return err
-				}
-			}
 		}
 
-		questions := make([]dto.UpdatePrivateExamQuestionRequest, len(req.Questions))
-		for i, question := range req.Questions {
-			questions[i] = dto.UpdatePrivateExamQuestionRequest{ID: question.ID, Content: strings.TrimSpace(question.Content), Explanation: question.Explanation, Options: question.Options, CorrectOptionIndex: question.CorrectOptionIndex, ExcludedFromScore: question.ExcludedFromScore, OptionIDs: question.OptionIDs}
-		}
-		exam, err = txService.updatePrivateExam(ctx, assignment.ExamID, dto.UpdatePrivateExamRequest{Title: strings.TrimSpace(req.Title), Description: req.Description, Questions: questions, CorrectionOnly: totalAttempts > 0, ActorID: teacherID, Reason: strings.TrimSpace(req.Reason)})
+		related, err := repo.GetAssignmentsByExamID(ctx, assignment.ExamID)
 		if err != nil {
 			return err
 		}
+		byClassroom := make(map[uint]*model.Assignment, len(related))
+		for _, item := range related {
+			byClassroom[item.ClassroomID] = item
+		}
+		var added []dto.AssignmentScheduleRequest
+		for _, schedule := range req.Schedules {
+			existing, ok := byClassroom[schedule.ClassroomID]
+			if !ok {
+				added = append(added, schedule)
+				continue
+			}
+			if !assignmentScheduleChanged(existing, schedule) {
+				continue
+			}
+			proctored, maxViolations := schedule.Proctored, maxViolationsOrDefault(schedule.MaxViolations)
+			if _, err := updateAssignmentScheduleTx(ctx, repo, teacherID, schedule.ClassroomID, existing.ID, dto.UpdateAssignmentScheduleRequest{
+				Duration: schedule.Duration, OpensAt: schedule.OpensAt, DueAt: schedule.DueAt, Confirm: req.Confirm, Proctored: &proctored, MaxViolations: &maxViolations,
+			}); err != nil {
+				return err
+			}
+		}
 
-		// Đề đã có bài làm thì giữ các assignment ở trạng thái tạm dừng; chưa có thì khôi phục.
-		finalActive := totalAttempts == 0
-		if err := repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, exam.Title, exam.Description, finalActive); err != nil {
+		// Đọc lại sau khi sửa: lớp mới nhận tiêu đề mới và response phản ánh lịch mới.
+		assignment, err = repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
+		if err != nil {
 			return err
 		}
-		if totalAttempts == 0 {
-			return repo.RestoreAssignmentActiveStates(ctx, activeStates)
+		if len(added) > 0 {
+			if _, err := assignExistingExamTx(ctx, repo, teacherID, assignment, added); err != nil {
+				return err
+			}
 		}
+		response = dto.ToAssignmentResponse(assignment, time.Now(), "", true, nil)
 		return nil
 	})
 	if err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
 	s.publishPendingEvents(events)
-	return &dto.EditableAssignmentResponse{ID: assignment.ID, ExamID: assignment.ExamID, Title: exam.Title, Description: exam.Description, Questions: dto.ToEditableAssignmentQuestions(exam)}, nil
+	return response, nil
+}
+
+// assignmentContentChanged so form sửa với đề hiện tại (bỏ khoảng trắng hai đầu như khi lưu).
+// Đổi thứ tự, thêm/xoá câu hay đáp án đều tính là thay đổi.
+func assignmentContentChanged(exam *model.Exam, req dto.UpdateAssignmentRequest) bool {
+	text := func(value *string) string {
+		if value == nil {
+			return ""
+		}
+		return strings.TrimSpace(*value)
+	}
+	if strings.TrimSpace(req.Title) != strings.TrimSpace(exam.Title) || text(req.Description) != text(exam.Description) {
+		return true
+	}
+	current := dto.ToEditableAssignmentQuestions(exam)
+	if len(current) != len(req.Questions) {
+		return true
+	}
+	for i, question := range req.Questions {
+		old := current[i]
+		if question.ID != old.ID || strings.TrimSpace(question.Content) != strings.TrimSpace(old.Content) ||
+			text(question.Explanation) != text(old.Explanation) || question.CorrectOptionIndex != old.CorrectOptionIndex ||
+			question.ExcludedFromScore != old.ExcludedFromScore || !slices.Equal(question.OptionIDs, old.OptionIDs) ||
+			len(question.Options) != len(old.Options) {
+			return true
+		}
+		for j, option := range question.Options {
+			if strings.TrimSpace(option) != strings.TrimSpace(old.Options[j]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func assignmentScheduleChanged(assignment *model.Assignment, schedule dto.AssignmentScheduleRequest) bool {
+	return assignment.Duration != schedule.Duration || !assignment.OpensAt.Equal(schedule.OpensAt) ||
+		!assignment.DueAt.Equal(schedule.DueAt) || assignment.Proctored != schedule.Proctored ||
+		assignment.MaxViolations != maxViolationsOrDefault(schedule.MaxViolations)
+}
+
+// updateAssignmentContentTx sửa đề trong transaction của người gọi. Tạm dừng các
+// assignment dùng chung đề, nộp bài đang làm, sửa/đính chính đề và bật lại
+// assignment đều nằm trong transaction: đề sửa không hợp lệ thì assignment không
+// bị kẹt ở trạng thái tạm dừng. Sự kiện socket được hoãn vào events, publish sau commit.
+func (s *service) updateAssignmentContentTx(ctx context.Context, repo repository.Repository, events *[]pendingEvent, teacherID string, assignment *model.Assignment, req dto.UpdateAssignmentContentRequest) (*model.Exam, error) {
+	assignments, err := repo.GetAssignmentsByExamID(ctx, assignment.ExamID)
+	if err != nil {
+		return nil, err
+	}
+	activeStates := make(map[uint]bool, len(assignments))
+	var totalAttempts int64
+	for _, related := range assignments {
+		if related.Classroom.TeacherID != teacherID {
+			return nil, ErrClassroomForbidden
+		}
+		activeStates[related.ID] = related.Active
+		_, totalCount, err := repo.CountAssignmentAttempts(ctx, related.ID)
+		if err != nil {
+			return nil, err
+		}
+		totalAttempts += totalCount
+	}
+	if totalAttempts > 0 && !req.Confirm {
+		return nil, ErrAssignmentContentConfirmation
+	}
+	if totalAttempts > 0 && strings.TrimSpace(req.Reason) == "" {
+		return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] A reason is required when changing an exam with attempts", nil)
+	}
+	if err := repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, assignment.Title, assignment.Description, false); err != nil {
+		return nil, err
+	}
+	txService := s.withRepoDeferringEvents(repo, events)
+	if totalAttempts > 0 {
+		for _, related := range assignments {
+			if _, err := txService.submitAssignmentAttempts(ctx, related.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	questions := make([]dto.UpdatePrivateExamQuestionRequest, len(req.Questions))
+	for i, question := range req.Questions {
+		questions[i] = dto.UpdatePrivateExamQuestionRequest{ID: question.ID, Content: strings.TrimSpace(question.Content), Explanation: question.Explanation, Options: question.Options, CorrectOptionIndex: question.CorrectOptionIndex, ExcludedFromScore: question.ExcludedFromScore, OptionIDs: question.OptionIDs}
+	}
+	exam, err := txService.updatePrivateExam(ctx, assignment.ExamID, dto.UpdatePrivateExamRequest{Title: strings.TrimSpace(req.Title), Description: req.Description, Questions: questions, CorrectionOnly: totalAttempts > 0, ActorID: teacherID, Reason: strings.TrimSpace(req.Reason)})
+	if err != nil {
+		return nil, err
+	}
+
+	// Đề đã có bài làm thì giữ các assignment ở trạng thái tạm dừng; chưa có thì khôi phục.
+	finalActive := totalAttempts == 0
+	if err := repo.UpdateAssignmentsContentAndActive(ctx, assignment.ExamID, exam.Title, exam.Description, finalActive); err != nil {
+		return nil, err
+	}
+	if totalAttempts == 0 {
+		return exam, repo.RestoreAssignmentActiveStates(ctx, activeStates)
+	}
+	return exam, nil
 }
 
 func (s *service) ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) *httpx.HTTPError {

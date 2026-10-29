@@ -30,10 +30,6 @@ type AssignmentScheduleRequest struct {
 	MaxViolations *int `json:"maxViolations,omitempty" validate:"omitempty,min=1"`
 }
 
-type AssignExistingExamRequest struct {
-	Schedules []AssignmentScheduleRequest `json:"schedules" validate:"required,min=1,dive"`
-}
-
 type UpdateAssignmentScheduleRequest struct {
 	Duration int       `json:"duration" validate:"required,gt=0,lte=1440"`
 	OpensAt  time.Time `json:"opensAt" validate:"required"`
@@ -60,6 +56,19 @@ type UpdateAssignmentContentRequest struct {
 	Title       string                            `json:"title" validate:"required,notblank"`
 	Description *string                           `json:"description,omitempty"`
 	Questions   []UpdateAssignmentQuestionRequest `json:"questions" validate:"required,min=1,dive"`
+	Confirm     bool                              `json:"confirm"`
+	Reason      string                            `json:"reason" validate:"omitempty"`
+}
+
+// UpdateAssignmentRequest là màn sửa bài, cùng dạng với lúc tạo: toàn bộ nội dung đề và
+// lịch của các lớp được tích. Backend tự so với dữ liệu hiện có: nội dung khác thì sửa đề,
+// lớp đã có bài mà lịch khác thì sửa lịch, lớp chưa có thì giao thêm. Confirm/Reason dùng
+// chung khi thay đổi ảnh hưởng tới bài đang làm.
+type UpdateAssignmentRequest struct {
+	Title       string                            `json:"title" validate:"required,notblank"`
+	Description *string                           `json:"description,omitempty"`
+	Questions   []UpdateAssignmentQuestionRequest `json:"questions" validate:"required,min=1,dive"`
+	Schedules   []AssignmentScheduleRequest       `json:"schedules" validate:"omitempty,dive"`
 	Confirm     bool                              `json:"confirm"`
 	Reason      string                            `json:"reason" validate:"omitempty"`
 }

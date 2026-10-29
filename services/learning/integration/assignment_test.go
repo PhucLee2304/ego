@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"ego/platform/httpx"
 	"ego/services/learning/config"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
@@ -119,17 +120,58 @@ func TestCreateAssignmentsIsAtomic(t *testing.T) {
 	}
 }
 
+// editRequest dựng form sửa giống client: nội dung đề hiện tại, chưa có lịch nào.
+func editRequest(ctx context.Context, t *testing.T, svc service.Service, classroomID, assignmentID uint) dto.UpdateAssignmentRequest {
+	t.Helper()
+	editable, httpErr := svc.GetEditableAssignment(ctx, "teacher-1", classroomID, assignmentID)
+	if httpErr != nil {
+		t.Fatal(httpErr)
+	}
+	questions := make([]dto.UpdateAssignmentQuestionRequest, len(editable.Questions))
+	for i, q := range editable.Questions {
+		explanation := ""
+		if q.Explanation != nil {
+			explanation = *q.Explanation
+		}
+		questions[i] = dto.UpdateAssignmentQuestionRequest{ID: q.ID, Content: q.Content, Explanation: &explanation, Options: q.Options, CorrectOptionIndex: q.CorrectOptionIndex, ExcludedFromScore: q.ExcludedFromScore, OptionIDs: q.OptionIDs}
+	}
+	return dto.UpdateAssignmentRequest{Title: editable.Title, Description: editable.Description, Questions: questions}
+}
+
+// Các luồng sửa riêng lẻ giờ đi qua endpoint gộp UpdateAssignment.
+func updateContent(ctx context.Context, svc service.Service, teacherID string, classroomID, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.AssignmentResponse, *httpx.HTTPError) {
+	return svc.UpdateAssignment(ctx, teacherID, classroomID, assignmentID, dto.UpdateAssignmentRequest{Title: req.Title, Description: req.Description, Questions: req.Questions, Confirm: req.Confirm, Reason: req.Reason})
+}
+
+func updateSchedule(ctx context.Context, t *testing.T, svc service.Service, classroomID, assignmentID uint, req dto.UpdateAssignmentScheduleRequest) (*dto.AssignmentResponse, *httpx.HTTPError) {
+	request := editRequest(ctx, t, svc, classroomID, assignmentID)
+	request.Schedules = []dto.AssignmentScheduleRequest{{ClassroomID: classroomID, Duration: req.Duration, OpensAt: req.OpensAt, DueAt: req.DueAt}}
+	request.Confirm = req.Confirm
+	return svc.UpdateAssignment(ctx, "teacher-1", classroomID, assignmentID, request)
+}
+
 func TestAssignmentViewsAndCalendar(t *testing.T) {
 	f := newAssignmentFixture(t)
 	ctx := context.Background()
 	created := f.create(t, f.classroom.ID)
 	assignmentID := created.Assignments[0].ID
 
-	if _, httpErr := f.svc.AssignExistingExam(ctx, "teacher-1", f.classroom.ID, assignmentID, dto.AssignExistingExamRequest{Schedules: []dto.AssignmentScheduleRequest{f.schedule(f.classroom.ID)}}); httpErr == nil || httpErr.StatusCode != http.StatusConflict {
-		t.Fatalf("assigning the same exam twice to a class must be 409, got %v", httpErr)
+	// Lớp đã có bài thì là sửa lịch (ở đây không đổi gì), không tạo bản trùng.
+	same := editRequest(ctx, t, f.svc, f.classroom.ID, assignmentID)
+	same.Schedules = []dto.AssignmentScheduleRequest{f.schedule(f.classroom.ID)}
+	if _, httpErr := f.svc.UpdateAssignment(ctx, "teacher-1", f.classroom.ID, assignmentID, same); httpErr != nil {
+		t.Fatalf("unchanged schedule must be a no-op, got %v", httpErr)
 	}
-	copied, httpErr := f.svc.AssignExistingExam(ctx, "teacher-1", f.classroom.ID, assignmentID, dto.AssignExistingExamRequest{Schedules: []dto.AssignmentScheduleRequest{f.schedule(f.other.ID)}})
-	if httpErr != nil || copied.Assignments[0].ExamID != created.Assignments[0].ExamID {
+	var inClass int64
+	f.db.Model(&model.Assignment{}).Where("classroom_id = ?", f.classroom.ID).Count(&inClass)
+	if inClass != 1 {
+		t.Fatalf("existing class must not get a duplicate assignment, got %d", inClass)
+	}
+	assign := editRequest(ctx, t, f.svc, f.classroom.ID, assignmentID)
+	assign.Schedules = []dto.AssignmentScheduleRequest{f.schedule(f.classroom.ID), f.schedule(f.other.ID)}
+	_, httpErr := f.svc.UpdateAssignment(ctx, "teacher-1", f.classroom.ID, assignmentID, assign)
+	var copied model.Assignment
+	if httpErr != nil || f.db.Where("classroom_id = ?", f.other.ID).First(&copied).Error != nil || copied.ExamID != created.Assignments[0].ExamID {
 		t.Fatalf("assign existing = %#v err=%v", copied, httpErr)
 	}
 
@@ -162,11 +204,11 @@ func TestUpdateAssignmentScheduleSyncsActiveAttempts(t *testing.T) {
 	attempt := f.startAssignmentAttempt(t, assignment.ID, assignment.ExamID, "student-1")
 
 	shorter := dto.UpdateAssignmentScheduleRequest{Duration: 20, OpensAt: f.opensAt, DueAt: f.opensAt.Add(24 * time.Hour)}
-	if _, httpErr := f.svc.UpdateAssignmentSchedule(ctx, "teacher-1", f.classroom.ID, assignment.ID, shorter); httpErr == nil || httpErr.Message != service.ErrAssignmentScheduleConfirmation.Message {
+	if _, httpErr := updateSchedule(ctx, t, f.svc, f.classroom.ID, assignment.ID, shorter); httpErr == nil || httpErr.Message != service.ErrAssignmentScheduleConfirmation.Message {
 		t.Fatalf("shortening with attempts must require confirmation, got %v", httpErr)
 	}
 	shorter.Confirm = true
-	updated, httpErr := f.svc.UpdateAssignmentSchedule(ctx, "teacher-1", f.classroom.ID, assignment.ID, shorter)
+	updated, httpErr := updateSchedule(ctx, t, f.svc, f.classroom.ID, assignment.ID, shorter)
 	if httpErr != nil || updated.Duration != 20 {
 		t.Fatalf("update = %#v err=%v", updated, httpErr)
 	}
@@ -235,7 +277,7 @@ func TestUpdateAssignmentContent(t *testing.T) {
 	}
 
 	// Chưa có bài làm: sửa tự do, assignment giữ trạng thái bật.
-	renamed, httpErr := f.svc.UpdateAssignmentContent(ctx, "teacher-1", f.classroom.ID, assignment.ID, request("Renamed", 0))
+	renamed, httpErr := updateContent(ctx, f.svc, "teacher-1", f.classroom.ID, assignment.ID, request("Renamed", 0))
 	if httpErr != nil || renamed.Title != "Renamed" {
 		t.Fatalf("free edit = %#v err=%v", renamed, httpErr)
 	}
@@ -252,17 +294,17 @@ func TestUpdateAssignmentContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, httpErr := f.svc.UpdateAssignmentContent(ctx, "teacher-1", f.classroom.ID, assignment.ID, request("Renamed", 1)); httpErr == nil || httpErr.Message != service.ErrAssignmentContentConfirmation.Message {
+	if _, httpErr := updateContent(ctx, f.svc, "teacher-1", f.classroom.ID, assignment.ID, request("Renamed", 1)); httpErr == nil || httpErr.Message != service.ErrAssignmentContentConfirmation.Message {
 		t.Fatalf("edit with attempts must require confirmation, got %v", httpErr)
 	}
 	confirmed := request("Renamed", 1)
 	confirmed.Confirm = true
-	if _, httpErr := f.svc.UpdateAssignmentContent(ctx, "teacher-1", f.classroom.ID, assignment.ID, confirmed); httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
+	if _, httpErr := updateContent(ctx, f.svc, "teacher-1", f.classroom.ID, assignment.ID, confirmed); httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("correction without reason must be 400, got %v", httpErr)
 	}
 	structural := request("New title", 1)
 	structural.Confirm, structural.Reason = true, "typo"
-	if _, httpErr := f.svc.UpdateAssignmentContent(ctx, "teacher-1", f.classroom.ID, assignment.ID, structural); httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
+	if _, httpErr := updateContent(ctx, f.svc, "teacher-1", f.classroom.ID, assignment.ID, structural); httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("structural change with attempts must be 400, got %v", httpErr)
 	}
 	var stillActive model.Attempt
@@ -273,7 +315,8 @@ func TestUpdateAssignmentContent(t *testing.T) {
 	}
 
 	confirmed.Reason = "wrong key"
-	corrected, httpErr := f.svc.UpdateAssignmentContent(ctx, "teacher-1", f.classroom.ID, assignment.ID, confirmed)
+	_, httpErr = updateContent(ctx, f.svc, "teacher-1", f.classroom.ID, assignment.ID, confirmed)
+	corrected, _ := f.svc.GetEditableAssignment(ctx, "teacher-1", f.classroom.ID, assignment.ID)
 	if httpErr != nil || corrected.Questions[0].CorrectOptionIndex != 1 {
 		t.Fatalf("correction = %#v err=%v", corrected, httpErr)
 	}
@@ -290,6 +333,82 @@ func TestUpdateAssignmentContent(t *testing.T) {
 	audits, httpErr := f.svc.GetAssignmentAudits(ctx, "teacher-1", f.classroom.ID, assignment.ID)
 	if httpErr != nil || len(audits) != 2 || audits[0].Reason != "wrong key" || audits[0].RegradedAt == nil || len(audits[0].ScoreChanges) != 1 || audits[0].Actor == nil {
 		t.Fatalf("audits = %#v err=%v", audits, httpErr)
+	}
+}
+
+// Màn sửa gộp: client gửi cả form, backend tự so và ghi nội dung + lịch + lớp mới trong
+// một transaction. Cần xác nhận
+// (409) thì không phần nào được ghi, kể cả lớp mới; xác nhận xong thì ghi đủ cả ba.
+func TestUpdateAssignmentCombined(t *testing.T) {
+	f := newAssignmentFixture(t)
+	ctx := context.Background()
+	third := &model.Classroom{Code: "ASSIGN03", Name: "Class C", TeacherID: "teacher-1", Active: true}
+	if err := f.db.Create(third).Error; err != nil {
+		t.Fatal(err)
+	}
+	assignment := f.create(t, f.classroom.ID).Assignments[0]
+	form := func(title string, correct int, schedules ...dto.AssignmentScheduleRequest) dto.UpdateAssignmentRequest {
+		request := editRequest(ctx, t, f.svc, f.classroom.ID, assignment.ID)
+		request.Title = title
+		request.Questions[0].CorrectOptionIndex = correct
+		request.Schedules = schedules
+		return request
+	}
+	countIn := func(classroomID uint) int64 {
+		var n int64
+		f.db.Model(&model.Assignment{}).Where("classroom_id = ?", classroomID).Count(&n)
+		return n
+	}
+
+	// Chưa có bài làm: đổi tên, kéo dài lịch, giao thêm lớp B; lớp B nhận tiêu đề mới.
+	longer := dto.AssignmentScheduleRequest{ClassroomID: f.classroom.ID, Duration: 60, OpensAt: f.opensAt, DueAt: f.opensAt.Add(72 * time.Hour)}
+	updated, httpErr := f.svc.UpdateAssignment(ctx, "teacher-1", f.classroom.ID, assignment.ID, form("Renamed", 0, longer, f.schedule(f.other.ID)))
+	if httpErr != nil || updated.Title != "Renamed" || updated.Duration != 60 {
+		t.Fatalf("combined update = %#v err=%v", updated, httpErr)
+	}
+	var copied model.Assignment
+	if err := f.db.Where("classroom_id = ?", f.other.ID).First(&copied).Error; err != nil || copied.Title != "Renamed" {
+		t.Fatalf("new class must get the renamed assignment: %#v err=%v", copied, err)
+	}
+
+	// Có bài làm: đính chính đáp án + giao lớp C khi chưa xác nhận thì 409, lớp C không có gì.
+	f.startAssignmentAttempt(t, assignment.ID, assignment.ExamID, "student-1")
+	request := form("Renamed", 1, longer, f.schedule(third.ID))
+	if _, httpErr := f.svc.UpdateAssignment(ctx, "teacher-1", f.classroom.ID, assignment.ID, request); httpErr == nil || httpErr.StatusCode != http.StatusConflict {
+		t.Fatalf("correction with attempts must require confirmation, got %v", httpErr)
+	}
+	if n := countIn(third.ID); n != 0 {
+		t.Fatalf("rejected update must not assign the new class, got %d", n)
+	}
+	request.Confirm, request.Reason = true, "wrong key"
+	if _, httpErr := f.svc.UpdateAssignment(ctx, "teacher-1", f.classroom.ID, assignment.ID, request); httpErr != nil {
+		t.Fatalf("confirmed update: %v", httpErr)
+	}
+	if n := countIn(third.ID); n != 1 {
+		t.Fatalf("confirmed update must assign the new class, got %d", n)
+	}
+	audits, _ := f.svc.GetAssignmentAudits(ctx, "teacher-1", f.classroom.ID, assignment.ID)
+	if len(audits) == 0 || audits[0].Reason != "wrong key" {
+		t.Fatalf("correction must be audited with the shared reason: %#v", audits)
+	}
+}
+
+// Gửi lại đúng form hiện tại thì không đổi gì: không cần xác nhận dù đã có bài làm,
+// không tạo audit, bài vẫn bật.
+func TestUpdateAssignmentUnchangedIsNoop(t *testing.T) {
+	f := newAssignmentFixture(t)
+	ctx := context.Background()
+	assignment := f.create(t, f.classroom.ID).Assignments[0]
+	f.startAssignmentAttempt(t, assignment.ID, assignment.ExamID, "student-1")
+	request := editRequest(ctx, t, f.svc, f.classroom.ID, assignment.ID)
+	request.Schedules = []dto.AssignmentScheduleRequest{f.schedule(f.classroom.ID)}
+	updated, httpErr := f.svc.UpdateAssignment(ctx, "teacher-1", f.classroom.ID, assignment.ID, request)
+	if httpErr != nil || !updated.Active {
+		t.Fatalf("unchanged form must save without confirmation: %#v err=%v", updated, httpErr)
+	}
+	audits, _ := f.svc.GetAssignmentAudits(ctx, "teacher-1", f.classroom.ID, assignment.ID)
+	if len(audits) != 0 {
+		t.Fatalf("unchanged form must not add an audit, got %d", len(audits))
 	}
 }
 

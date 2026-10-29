@@ -129,64 +129,6 @@ func (h *handler) GetAssignment(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, resp)
 }
 
-func (h *handler) AssignExistingExam(w http.ResponseWriter, r *http.Request) {
-	userID, ok := jwt.GetUserID(r.Context())
-	if !ok {
-		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
-		return
-	}
-	classroomID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid classroom ID", err))
-		return
-	}
-	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid assignment ID", err))
-		return
-	}
-	var body dto.AssignExistingExamRequest
-	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	resp, httpErr := h.service.AssignExistingExam(r.Context(), userID, classroomID, assignmentID, body)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusCreated, resp)
-}
-
-func (h *handler) UpdateAssignmentSchedule(w http.ResponseWriter, r *http.Request) {
-	userID, ok := jwt.GetUserID(r.Context())
-	if !ok {
-		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
-		return
-	}
-	classroomID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid classroom ID", err))
-		return
-	}
-	assignmentID, err := httpx.ParsePathID(r, "assignmentId")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid assignment ID", err))
-		return
-	}
-	var body dto.UpdateAssignmentScheduleRequest
-	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	resp, httpErr := h.service.UpdateAssignmentSchedule(r.Context(), userID, classroomID, assignmentID, body)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, resp)
-}
-
 // SetAssignmentActive godoc
 // @Summary      Activate or deactivate an assignment
 // @Description  Update assignment availability. Only the classroom teacher can perform this action.
@@ -257,7 +199,7 @@ func (h *handler) GetEditableAssignment(w http.ResponseWriter, r *http.Request) 
 	httpx.JSON(w, http.StatusOK, response)
 }
 
-func (h *handler) UpdateAssignmentContent(w http.ResponseWriter, r *http.Request) {
+func (h *handler) UpdateAssignment(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
 		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User ID not found", nil))
@@ -273,12 +215,12 @@ func (h *handler) UpdateAssignmentContent(w http.ResponseWriter, r *http.Request
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid assignment ID", err))
 		return
 	}
-	var body dto.UpdateAssignmentContentRequest
+	var body dto.UpdateAssignmentRequest
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
-	response, httpErr := h.service.UpdateAssignmentContent(r.Context(), userID, classroomID, assignmentID, body)
+	response, httpErr := h.service.UpdateAssignment(r.Context(), userID, classroomID, assignmentID, body)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return

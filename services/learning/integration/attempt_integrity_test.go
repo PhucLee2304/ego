@@ -478,7 +478,7 @@ func TestIntegrityRegradeKeepsTerminatedScore(t *testing.T) {
 		}
 		questions[i] = dto.UpdateAssignmentQuestionRequest{ID: q.ID, Content: q.Content, Explanation: &explanation, Options: q.Options, OptionIDs: q.OptionIDs, CorrectOptionIndex: 1, ExcludedFromScore: true}
 	}
-	if _, httpErr := f.svc.UpdateAssignmentContent(ctx, "teacher-1", f.classroom.ID, f.assignmentID, dto.UpdateAssignmentContentRequest{
+	if _, httpErr := updateContent(ctx, f.svc, "teacher-1", f.classroom.ID, f.assignmentID, dto.UpdateAssignmentContentRequest{
 		Title: editable.Title, Description: editable.Description, Questions: questions, Confirm: true, Reason: "Fix key",
 	}); httpErr != nil {
 		t.Fatal(httpErr)
