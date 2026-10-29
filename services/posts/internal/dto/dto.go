@@ -37,8 +37,9 @@ func (request CreatePostRequest) CommentsAllowed() bool {
 }
 
 type UpdatePostRequest struct {
-	Content       string `json:"content" validate:"required,notblank"`
-	AllowComments *bool  `json:"allowComments,omitempty"`
+	Content       string  `json:"content"`
+	AllowComments *bool   `json:"allowComments,omitempty"`
+	AttachmentIDs *[]uint `json:"attachmentIds,omitempty" validate:"omitempty,dive,gt=0"`
 }
 
 type CreateUploadIntentRequest struct {
@@ -128,10 +129,6 @@ type CreateCommentRequest struct {
 	Content          string `json:"content" validate:"required,notblank"`
 	ParentID         *uint  `json:"parentId,omitempty" validate:"omitempty,gt=0"`
 	ReplyToCommentID *uint  `json:"replyToCommentId,omitempty" validate:"omitempty,gt=0"`
-}
-
-type UpdateCommentRequest struct {
-	Content string `json:"content" validate:"required,notblank"`
 }
 
 type ModerationRequest struct {

@@ -38,8 +38,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMiddleware *jwt.AuthMid
 	mux.HandleFunc("DELETE /posts/{id}/like", authMiddleware.Handle(h.UnlikePost))
 	mux.HandleFunc("GET /posts/{id}/comments", authMiddleware.Handle(h.ListPostComments))
 	mux.HandleFunc("POST /posts/{id}/comments", authMiddleware.Handle(h.CreatePostComment))
-	mux.HandleFunc("PATCH /comments/{id}", authMiddleware.Handle(h.UpdatePostComment))
-	mux.HandleFunc("DELETE /comments/{id}", authMiddleware.Handle(h.DeletePostComment))
+	mux.HandleFunc("GET /comments/{id}", authMiddleware.Handle(h.GetPostComment))
 	mux.HandleFunc("POST /comments/{id}/like", authMiddleware.Handle(h.LikePostComment))
 	mux.HandleFunc("DELETE /comments/{id}/like", authMiddleware.Handle(h.UnlikePostComment))
 	mux.HandleFunc("GET /admin/posts", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.ListPostsForModeration)))
@@ -337,6 +336,31 @@ func (h *Handler) ListPostComments(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, response)
 }
 
+// GetPostComment godoc
+// @Summary Get a post comment
+// @Tags comments
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Comment ID"
+// @Success 200 {object} dto.CommentResponse
+// @Failure 400 {object} httpx.HTTPError
+// @Failure 404 {object} httpx.HTTPError
+// @Router /comments/{id} [get]
+func (h *Handler) GetPostComment(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwt.GetUserID(r.Context())
+	id, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
+		return
+	}
+	response, httpErr := h.service.GetPostComment(r.Context(), userID, id)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, response)
+}
+
 func (h *Handler) CreatePostComment(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwt.GetUserID(r.Context())
 	postID, err := httpx.ParsePathID(r, "id")
@@ -355,40 +379,6 @@ func (h *Handler) CreatePostComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, response)
-}
-
-func (h *Handler) UpdatePostComment(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	commentID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var request dto.UpdateCommentRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	response, httpErr := h.service.UpdatePostComment(r.Context(), userID, commentID, request)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) DeletePostComment(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	commentID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.DeletePostComment(r.Context(), userID, commentID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) LikePostComment(w http.ResponseWriter, r *http.Request) {

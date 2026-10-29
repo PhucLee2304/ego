@@ -134,6 +134,16 @@ func (r *Repository) AttachToPost(ctx context.Context, ids []uint, userID string
 	return nil
 }
 
+// DetachFromPost gỡ đính kèm khỏi bài; chúng thành orphan và job dọn dẹp sẽ xóa file sau.
+func (r *Repository) DetachFromPost(ctx context.Context, postID uint, ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.PostAttachment{}).
+		Where("post_id = ? AND id IN ?", postID, ids).
+		Updates(map[string]any{"post_id": nil}).Error
+}
+
 func (r *Repository) ListAttachments(ctx context.Context, postID uint) ([]*model.PostAttachment, error) {
 	var attachments []*model.PostAttachment
 	err := r.db.WithContext(ctx).Where("post_id = ?", postID).Order("sort_order ASC, id ASC").Find(&attachments).Error
@@ -213,14 +223,6 @@ func (r *Repository) CountReplies(ctx context.Context, parentIDs []uint) (map[ui
 		out[row.ParentID] = row.Count
 	}
 	return out, err
-}
-
-func (r *Repository) SaveComment(ctx context.Context, comment *model.PostComment) error {
-	return r.db.WithContext(ctx).Save(comment).Error
-}
-
-func (r *Repository) DeleteComment(ctx context.Context, comment *model.PostComment) error {
-	return r.db.WithContext(ctx).Delete(comment).Error
 }
 
 func (r *Repository) LikePost(ctx context.Context, postID uint, userID string) (bool, error) {

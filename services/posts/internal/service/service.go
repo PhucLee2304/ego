@@ -341,11 +341,12 @@ func (s *Service) attachToPost(ctx context.Context, repo *repository.Repository,
 			videoCount++
 		}
 	}
-	if total > s.cfg.PostMaxBytes || videoCount > 1 {
+	if len(attachments) > s.cfg.MaxAttachments || total > s.cfg.PostMaxBytes || videoCount > 1 {
 		return ErrInvalidAttachment
 	}
 	return nil
 }
+
 func (s *Service) ListCommunityPosts(ctx context.Context, userID string, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError) {
 	q.Normalize()
 	items, total, err := s.repo.ListPosts(ctx, model.PostScopeCommunity, nil, model.PostStatusPublished, nil, q.PaginationQuery)
@@ -432,7 +433,49 @@ func (s *Service) UpdatePost(ctx context.Context, userID string, id uint, req dt
 	if req.AllowComments != nil {
 		post.AllowComments = *req.AllowComments
 	}
-	if err := s.repo.SavePost(ctx, post); err != nil {
+	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
+		// Đưa đính kèm về đúng danh sách gửi lên: gỡ cái không còn, gắn cái mới.
+		if req.AttachmentIDs != nil {
+			current, err := repo.ListAttachments(ctx, post.ID)
+			if err != nil {
+				return err
+			}
+			wanted := make(map[uint]struct{}, len(*req.AttachmentIDs))
+			for _, id := range *req.AttachmentIDs {
+				wanted[id] = struct{}{}
+			}
+			existing := make(map[uint]struct{}, len(current))
+			var removed []uint
+			for _, attachment := range current {
+				existing[attachment.ID] = struct{}{}
+				if _, ok := wanted[attachment.ID]; !ok {
+					removed = append(removed, attachment.ID)
+				}
+			}
+			var added []uint
+			for id := range wanted {
+				if _, ok := existing[id]; !ok {
+					added = append(added, id)
+				}
+			}
+			if err := repo.DetachFromPost(ctx, post.ID, removed); err != nil {
+				return err
+			}
+			if err := s.attachToPost(ctx, repo, userID, post.ID, added); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(post.Content) == "" {
+			attachments, err := repo.ListAttachments(ctx, post.ID)
+			if err != nil {
+				return err
+			}
+			if len(attachments) == 0 {
+				return ErrPostEmpty
+			}
+		}
+		return repo.SavePost(ctx, post)
+	}); err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to update post")
 	}
 	return s.toPostResponse(ctx, post, userID, teacher), nil
@@ -586,6 +629,41 @@ func (s *Service) ListPostComments(ctx context.Context, userID string, postID ui
 		Comments: out, Page: int(query.Page), PageCount: httpx.ToPageCounts(total, query.PageSize), Total: total,
 	}, nil
 }
+
+// GetPostComment trả một comment (kèm số reply nếu là comment gốc) để client
+// mở thẳng tới comment được thông báo.
+func (s *Service) GetPostComment(ctx context.Context, userID string, id uint) (*dto.CommentResponse, *httpx.HTTPError) {
+	c, err := s.repo.GetComment(ctx, id)
+	if err != nil {
+		return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
+	}
+	p, err := s.repo.GetPost(ctx, c.PostID)
+	if err != nil {
+		return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
+	}
+	if p.Status != model.PostStatusPublished && p.AuthorID != userID {
+		return nil, ErrNotFound
+	}
+	teacher := false
+	if p.Scope == model.PostScopeClassroom {
+		access, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
+		if err != nil {
+			return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
+		}
+		teacher = access.IsTeacher
+	}
+	likes, liked, _ := s.repo.CommentStats(ctx, c.ID, userID)
+	out := dto.ToCommentResponse(c, userID, teacher, likes, liked)
+	if c.ParentID == nil {
+		counts, err := s.repo.CountReplies(ctx, []uint{c.ID})
+		if err != nil {
+			return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
+		}
+		out.ReplyCount = counts[c.ID]
+	}
+	s.enrichComments(ctx, []*dto.CommentResponse{out})
+	return out, nil
+}
 func (s *Service) CreatePostComment(ctx context.Context, userID string, postID uint, req dto.CreateCommentRequest) (*dto.CommentResponse, *httpx.HTTPError) {
 	p, err := s.repo.GetPost(ctx, postID)
 	if err != nil {
@@ -641,59 +719,9 @@ func (s *Service) CreatePostComment(ctx context.Context, userID string, postID u
 	}); err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to create post comment")
 	}
-	return dto.ToCommentResponse(c, userID, false, 0, false), nil
-}
-func (s *Service) UpdatePostComment(ctx context.Context, userID string, id uint, req dto.UpdateCommentRequest) (*dto.CommentResponse, *httpx.HTTPError) {
-	c, err := s.repo.GetComment(ctx, id)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to update post comment")
-	}
-	if c.UserID != userID {
-		return nil, ErrForbidden
-	}
-	p, err := s.repo.GetPost(ctx, c.PostID)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to update post comment")
-	}
-	if p.Scope == model.PostScopeClassroom {
-		a, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
-		if err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to update post comment")
-		}
-		if !a.Active {
-			return nil, ErrClassroomReadOnly
-		}
-	}
-	c.Content = req.Content
-	if err := s.repo.SaveComment(ctx, c); err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to update post comment")
-	}
-	return dto.ToCommentResponse(c, userID, false, 0, false), nil
-}
-func (s *Service) DeletePostComment(ctx context.Context, userID string, id uint) *httpx.HTTPError {
-	c, err := s.repo.GetComment(ctx, id)
-	if err != nil {
-		return httpx.FromError(err, "[ERROR] Failed to delete post comment")
-	}
-	p, err := s.repo.GetPost(ctx, c.PostID)
-	if err != nil {
-		return httpx.FromError(err, "[ERROR] Failed to delete post comment")
-	}
-	teacher := false
-	if p.Scope == model.PostScopeClassroom {
-		a, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
-		if err != nil {
-			return httpx.FromError(err, "[ERROR] Failed to delete post comment")
-		}
-		if !a.Active {
-			return ErrClassroomReadOnly
-		}
-		teacher = a.IsTeacher
-	}
-	if c.UserID != userID && !teacher {
-		return ErrForbidden
-	}
-	return httpx.FromError(s.repo.DeleteComment(ctx, c), "[ERROR] Failed to delete post comment")
+	out := dto.ToCommentResponse(c, userID, false, 0, false)
+	s.enrichComments(ctx, []*dto.CommentResponse{out})
+	return out, nil
 }
 func (s *Service) LikePostComment(ctx context.Context, userID string, commentID uint) *httpx.HTTPError {
 	return s.setCommentLiked(ctx, userID, commentID, true)
