@@ -47,7 +47,7 @@ func newAssignmentAttemptFixture(t *testing.T) (*assignmentFixture, *gradebookEv
 	t.Helper()
 	f := newAssignmentFixture(t)
 	gradebook := &gradebookEvents{}
-	f.svc = service.New(repository.NewRepository(f.db), &config.AppConfig{}, nil, testIdentityClient{}, nil, gradebook.publish, f.events.publish)
+	f.svc = service.New(repository.NewRepository(f.db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, gradebook.publish, f.events.publish)
 	return f, gradebook
 }
 

@@ -139,7 +139,7 @@ func TestRoomLifecycleAndPermissions(t *testing.T) {
 
 	repo := repository.NewRepository(db)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}
-	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, nil, testIdentityClient{}, mediaClient, nil, nil)
+	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, nil, testIdentityClient{}, nil, mediaClient, nil, nil)
 
 	now := time.Now()
 	tooEarly, err := svc.CreateSchedule(ctx, "teacher", classroom.ID, dto.CreateScheduleRequest{Title: "Later", StartsAt: now.Add(time.Hour), EndsAt: now.Add(2 * time.Hour)})
@@ -232,7 +232,7 @@ func TestCreateScheduleAndRoomAreAtomic(t *testing.T) {
 	}
 
 	repo := repository.NewRepository(db)
-	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil, nil)
 	now := time.Now()
 	_, err := svc.CreateSchedule(context.Background(), "teacher", classroom.ID, dto.CreateScheduleRequest{
 		Title: "Must roll back", StartsAt: now.Add(time.Hour), EndsAt: now.Add(2 * time.Hour),
@@ -267,7 +267,7 @@ func TestRoomActivityPermissionsAndCleanup(t *testing.T) {
 
 	repo := repository.NewRepository(db)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}
-	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, mediaClient, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, mediaClient, nil, nil)
 	created, err := svc.CreateSchedule(ctx, "teacher", classroom.ID, dto.CreateScheduleRequest{
 		Title: "Activity", StartsAt: now.Add(-time.Minute), EndsAt: now.Add(time.Hour),
 	})
@@ -375,7 +375,7 @@ func TestRoomPermissionsForMembershipAndArchivedClassroom(t *testing.T) {
 
 	repo := repository.NewRepository(db)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}
-	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, nil, testIdentityClient{}, mediaClient, nil, nil)
+	svc := service.New(repo, &config.AppConfig{LiveKitPublicURL: "ws://localhost:7880"}, nil, testIdentityClient{}, nil, mediaClient, nil, nil)
 
 	if _, err := svc.JoinRoom(ctx, "approved", room.ID); err != nil {
 		t.Fatalf("approved member could not join: %v", err)
@@ -419,7 +419,7 @@ func TestRoomLifecycleWorkerAndReconcile(t *testing.T) {
 
 	repo := repository.NewRepository(db)
 	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}, listFailures: 2}
-	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, mediaClient, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, mediaClient, nil, nil)
 
 	liveSchedule := &model.Schedule{ClassroomID: classroom.ID, Title: "Live", StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour)}
 	if err := db.Create(liveSchedule).Error; err != nil {

@@ -26,7 +26,7 @@ func TestExamCatalogHidesPrivateExams(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	svc := service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil)
+	svc := service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil, nil)
 
 	query := dto.GetExamsQuery{}
 	query.Normalize()

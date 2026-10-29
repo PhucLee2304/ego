@@ -45,7 +45,7 @@ func (e *attemptEvents) types() []string {
 }
 
 func newSubmitService(db *gorm.DB, events *attemptEvents) service.Service {
-	return service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, events.publish)
+	return service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil, events.publish)
 }
 
 func startTOEICTest(t *testing.T, svc service.Service, examID uint, userID string) *dto.AttemptResponse {

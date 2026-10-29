@@ -49,7 +49,7 @@ func TestStrictAttemptEnforcement(t *testing.T) {
 	svc := service.New(repository.NewRepository(db), &config.AppConfig{
 		TOEICStrictFlowEnabled: true,
 		TOEICListeningGapMs:    [4]int{5000, 5000, 8000, 8000},
-	}, nil, testIdentityClient{}, nil, nil, nil)
+	}, nil, testIdentityClient{}, nil, nil, nil, nil)
 
 	created, httpErr := svc.CreateAttempt(ctx, "student-1", exam.ID, dto.CreateExamAttemptRequest{Mode: model.AttemptModeTest, ContextType: model.AttemptContextTypeStandalone})
 	if httpErr != nil {
@@ -151,7 +151,7 @@ func TestListeningOnlyAttemptAutoSubmit(t *testing.T) {
 	svc := service.New(repository.NewRepository(db), &config.AppConfig{
 		TOEICStrictFlowEnabled: true,
 		TOEICListeningGapMs:    [4]int{5000, 5000, 8000, 8000},
-	}, nil, testIdentityClient{}, nil, nil, nil)
+	}, nil, testIdentityClient{}, nil, nil, nil, nil)
 
 	start := func(userID string) (uint, time.Time) {
 		t.Helper()

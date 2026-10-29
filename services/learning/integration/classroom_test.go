@@ -16,7 +16,7 @@ import (
 func TestClassroomMembershipLifecycleAndFilters(t *testing.T) {
 	db := learningTestDB(t)
 	cfg := &config.AppConfig{MaxStudentsPerClass: 50}
-	svc := service.New(repository.NewRepository(db), cfg, nil, testIdentityClient{}, nil, nil, nil)
+	svc := service.New(repository.NewRepository(db), cfg, nil, testIdentityClient{}, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	created, err := svc.CreateClassroom(ctx, "teacher-1", dto.CreateClassroomRequest{Name: "  Advanced Math  "})

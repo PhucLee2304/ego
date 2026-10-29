@@ -8,6 +8,7 @@ import (
 
 	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
+	storageClient "ego/api/gen/go/storage"
 	"ego/platform/httpx"
 	learningConfig "ego/services/learning/config"
 	"ego/services/learning/internal/dto"
@@ -214,6 +215,11 @@ type IdentityClient interface {
 	SearchUserIDsByName(ctx context.Context, in *identityClient.SearchUserIDsByNameRequest, opts ...grpc.CallOption) (*identityClient.SearchUserIDsByNameResponse, error)
 }
 
+// StorageClient là interface hẹp tới storage service: chỉ dùng để đổi tên file ảnh lớp thành URL công khai.
+type StorageClient interface {
+	GetPublicURL(ctx context.Context, in *storageClient.GetPublicURLRequest, opts ...grpc.CallOption) (*storageClient.GetPublicURLResponse, error)
+}
+
 // EventPublisher đẩy payload realtime tới mọi kết nối WebSocket của một user.
 type EventPublisher func(userID string, payload any)
 
@@ -222,6 +228,7 @@ type service struct {
 	cfg                *learningConfig.AppConfig
 	notificationClient NotificationClient
 	identityClient     IdentityClient
+	storageClient      StorageClient
 	mediaClient        media.Client
 	roomPublisher      EventPublisher // hub /ws/classrooms
 	attemptPublisher   EventPublisher // hub /ws/exams
@@ -234,6 +241,7 @@ func New(
 	cfg *learningConfig.AppConfig,
 	notificationClient NotificationClient,
 	identityClient IdentityClient,
+	storageClient StorageClient,
 	mediaClient media.Client,
 	roomPublisher EventPublisher,
 	attemptPublisher EventPublisher,
@@ -243,6 +251,7 @@ func New(
 		cfg:                cfg,
 		notificationClient: notificationClient,
 		identityClient:     identityClient,
+		storageClient:      storageClient,
 		mediaClient:        mediaClient,
 		roomPublisher:      roomPublisher,
 		attemptPublisher:   attemptPublisher,

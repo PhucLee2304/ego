@@ -77,7 +77,7 @@ func TestNotificationOutboxIsProcessedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &fakeNotificationClient{}
-	svc := service.New(repo, &config.AppConfig{}, client, testIdentityClient{}, nil, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, client, testIdentityClient{}, nil, nil, nil, nil)
 	if processed, err := svc.ProcessNotificationOutbox(ctx, 10); err != nil || processed != 1 || client.calls != 1 {
 		t.Fatalf("process notification outbox: processed=%d calls=%d err=%v", processed, client.calls, err)
 	}

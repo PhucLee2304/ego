@@ -43,7 +43,7 @@ func newAssignmentFixture(t *testing.T) *assignmentFixture {
 		t.Fatal(err)
 	}
 	events := &attemptEvents{}
-	svc := service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, events.publish)
+	svc := service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil, events.publish)
 	return &assignmentFixture{db: db, svc: svc, events: events, classroom: classroom, other: other, opensAt: time.Now().Add(-time.Hour).UTC().Truncate(time.Second)}
 }
 

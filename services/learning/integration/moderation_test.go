@@ -41,7 +41,7 @@ func TestParticipantModerationAndAudit(t *testing.T) {
 			events = append(events, sentRoomEvent{recipient: recipient, eventType: event.Type, userID: activity.UserID})
 		}
 	}
-	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, mediaClient, publisher, nil)
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, mediaClient, publisher, nil)
 	takeEvents := func() []sentRoomEvent {
 		taken := events
 		events = nil

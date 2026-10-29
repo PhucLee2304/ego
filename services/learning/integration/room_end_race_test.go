@@ -26,7 +26,7 @@ func TestLateHostWebhooksDoNotReopenEndedRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := repository.NewRepository(db)
-	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}, nil, nil)
 	created, err := svc.CreateSchedule(ctx, "teacher", classroom.ID, dto.CreateScheduleRequest{Title: "Race", StartsAt: now.Add(-time.Minute), EndsAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)

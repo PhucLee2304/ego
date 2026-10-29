@@ -95,7 +95,7 @@ func newIntegrityFixture(t *testing.T, maxViolations int) *integrityFixture {
 	f := newAssignmentFixture(t)
 	clock := &testClock{now: time.Now()}
 	student, teacher := &pushRecorder{}, &pushRecorder{}
-	f.svc = service.New(repository.NewRepository(f.db), &config.AppConfig{}, nil, testIdentityClient{}, nil, teacher.publish, student.publish)
+	f.svc = service.New(repository.NewRepository(f.db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, teacher.publish, student.publish)
 	service.SetClock(f.svc, clock.Now)
 	schedule := f.schedule(f.classroom.ID)
 	schedule.Proctored, schedule.MaxViolations = true, &maxViolations
