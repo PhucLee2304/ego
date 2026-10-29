@@ -63,7 +63,7 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 	createNotifications(t, repo)
 	ctx := context.Background()
 
-	items, total, unread, err := repo.GetNotifications(ctx, "1", nil, 1, 0)
+	items, total, unread, err := repo.GetNotifications(ctx, "1", nil, nil, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	read := true
-	items, total, unread, err = repo.GetNotifications(ctx, "1", &read, 10, 0)
+	items, total, unread, err = repo.GetNotifications(ctx, "1", &read, nil, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	unreadOnly := false
-	items, total, unread, err = repo.GetNotifications(ctx, "1", &unreadOnly, 10, 0)
+	items, total, unread, err = repo.GetNotifications(ctx, "1", &unreadOnly, nil, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

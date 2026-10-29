@@ -43,15 +43,29 @@ func New(repo *repository.Repository, sender push.Sender, broadcast Broadcaster)
 }
 
 func (s *service) GetNotifications(ctx context.Context, userID string, query dto.NotificationsQuery) (*dto.NotificationsResponse, *httpx.HTTPError) {
-	items, total, unread, err := s.repo.GetNotifications(ctx, userID, query.Read, int(query.Limit()), int(query.Offset()))
+	var types []string
+	if query.Category != "" {
+		types = model.CategoryTypes[query.Category]
+	}
+	items, total, unread, err := s.repo.GetNotifications(ctx, userID, query.Read, types, int(query.Limit()), int(query.Offset()))
 	if err != nil {
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get notifications", err)
+	}
+	byType, err := s.repo.CountUnreadByType(ctx, userID)
+	if err != nil {
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get notifications", err)
+	}
+	byCategory := map[string]int64{}
+	for dataType, count := range byType {
+		if category := model.CategoryOf(dataType); category != "" {
+			byCategory[category] += count
+		}
 	}
 	responses := make([]*dto.NotificationResponse, len(items))
 	for i, item := range items {
 		responses[i] = dto.ToNotificationResponse(item)
 	}
-	return &dto.NotificationsResponse{Notifications: responses, Page: int(query.Page), PageCount: httpx.ToPageCounts(total, query.PageSize), UnreadCount: unread}, nil
+	return &dto.NotificationsResponse{Notifications: responses, Page: int(query.Page), PageCount: httpx.ToPageCounts(total, query.PageSize), UnreadCount: unread, UnreadByCategory: byCategory}, nil
 }
 
 func (s *service) RegisterDeviceToken(ctx context.Context, userID string, req dto.RegisterDeviceTokenRequest) *httpx.HTTPError {
