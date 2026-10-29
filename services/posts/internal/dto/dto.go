@@ -170,6 +170,7 @@ type PostsResponse struct {
 	Posts     []*PostResponse `json:"posts"`
 	Page      int             `json:"page"`
 	PageCount int             `json:"pageCount"`
+	Total     int64           `json:"total"`
 }
 
 func ToPostResponse(post *model.Post, userID string, teacher bool, likeCount, commentCount int64, liked bool, attachments []*AttachmentResponse) *PostResponse {
@@ -183,7 +184,7 @@ func ToPostResponse(post *model.Post, userID string, teacher bool, likeCount, co
 }
 
 func ToPostsResponse(posts []*PostResponse, total int64, page, pageSize int) *PostsResponse {
-	return &PostsResponse{Posts: posts, Page: page, PageCount: httpx.ToPageCounts(total, int32(pageSize))}
+	return &PostsResponse{Posts: posts, Page: page, PageCount: httpx.ToPageCounts(total, int32(pageSize)), Total: total}
 }
 
 type CommentResponse struct {

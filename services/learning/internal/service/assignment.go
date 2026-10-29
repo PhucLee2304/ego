@@ -211,7 +211,7 @@ func (s *service) AssignExistingExam(ctx context.Context, teacherID string, clas
 	return dto.ToCreatedAssignmentsResponse(assignments), nil
 }
 
-func (s *service) GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int, *httpx.HTTPError) {
+func (s *service) GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int64, *httpx.HTTPError) {
 	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
 	if err != nil {
 		return nil, 0, httpx.FromError(err, errClassroomServiceFailed)
@@ -264,7 +264,7 @@ func (s *service) GetAssignments(ctx context.Context, userID string, classroomID
 		currentUserID = ""
 	}
 	responses := dto.ToAssignmentResponses(assignments, time.Now(), currentUserID, isTeacher, users)
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
 func (s *service) GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, *httpx.HTTPError) {

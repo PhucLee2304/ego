@@ -80,12 +80,12 @@ func (h *handler) GetAssignments(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Normalize()
 
-	resp, pageCounts, httpErr := h.service.GetAssignments(r.Context(), userID, id, query)
+	resp, total, httpErr := h.service.GetAssignments(r.Context(), userID, id, query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, total))
 }
 
 // GetAssignment godoc

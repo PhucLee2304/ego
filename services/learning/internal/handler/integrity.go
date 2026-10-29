@@ -72,12 +72,12 @@ func (h *handler) GetIntegrityEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Normalize()
-	response, pageCounts, httpErr := h.service.GetIntegrityEvents(r.Context(), userID, classroomID, assignmentID, query)
+	response, total, httpErr := h.service.GetIntegrityEvents(r.Context(), userID, classroomID, assignmentID, query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(response, query.PaginationQuery, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(response, query.PaginationQuery, total))
 }
 
 // ReviewIntegrityEvent godoc

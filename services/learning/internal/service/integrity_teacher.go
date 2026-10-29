@@ -32,7 +32,7 @@ func (s *service) teacherAssignment(ctx context.Context, teacherID string, class
 	return s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
 }
 
-func (s *service) GetIntegrityEvents(ctx context.Context, teacherID string, classroomID, assignmentID uint, query dto.IntegrityEventsQuery) ([]*dto.AttemptIntegrityEventResponse, int, *httpx.HTTPError) {
+func (s *service) GetIntegrityEvents(ctx context.Context, teacherID string, classroomID, assignmentID uint, query dto.IntegrityEventsQuery) ([]*dto.AttemptIntegrityEventResponse, int64, *httpx.HTTPError) {
 	level := strings.ToUpper(strings.TrimSpace(query.Level))
 	switch model.IntegrityLevel(level) {
 	case "", model.IntegrityLevelLog, model.IntegrityLevelWarning, model.IntegrityLevelViolation:
@@ -52,7 +52,7 @@ func (s *service) GetIntegrityEvents(ctx context.Context, teacherID string, clas
 	for i, row := range rows {
 		responses[i] = dto.ToAttemptIntegrityEventResponse(&row.AttemptIntegrityEvent, row.StudentID)
 	}
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
 // ReviewIntegrityEvent: giáo viên bấm "Cho tiếp tục làm bài" (CONTINUE) hoặc Cấm (BAN)

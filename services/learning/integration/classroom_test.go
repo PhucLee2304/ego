@@ -59,9 +59,9 @@ func TestClassroomMembershipLifecycleAndFilters(t *testing.T) {
 	active := true
 	studentQuery := dto.ClassroomsQuery{Active: &active}
 	studentQuery.Normalize()
-	studentClasses, pages, err := svc.GetMyClassrooms(ctx, "student-1", studentQuery)
-	if err != nil || pages != 1 || len(studentClasses) != 1 || studentClasses[0].ID != created.ID {
-		t.Fatalf("filter student classrooms: response=%#v pages=%d err=%v", studentClasses, pages, err)
+	studentClasses, total, err := svc.GetMyClassrooms(ctx, "student-1", studentQuery)
+	if err != nil || total != 1 || len(studentClasses) != 1 || studentClasses[0].ID != created.ID {
+		t.Fatalf("filter student classrooms: response=%#v total=%d err=%v", studentClasses, total, err)
 	}
 	teacherQuery := dto.ClassroomsQuery{Query: "advanced"}
 	teacherQuery.Normalize()

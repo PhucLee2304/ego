@@ -197,7 +197,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 	return dto.ToAttemptResponseWithQuestions(attempt), nil
 }
 
-func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, *httpx.HTTPError) {
+func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int64, *httpx.HTTPError) {
 	attempts, total, err := s.repo.GetAttemptsByUserIDAndStatus(ctx, userID, query.Status, query.Limit(), query.Offset())
 	if err != nil {
 		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get attempts", err)
@@ -209,7 +209,7 @@ func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetA
 		responses[i] = dto.ToAttemptResponse(attempt, now)
 	}
 
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
 func (s *service) GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, *httpx.HTTPError) {

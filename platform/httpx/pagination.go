@@ -1,9 +1,10 @@
 package httpx
 
 type PaginatedResponse[T any] struct {
-	Data       []T `json:"data"`
-	Page       int `json:"page"`
-	PageCounts int `json:"pageCounts"`
+	Data       []T   `json:"data"`
+	Page       int   `json:"page"`
+	PageCounts int   `json:"pageCounts"`
+	Total      int64 `json:"total,omitempty"`
 }
 
 type PaginationQuery struct {
@@ -38,10 +39,11 @@ func ToPageCounts(total int64, pageSize int32) int {
 	return pageCounts
 }
 
-func ToPaginatedResponse[T any](data []T, query PaginationQuery, pageCounts int) PaginatedResponse[T] {
+func ToPaginatedResponse[T any](data []T, query PaginationQuery, total int64) PaginatedResponse[T] {
 	return PaginatedResponse[T]{
 		Data:       data,
 		Page:       int(query.Page),
-		PageCounts: pageCounts,
+		PageCounts: ToPageCounts(total, query.PageSize),
+		Total:      total,
 	}
 }

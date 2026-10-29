@@ -71,7 +71,7 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 	return nil, httpx.NewError(http.StatusInternalServerError, errClassroomServiceFailed, errors.New("[ERROR] Could not generate a unique classroom code"))
 }
 
-func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, *httpx.HTTPError) {
+func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError) {
 	var teacherIDs []string
 	if query.Query != "" {
 		usersResp, err := s.identityClient.SearchUserIDsByName(ctx, &identityClient.SearchUserIDsByNameRequest{Query: query.Query})
@@ -108,10 +108,10 @@ func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) 
 		users = usersResp.Users
 	}
 	responses := dto.ToClassroomResponses(classrooms, users)
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
-func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, *httpx.HTTPError) {
+func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError) {
 	var teacherIDs []string
 	if query.Query != "" {
 		usersResp, err := s.identityClient.SearchUserIDsByName(ctx, &identityClient.SearchUserIDsByNameRequest{Query: query.Query})
@@ -148,7 +148,7 @@ func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.
 		users = usersResp.Users
 	}
 	responses := dto.ToClassroomResponses(classrooms, users)
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
 func (s *service) GetClassroom(ctx context.Context, userID string, id uint) (*dto.ClassroomResponse, *httpx.HTTPError) {

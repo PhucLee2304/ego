@@ -31,7 +31,7 @@ type Service interface {
 	GetMe(ctx context.Context, userID string) (*dto.User, *httpx.HTTPError)
 	UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, *httpx.HTTPError)
 	GetRole(ctx context.Context, userID string) (string, error)
-	GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.User, int, *httpx.HTTPError)
+	GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.User, int64, *httpx.HTTPError)
 
 	// RPC
 	ValidateToken(ctx context.Context, tokenString string) (string, error)

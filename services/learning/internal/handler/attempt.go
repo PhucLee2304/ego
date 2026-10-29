@@ -85,13 +85,13 @@ func (h *handler) GetAttempts(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Normalize()
 
-	resp, pageCounts, httpErr := h.service.GetAttempts(r.Context(), userID, query)
+	resp, total, httpErr := h.service.GetAttempts(r.Context(), userID, query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, total))
 }
 
 // GetAttemptQuestions godoc

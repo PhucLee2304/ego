@@ -28,13 +28,13 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Normalize()
 
-	exams, pageCounts, httpErr := h.service.GetList(r.Context(), query)
+	exams, total, httpErr := h.service.GetList(r.Context(), query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(exams, query.PaginationQuery, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(exams, query.PaginationQuery, total))
 }
 
 // GetByID godoc

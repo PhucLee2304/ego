@@ -8,7 +8,7 @@ import (
 	"ego/services/learning/internal/dto"
 )
 
-func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, *httpx.HTTPError) {
+func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int64, *httpx.HTTPError) {
 	exams, total, err := s.repo.GetListExam(ctx, query.Type, query.Limit(), query.Offset())
 	if err != nil {
 		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get exams", err)
@@ -19,7 +19,7 @@ func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.
 		examDTOs[i] = dto.ToGetExamsResponse(exam)
 	}
 
-	return examDTOs, httpx.ToPageCounts(total, query.PageSize), nil
+	return examDTOs, total, nil
 }
 
 func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError) {

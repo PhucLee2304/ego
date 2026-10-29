@@ -89,11 +89,11 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Normalize()
 
-	users, pageCounts, httpErr := h.service.GetList(r.Context(), query)
+	users, total, httpErr := h.service.GetList(r.Context(), query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(users, query, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(users, query, total))
 }

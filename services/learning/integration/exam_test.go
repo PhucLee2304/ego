@@ -30,9 +30,9 @@ func TestExamCatalogHidesPrivateExams(t *testing.T) {
 
 	query := dto.GetExamsQuery{}
 	query.Normalize()
-	exams, pages, err := svc.GetList(ctx, query)
-	if err != nil || pages != 1 || len(exams) != 1 || exams[0].ID != public.ID {
-		t.Fatalf("THPT catalog = %#v pages=%d err=%v", exams, pages, err)
+	exams, total, err := svc.GetList(ctx, query)
+	if err != nil || total != 1 || len(exams) != 1 || exams[0].ID != public.ID {
+		t.Fatalf("THPT catalog = %#v total=%d err=%v", exams, total, err)
 	}
 
 	if got, err := svc.GetByID(ctx, public.ID); err != nil || got.ID != public.ID {
