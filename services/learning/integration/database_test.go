@@ -110,6 +110,13 @@ func TestScheduleCrudAndCalendar(t *testing.T) {
 	if httpErr != nil || updated.Title != "Consultation" || updated.CalendarType != dto.CalendarTypeClassSchedule {
 		t.Fatalf("update schedule: response=%#v err=%v", updated, httpErr)
 	}
+	past := time.Now().Add(-time.Hour)
+	if _, httpErr := f.svc.UpdateSchedule(ctx, "teacher-1", created.ID, dto.UpdateScheduleRequest{Title: "Past", StartsAt: past, EndsAt: past.Add(30 * time.Minute)}); httpErr != service.ErrScheduleInPast {
+		t.Fatalf("update schedule into the past: err=%v", httpErr)
+	}
+	if _, httpErr := f.svc.CreateSchedule(ctx, "teacher-1", f.classroom.ID, dto.CreateScheduleRequest{Title: "Past", StartsAt: past, EndsAt: past.Add(30 * time.Minute)}); httpErr != service.ErrScheduleInPast {
+		t.Fatalf("create schedule in the past: err=%v", httpErr)
+	}
 	if httpErr := f.svc.DeleteSchedule(ctx, "teacher-1", created.ID); httpErr != nil {
 		t.Fatal(httpErr)
 	}

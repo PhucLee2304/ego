@@ -32,6 +32,7 @@ var (
 	ErrClassroomCapacityFull  = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom capacity is full", nil)
 	ErrTeacherCannotJoinClass = httpx.NewError(http.StatusBadRequest, "[ERROR] Teacher cannot join own classroom as student", nil)
 	ErrScheduleInvalidTime    = httpx.NewError(http.StatusBadRequest, "[ERROR] Schedule end time must be after start time", nil)
+	ErrScheduleInPast         = httpx.NewError(http.StatusBadRequest, "[ERROR] Schedule cannot start in the past", nil)
 	ErrCalendarInvalidRange   = httpx.NewError(http.StatusBadRequest, "[ERROR] Calendar range must be valid and no longer than 366 days", nil)
 	ErrRoomLive               = httpx.NewError(http.StatusConflict, "[CONFLICT] The room is currently live", nil)
 	ErrRoomNotLive            = httpx.NewError(http.StatusBadRequest, "[ERROR] This session has not started yet", nil)
