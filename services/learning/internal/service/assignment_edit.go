@@ -15,6 +15,7 @@ import (
 	"ego/services/learning/internal/repository"
 	"ego/services/learning/internal/socket"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -50,7 +51,7 @@ func (s *service) GetEditableAssignment(ctx context.Context, teacherID string, c
 		activeAttempts += activeCount
 		submittedAttempts += totalCount - activeCount
 		hasAttempts = hasAttempts || totalCount > 0
-		affected = append(affected, &dto.AffectedAssignmentResponse{ID: related.ID, ClassroomID: related.ClassroomID, ClassroomName: related.Classroom.Name, Active: related.Active})
+		affected = append(affected, &dto.AffectedAssignmentResponse{ID: related.ID, ClassroomID: related.ClassroomID, ClassroomName: related.Classroom.Name, Active: related.Active, Duration: related.Duration, OpensAt: related.OpensAt, DueAt: related.DueAt, Proctored: related.Proctored, MaxViolations: related.MaxViolations})
 	}
 	return &dto.EditableAssignmentResponse{ID: assignment.ID, ExamID: assignment.ExamID, Title: exam.Title, Description: exam.Description, Questions: dto.ToEditableAssignmentQuestions(exam), HasAttempts: hasAttempts, ActiveAttempts: activeAttempts, SubmittedAttempts: submittedAttempts, AffectedAssignments: affected}, nil
 }
@@ -78,13 +79,8 @@ func (s *service) UpdateAssignment(ctx context.Context, teacherID string, classr
 		if err != nil {
 			return err
 		}
-		if assignmentContentChanged(exam, req) {
-			content := dto.UpdateAssignmentContentRequest{Title: req.Title, Description: req.Description, Questions: req.Questions, Confirm: req.Confirm, Reason: req.Reason}
-			if _, err := s.updateAssignmentContentTx(ctx, repo, &events, teacherID, assignment, content); err != nil {
-				return err
-			}
-		}
-
+		// Mọi thay đổi (đề, lịch, lớp giao thêm) gom vào một dòng lịch sử. Đọc lịch cũ
+		// trước khi sửa đề vì sửa đề có thể tạm dừng/bật lại assignment.
 		related, err := repo.GetAssignmentsByExamID(ctx, assignment.ExamID)
 		if err != nil {
 			return err
@@ -93,14 +89,36 @@ func (s *service) UpdateAssignment(ctx context.Context, teacherID string, classr
 		for _, item := range related {
 			byClassroom[item.ClassroomID] = item
 		}
+		var scheduleChanges []string
 		var added []dto.AssignmentScheduleRequest
 		for _, schedule := range req.Schedules {
-			existing, ok := byClassroom[schedule.ClassroomID]
-			if !ok {
-				added = append(added, schedule)
+			if existing, ok := byClassroom[schedule.ClassroomID]; ok {
+				scheduleChanges = append(scheduleChanges, describeScheduleChanges(existing.Classroom.Name, existing, schedule)...)
 				continue
 			}
-			if !assignmentScheduleChanged(existing, schedule) {
+			target, err := repo.GetClassroomByID(ctx, schedule.ClassroomID)
+			if err != nil {
+				return err
+			}
+			added = append(added, schedule)
+			scheduleChanges = append(scheduleChanges, describeAssigned(target.Name, schedule))
+		}
+
+		if assignmentContentChanged(exam, req) {
+			content := dto.UpdateAssignmentContentRequest{Title: req.Title, Description: req.Description, Questions: req.Questions, Confirm: req.Confirm, Reason: req.Reason}
+			changes := append(describeContentChanges(exam, req), scheduleChanges...)
+			if _, err := s.updateAssignmentContentTx(ctx, repo, &events, teacherID, assignment, content, changes); err != nil {
+				return err
+			}
+		} else if len(scheduleChanges) > 0 {
+			if err := repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: assignment.ExamID, ActorID: teacherID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON("{}"), After: datatypes.JSON("{}"), ScoreChanges: datatypes.JSON("[]"), Changes: auditChanges(scheduleChanges)}); err != nil {
+				return err
+			}
+		}
+
+		for _, schedule := range req.Schedules {
+			existing, ok := byClassroom[schedule.ClassroomID]
+			if !ok || !assignmentScheduleChanged(existing, schedule) {
 				continue
 			}
 			proctored, maxViolations := schedule.Proctored, maxViolationsOrDefault(schedule.MaxViolations)
@@ -174,7 +192,7 @@ func assignmentScheduleChanged(assignment *model.Assignment, schedule dto.Assign
 // assignment dùng chung đề, nộp bài đang làm, sửa/đính chính đề và bật lại
 // assignment đều nằm trong transaction: đề sửa không hợp lệ thì assignment không
 // bị kẹt ở trạng thái tạm dừng. Sự kiện socket được hoãn vào events, publish sau commit.
-func (s *service) updateAssignmentContentTx(ctx context.Context, repo repository.Repository, events *[]pendingEvent, teacherID string, assignment *model.Assignment, req dto.UpdateAssignmentContentRequest) (*model.Exam, error) {
+func (s *service) updateAssignmentContentTx(ctx context.Context, repo repository.Repository, events *[]pendingEvent, teacherID string, assignment *model.Assignment, req dto.UpdateAssignmentContentRequest, changes []string) (*model.Exam, error) {
 	assignments, err := repo.GetAssignmentsByExamID(ctx, assignment.ExamID)
 	if err != nil {
 		return nil, err
@@ -214,7 +232,7 @@ func (s *service) updateAssignmentContentTx(ctx context.Context, repo repository
 	for i, question := range req.Questions {
 		questions[i] = dto.UpdatePrivateExamQuestionRequest{ID: question.ID, Content: strings.TrimSpace(question.Content), Explanation: question.Explanation, Options: question.Options, CorrectOptionIndex: question.CorrectOptionIndex, ExcludedFromScore: question.ExcludedFromScore, OptionIDs: question.OptionIDs}
 	}
-	exam, err := txService.updatePrivateExam(ctx, assignment.ExamID, dto.UpdatePrivateExamRequest{Title: strings.TrimSpace(req.Title), Description: req.Description, Questions: questions, CorrectionOnly: totalAttempts > 0, ActorID: teacherID, Reason: strings.TrimSpace(req.Reason)})
+	exam, err := txService.updatePrivateExam(ctx, assignment.ExamID, dto.UpdatePrivateExamRequest{Title: strings.TrimSpace(req.Title), Description: req.Description, Questions: questions, CorrectionOnly: totalAttempts > 0, ActorID: teacherID, Reason: strings.TrimSpace(req.Reason), Changes: changes})
 	if err != nil {
 		return nil, err
 	}

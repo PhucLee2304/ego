@@ -370,6 +370,10 @@ func TestUpdateAssignmentCombined(t *testing.T) {
 	if err := f.db.Where("classroom_id = ?", f.other.ID).First(&copied).Error; err != nil || copied.Title != "Renamed" {
 		t.Fatalf("new class must get the renamed assignment: %#v err=%v", copied, err)
 	}
+	audits, _ := f.svc.GetAssignmentAudits(ctx, "teacher-1", f.classroom.ID, assignment.ID)
+	if len(audits) != 1 || !hasChange(audits[0].Changes, "Title: \"") || !hasChange(audits[0].Changes, ": due ") || !hasChange(audits[0].Changes, "Assigned to "+f.other.Name) {
+		t.Fatalf("edit without attempts must be audited with its changes: %#v", audits)
+	}
 
 	// Có bài làm: đính chính đáp án + giao lớp C khi chưa xác nhận thì 409, lớp C không có gì.
 	f.startAssignmentAttempt(t, assignment.ID, assignment.ExamID, "student-1")
@@ -387,8 +391,8 @@ func TestUpdateAssignmentCombined(t *testing.T) {
 	if n := countIn(third.ID); n != 1 {
 		t.Fatalf("confirmed update must assign the new class, got %d", n)
 	}
-	audits, _ := f.svc.GetAssignmentAudits(ctx, "teacher-1", f.classroom.ID, assignment.ID)
-	if len(audits) == 0 || audits[0].Reason != "wrong key" {
+	audits, _ = f.svc.GetAssignmentAudits(ctx, "teacher-1", f.classroom.ID, assignment.ID)
+	if len(audits) != 2 || audits[0].Reason != "wrong key" || !hasChange(audits[0].Changes, "Q1: correct answer A → B") || !hasChange(audits[0].Changes, "Assigned to Class C") {
 		t.Fatalf("correction must be audited with the shared reason: %#v", audits)
 	}
 }
@@ -410,6 +414,33 @@ func TestUpdateAssignmentUnchangedIsNoop(t *testing.T) {
 	if len(audits) != 0 {
 		t.Fatalf("unchanged form must not add an audit, got %d", len(audits))
 	}
+}
+
+// Chỉ đổi lịch (không đổi đề) vẫn ghi một dòng lịch sử.
+func TestUpdateAssignmentScheduleOnlyIsAudited(t *testing.T) {
+	f := newAssignmentFixture(t)
+	ctx := context.Background()
+	assignment := f.create(t, f.classroom.ID).Assignments[0]
+	request := editRequest(ctx, t, f.svc, f.classroom.ID, assignment.ID)
+	schedule := f.schedule(f.classroom.ID)
+	schedule.Duration += 15
+	request.Schedules = []dto.AssignmentScheduleRequest{schedule}
+	if _, httpErr := f.svc.UpdateAssignment(ctx, "teacher-1", f.classroom.ID, assignment.ID, request); httpErr != nil {
+		t.Fatalf("schedule update: %v", httpErr)
+	}
+	audits, _ := f.svc.GetAssignmentAudits(ctx, "teacher-1", f.classroom.ID, assignment.ID)
+	if len(audits) != 1 || len(audits[0].Changes) != 1 || !hasChange(audits[0].Changes, "time limit") {
+		t.Fatalf("schedule-only edit must be audited: %#v", audits)
+	}
+}
+
+func hasChange(changes []string, part string) bool {
+	for _, change := range changes {
+		if strings.Contains(change, part) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestResetAssignmentAttempt(t *testing.T) {

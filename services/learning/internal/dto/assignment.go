@@ -100,6 +100,12 @@ type AffectedAssignmentResponse struct {
 	ClassroomID   uint   `json:"classroomId"`
 	ClassroomName string `json:"classroomName"`
 	Active        bool   `json:"active"`
+	// Lịch của lớp đó, để màn sửa mở từ lớp nào cũng sửa được lịch mọi lớp.
+	Duration      int       `json:"duration"`
+	OpensAt       time.Time `json:"opensAt"`
+	DueAt         time.Time `json:"dueAt"`
+	Proctored     bool      `json:"proctored"`
+	MaxViolations int       `json:"maxViolations"`
 }
 
 type EditableAssignmentQuestion struct {
@@ -118,6 +124,7 @@ type ExamAuditResponse struct {
 	ActorID      string                          `json:"actorId"`
 	Actor        *UserInfo                       `json:"actor,omitempty"`
 	Reason       string                          `json:"reason"`
+	Changes      []string                        `json:"changes"`
 	Before       json.RawMessage                 `json:"before"`
 	After        json.RawMessage                 `json:"after"`
 	RegradedAt   *time.Time                      `json:"regradedAt,omitempty"`
@@ -324,7 +331,12 @@ func ToEditableAssignmentQuestions(exam *model.Exam) []*EditableAssignmentQuesti
 
 // ToExamAuditResponse giữ đúng dữ liệu cũ đi qua gRPC: thời gian làm tròn tới giây.
 func ToExamAuditResponse(audit *model.ExamAudit) (*ExamAuditResponse, error) {
-	item := &ExamAuditResponse{ID: audit.ID, ExamID: audit.ExamID, ActorID: audit.ActorID, Reason: audit.Reason, Before: json.RawMessage(audit.Before), After: json.RawMessage(audit.After), CreatedAt: time.Unix(audit.CreatedAt.Unix(), 0), ScoreChanges: []*ExamAuditScoreChangeResponse{}}
+	item := &ExamAuditResponse{ID: audit.ID, ExamID: audit.ExamID, ActorID: audit.ActorID, Reason: audit.Reason, Before: json.RawMessage(audit.Before), After: json.RawMessage(audit.After), CreatedAt: time.Unix(audit.CreatedAt.Unix(), 0), ScoreChanges: []*ExamAuditScoreChangeResponse{}, Changes: []string{}}
+	if len(audit.Changes) > 0 {
+		if err := json.Unmarshal(audit.Changes, &item.Changes); err != nil {
+			return nil, err
+		}
+	}
 	if audit.RegradedAt != nil {
 		value := time.Unix(audit.RegradedAt.Unix(), 0)
 		item.RegradedAt = &value

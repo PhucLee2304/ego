@@ -16,6 +16,7 @@ type UpdatePrivateExamRequest struct {
 	CorrectionOnly bool
 	ActorID        string
 	Reason         string
+	Changes        []string
 }
 
 type UpdatePrivateExamQuestionRequest struct {

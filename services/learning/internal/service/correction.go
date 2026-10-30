@@ -134,7 +134,7 @@ func (s *service) correctPrivateExam(ctx context.Context, repo repository.Reposi
 	if err != nil {
 		return nil, err
 	}
-	return updated, repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON(changes), RegradedAt: &regradedAt})
+	return updated, repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON(changes), RegradedAt: &regradedAt, Changes: auditChanges(req.Changes)})
 }
 
 // getExamAudits trả lịch sử sửa/đính chính của đề private (mới nhất trước).

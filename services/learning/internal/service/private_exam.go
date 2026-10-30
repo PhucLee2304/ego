@@ -135,7 +135,7 @@ func (s *service) updatePrivateExam(ctx context.Context, id uint, req dto.Update
 		if err != nil {
 			return err
 		}
-		return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON("[]")})
+		return repo.CreateExamAudit(ctx, &model.ExamAudit{ExamID: id, ActorID: req.ActorID, Reason: strings.TrimSpace(req.Reason), Before: datatypes.JSON(before), After: datatypes.JSON(after), ScoreChanges: datatypes.JSON("[]"), Changes: auditChanges(req.Changes)})
 	})
 	if err != nil {
 		return nil, err
