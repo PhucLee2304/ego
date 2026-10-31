@@ -47,7 +47,7 @@ func (s *service) SetAssignmentActive(ctx context.Context, teacherID string, cla
 				return err
 			}
 			// Khi tắt Assignment, nộp ngay mọi attempt đang làm bằng các đáp án đã lưu.
-			if _, err := s.withRepoDeferringEvents(repo, &events).submitAssignmentAttempts(ctx, assignmentID); err != nil {
+			if _, err := s.withRepoDeferringEvents(repo, &events).submitAssignmentAttempts(ctx, assignmentID, SubmitReasonAssignmentPaused); err != nil {
 				return err
 			}
 		} else {

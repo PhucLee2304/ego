@@ -137,7 +137,28 @@ func readErrors(errs <-chan error) []error {
 // thay toàn bộ đáp án đã lưu) hoặc auto-submit/lazy auto-submit (nil, chấm lại
 // đáp án đã lưu qua WS).
 func (s *service) submitAttempt(ctx context.Context, userID string, attemptID uint, submittedAnswers *[]dto.SubmitAttemptAnswer) (*dto.AttemptResponse, error) {
-	return s.finishAttempt(ctx, userID, attemptID, submittedAnswers, nil)
+	return s.finishAttempt(ctx, userID, attemptID, submittedAnswers, nil, "")
+}
+
+// Lý do server tự nộp bài, gửi kèm ATTEMPT_SUBMITTED để client báo cho học sinh trước
+// khi chuyển sang trang kết quả.
+const (
+	SubmitReasonExamUpdated      = "EXAM_UPDATED"
+	SubmitReasonAssignmentPaused = "ASSIGNMENT_PAUSED"
+	SubmitReasonRemovedFromClass = "REMOVED_FROM_CLASS"
+)
+
+func submitPayload(attemptID uint, reason string) map[string]any {
+	payload := map[string]any{"attemptId": attemptID}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	return payload
+}
+
+// submitAttemptWithReason là submitAttempt bằng đáp án đã lưu, kèm lý do cho sự kiện socket.
+func (s *service) submitAttemptWithReason(ctx context.Context, userID string, attemptID uint, reason string) (*dto.AttemptResponse, error) {
+	return s.finishAttempt(ctx, userID, attemptID, nil, nil, reason)
 }
 
 // attemptTermination là thông tin đình chỉ khi finishAttempt chốt bài vì vi phạm
@@ -149,11 +170,11 @@ type attemptTermination struct {
 
 // finishAttempt là submitAttempt kèm đình chỉ tùy chọn. Đình chỉ chỉ chốt được bài
 // còn ACTIVE; bài đã nộp hoặc đã hủy trả ErrAttemptAlreadySubmitted / ErrAttemptCancelled.
-func (s *service) finishAttempt(ctx context.Context, userID string, attemptID uint, submittedAnswers *[]dto.SubmitAttemptAnswer, termination *attemptTermination) (*dto.AttemptResponse, error) {
+func (s *service) finishAttempt(ctx context.Context, userID string, attemptID uint, submittedAnswers *[]dto.SubmitAttemptAnswer, termination *attemptTermination, reason string) (*dto.AttemptResponse, error) {
 	if submittedAnswers == nil && termination == nil && s.attemptPublisher != nil {
 		s.attemptPublisher(userID, map[string]any{
 			"type":    "ATTEMPT_SUBMITTING",
-			"payload": map[string]any{"attemptId": attemptID},
+			"payload": submitPayload(attemptID, reason),
 		})
 	}
 	var response *dto.AttemptResponse
@@ -361,10 +382,9 @@ func (s *service) finishAttempt(ctx context.Context, userID string, attemptID ui
 		s.publishGradebookEvents([]*gradebookEvent{gradebook})
 	}
 	if s.attemptPublisher != nil && response != nil {
-		s.attemptPublisher(userID, map[string]any{
-			"type":    "ATTEMPT_SUBMITTED",
-			"payload": map[string]any{"attemptId": attemptID, "score": response.Score},
-		})
+		payload := submitPayload(attemptID, reason)
+		payload["score"] = response.Score
+		s.attemptPublisher(userID, map[string]any{"type": "ATTEMPT_SUBMITTED", "payload": payload})
 	}
 	return response, nil
 }

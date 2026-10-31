@@ -222,7 +222,7 @@ func (s *service) updateAssignmentContentTx(ctx context.Context, repo repository
 	txService := s.withRepoDeferringEvents(repo, events)
 	if totalAttempts > 0 {
 		for _, related := range assignments {
-			if _, err := txService.submitAssignmentAttempts(ctx, related.ID); err != nil {
+			if _, err := txService.submitAssignmentAttempts(ctx, related.ID, SubmitReasonExamUpdated); err != nil {
 				return nil, err
 			}
 		}

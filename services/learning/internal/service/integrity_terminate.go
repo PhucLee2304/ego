@@ -18,7 +18,7 @@ func (s *service) terminateAttempt(ctx context.Context, repo repository.Reposito
 		Payload: socket.AttemptTerminatedPayload{AttemptID: attempt.ID, Reason: string(reason)},
 	}})
 	termination := &attemptTermination{reason: reason, actor: actor}
-	if _, err := s.withRepoDeferringEvents(repo, events).finishAttempt(ctx, attempt.UserID, attempt.ID, nil, termination); err != nil {
+	if _, err := s.withRepoDeferringEvents(repo, events).finishAttempt(ctx, attempt.UserID, attempt.ID, nil, termination, ""); err != nil {
 		return nil, err
 	}
 	s.integrity.clearAttempt(attempt.ID)

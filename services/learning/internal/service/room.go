@@ -186,10 +186,6 @@ func (s *service) EndRoom(ctx context.Context, teacherID string, roomID uint) (*
 		return nil, ErrClassroomForbidden
 	}
 	if room.Status == model.RoomStatusEnded {
-		// Lần gọi trước có thể đã lưu ENDED nhưng xóa phòng LiveKit thất bại; thử xóa lại.
-		if s.mediaClient != nil {
-			_ = s.mediaClient.DeleteRoom(ctx, media.RoomName(room.ID))
-		}
 		return dto.ToRoomResponse(room, true), nil
 	}
 	if room.Status != model.RoomStatusLive {
