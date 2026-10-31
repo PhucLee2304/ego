@@ -55,8 +55,8 @@ func (s *service) GetIntegrityEvents(ctx context.Context, teacherID string, clas
 	return responses, total, nil
 }
 
-// ReviewIntegrityEvent: giáo viên bấm "Cho tiếp tục làm bài" (CONTINUE) hoặc Cấm (BAN)
-// trên thẻ vi phạm. Review idempotent: cùng action → 200, đổi action → 409. CONTINUE
+// ReviewIntegrityEvent: giáo viên bấm "Cho tiếp tục làm bài" (CONTINUE), "Vẫn tính" (KEEP)
+// hoặc Cấm (BAN) trên thẻ vi phạm. KEEP chỉ đánh dấu đã xem, giữ nguyên ViolationCount. Review idempotent: cùng action → 200, đổi action → 409. CONTINUE
 // lúc bài còn đang làm thì trừ ViolationCount đi 1 (xóa vi phạm đó) và push
 // ATTEMPT_VIOLATION_CLEARED cho học sinh; bài đã kết thúc thì chỉ đánh dấu đã xem.
 func (s *service) ReviewIntegrityEvent(ctx context.Context, teacherID string, classroomID, assignmentID uint, eventID string, req dto.ReviewIntegrityEventRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError) {
@@ -65,12 +65,16 @@ func (s *service) ReviewIntegrityEvent(ctx context.Context, teacherID string, cl
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
 	review, serverType := model.IntegrityReviewContinueAllowed, model.IntegrityEventContinueAllowed
-	if req.Action == "BAN" {
+	switch req.Action {
+	case "BAN":
 		review, serverType = model.IntegrityReviewBanned, model.IntegrityEventTeacherBanned
+	case "KEEP":
+		review, serverType = model.IntegrityReviewKept, model.IntegrityEventViolationKept
 	}
 
 	var response *dto.AttemptIntegrityResponse
 	var events []pendingEvent
+	var gradebook *gradebookEvent
 	err = s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		row, err := repo.GetAssignmentIntegrityEvent(ctx, assignment.ID, eventID)
 		if err != nil {
@@ -97,8 +101,8 @@ func (s *service) ReviewIntegrityEvent(ctx context.Context, teacherID string, cl
 			response = dto.ToAttemptIntegrityResponse(attempt)
 			return nil
 		}
-		if review == model.IntegrityReviewBanned && attempt.Status != model.AttemptStatusInProgress {
-			return ErrAttemptAlreadySubmitted
+		if review == model.IntegrityReviewBanned && attempt.IntegrityOutcome == model.IntegrityOutcomeTerminated {
+			return ErrAttemptAlreadyTerminated
 		}
 
 		now := s.clock()
@@ -124,7 +128,12 @@ func (s *service) ReviewIntegrityEvent(ctx context.Context, teacherID string, cl
 			}})
 		}
 		if review == model.IntegrityReviewBanned {
-			if attempt, err = s.terminateAttempt(ctx, repo, attempt, model.IntegrityTerminationTeacherBanned, teacherID, &events); err != nil {
+			if attempt.Status == model.AttemptStatusInProgress {
+				attempt, err = s.terminateAttempt(ctx, repo, attempt, model.IntegrityTerminationTeacherBanned, teacherID, &events)
+			} else {
+				attempt, gradebook, err = s.banSubmittedAttempt(ctx, repo, attempt, teacherID)
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -140,6 +149,9 @@ func (s *service) ReviewIntegrityEvent(ctx context.Context, teacherID string, cl
 	})
 	if err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
+	}
+	if gradebook != nil {
+		s.publishGradebookEvents([]*gradebookEvent{gradebook})
 	}
 	s.publishPendingEvents(events)
 	return response, nil
@@ -157,7 +169,8 @@ func lockStudentAttempt(ctx context.Context, repo repository.Repository, assignm
 	return attempt, nil
 }
 
-// BanAttempt: Cấm không gắn với thẻ vi phạm nào (vd từ dòng WARNING).
+// BanAttempt: Cấm không gắn với thẻ vi phạm nào (vd từ dòng WARNING). Bài đang làm thì
+// đình chỉ và nộp luôn; bài đã nộp thì đình chỉ kết quả (điểm 0, khôi phục được).
 func (s *service) BanAttempt(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string, req dto.BanAttemptRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError) {
 	assignment, err := s.teacherAssignment(ctx, teacherID, classroomID, assignmentID)
 	if err != nil {
@@ -165,15 +178,18 @@ func (s *service) BanAttempt(ctx context.Context, teacherID string, classroomID,
 	}
 	var response *dto.AttemptIntegrityResponse
 	var events []pendingEvent
+	var gradebook *gradebookEvent
 	err = s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		attempt, err := lockStudentAttempt(ctx, repo, assignment.ID, studentID)
 		if err != nil {
 			return err
 		}
-		if attempt.Status != model.AttemptStatusInProgress {
-			return ErrAttemptAlreadySubmitted
+		if attempt.Status == model.AttemptStatusInProgress {
+			attempt, err = s.terminateAttempt(ctx, repo, attempt, model.IntegrityTerminationTeacherBanned, teacherID, &events)
+		} else {
+			attempt, gradebook, err = s.banSubmittedAttempt(ctx, repo, attempt, teacherID)
 		}
-		if attempt, err = s.terminateAttempt(ctx, repo, attempt, model.IntegrityTerminationTeacherBanned, teacherID, &events); err != nil {
+		if err != nil {
 			return err
 		}
 		if err := s.recordServerEvent(ctx, repo, attempt, model.IntegrityEventTeacherBanned, model.IntegrityLevelLog, nil, trimmedNote(req.Note), &events); err != nil {
@@ -184,6 +200,9 @@ func (s *service) BanAttempt(ctx context.Context, teacherID string, classroomID,
 	})
 	if err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
+	}
+	if gradebook != nil {
+		s.publishGradebookEvents([]*gradebookEvent{gradebook})
 	}
 	s.publishPendingEvents(events)
 	return response, nil

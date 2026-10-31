@@ -59,7 +59,7 @@ type IntegrityEventsQuery struct {
 }
 
 type ReviewIntegrityEventRequest struct {
-	Action string `json:"action" validate:"required,oneof=CONTINUE BAN"`
+	Action string `json:"action" validate:"required,oneof=CONTINUE KEEP BAN"`
 }
 
 type BanAttemptRequest struct {

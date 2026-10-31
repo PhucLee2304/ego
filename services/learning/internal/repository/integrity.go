@@ -48,6 +48,7 @@ func (r *repository) UpdateAttemptIntegrity(ctx context.Context, attempt *model.
 	return r.db.WithContext(ctx).
 		Model(attempt).
 		Select("violation_count", "correct_answers", "raw_score", "score", "integrity_outcome",
+			"terminated_at", "termination_reason", "terminated_by",
 			"reinstated_at", "reinstated_by", "reinstate_note", "updated_at").
 		Updates(attempt).Error
 }

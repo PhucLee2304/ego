@@ -51,6 +51,7 @@ const (
 	IntegrityEventSessionReleased   IntegrityEventType = "SESSION_RELEASED"
 	IntegrityEventTeacherBanned     IntegrityEventType = "TEACHER_BANNED"
 	IntegrityEventContinueAllowed   IntegrityEventType = "CONTINUE_ALLOWED"
+	IntegrityEventViolationKept     IntegrityEventType = "VIOLATION_KEPT"
 	IntegrityEventResultReinstated  IntegrityEventType = "RESULT_REINSTATED"
 )
 
@@ -59,6 +60,8 @@ type IntegrityReview string
 const (
 	IntegrityReviewContinueAllowed IntegrityReview = "CONTINUE_ALLOWED"
 	IntegrityReviewBanned          IntegrityReview = "BANNED"
+	// IntegrityReviewKept: giáo viên đã xem và vẫn tính vi phạm (không trừ, không cấm).
+	IntegrityReviewKept IntegrityReview = "KEPT"
 )
 
 // AttemptIntegrityEvent là một sự kiện giám sát; EventID unique theo attempt (idempotency).

@@ -414,6 +414,15 @@ func TestIntegrityReviewAndBan(t *testing.T) {
 		t.Fatalf("reviewing a non-violation must be 400, got %v", httpErr)
 	}
 
+	// KEEP: đánh dấu đã xem, vẫn tính vi phạm.
+	f.awayEpisode(t, attempt.ID, "c1", claim.SessionEpoch, "vk", 5*time.Second)
+	if resp, err := review("vk-start", "KEEP"); err != nil || resp.ViolationCount != 1 || resp.Status != "ACTIVE" {
+		t.Fatalf("keep must not decrement: %#v %v", resp, err)
+	}
+	if _, httpErr := f.svc.ReviewIntegrityEvent(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "vk-start", dto.ReviewIntegrityEventRequest{Action: "CONTINUE"}); httpErr == nil || httpErr.StatusCode != http.StatusConflict {
+		t.Fatalf("changing a kept review must be 409, got %v", httpErr)
+	}
+
 	f.awayEpisode(t, attempt.ID, "c1", claim.SessionEpoch, "v2", 5*time.Second)
 	resp, err = review("v2-start", "BAN")
 	if err != nil || resp.Status != "SUBMITTED" || resp.IntegrityOutcome != "TERMINATED" || resp.TerminationReason == nil || *resp.TerminationReason != "TEACHER_BANNED" || resp.Score == nil || *resp.Score != 0 {
@@ -486,6 +495,34 @@ func TestIntegrityRegradeKeepsTerminatedScore(t *testing.T) {
 	stored := f.attempt(t, attempt.ID)
 	if stored.IntegrityOutcome != model.IntegrityOutcomeTerminated || stored.Score == nil || *stored.Score != 0 || stored.RawScore == nil {
 		t.Fatalf("regraded terminated attempt = %#v", stored)
+	}
+}
+
+// Cấm sau khi nộp: đình chỉ kết quả (Score 0, giữ RawScore), Cấm lần nữa 409, Khôi phục trả điểm.
+func TestIntegrityBanAfterSubmit(t *testing.T) {
+	f := newIntegrityFixture(t, 2)
+	ctx := context.Background()
+	attempt := f.start(t)
+	if _, httpErr := f.svc.SubmitAttempt(ctx, "student-1", attempt.ID, dto.SubmitAttemptRequest{}); httpErr != nil {
+		t.Fatal(httpErr)
+	}
+	before := f.attempt(t, attempt.ID)
+	resp, httpErr := f.svc.BanAttempt(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "student-1", dto.BanAttemptRequest{})
+	if httpErr != nil || resp.IntegrityOutcome != "TERMINATED" || resp.TerminationReason == nil || *resp.TerminationReason != "TEACHER_BANNED" {
+		t.Fatalf("ban after submit = %#v err=%v", resp, httpErr)
+	}
+	stored := f.attempt(t, attempt.ID)
+	if stored.Status != model.AttemptStatusSubmitted || stored.Score == nil || *stored.Score != 0 || stored.RawScore == nil || before.Score == nil || *stored.RawScore != *before.Score || stored.TerminatedAt == nil {
+		t.Fatalf("banned submitted attempt = %#v", stored)
+	}
+	if _, httpErr := f.svc.BanAttempt(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "student-1", dto.BanAttemptRequest{}); httpErr == nil || httpErr.StatusCode != http.StatusConflict {
+		t.Fatalf("second ban must be 409, got %v", httpErr)
+	}
+	if _, httpErr := f.svc.ReinstateAttempt(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "student-1", dto.ReinstateAttemptRequest{Note: "Nhầm"}); httpErr != nil {
+		t.Fatal(httpErr)
+	}
+	if restored := f.attempt(t, attempt.ID); restored.Score == nil || *restored.Score != *before.Score {
+		t.Fatalf("reinstate must restore the score: %#v", restored)
 	}
 }
 

@@ -72,6 +72,7 @@ var (
 	ErrIntegrityConsentOutdated   = httpx.NewError(http.StatusConflict, "[CONFLICT] Consent version outdated", nil)
 	ErrAttemptNotProctored        = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt is not proctored", nil)
 	ErrAttemptNotTerminated       = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt is not suspended", nil)
+	ErrAttemptAlreadyTerminated   = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt is already suspended", nil)
 	ErrIntegrityEventNotFound     = httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Integrity event not found", nil)
 	ErrIntegrityEventNotViolation = httpx.NewError(http.StatusBadRequest, "[ERROR] Only violations can be reviewed", nil)
 	ErrIntegrityReviewConflict    = httpx.NewError(http.StatusConflict, "[CONFLICT] Integrity event was already reviewed with another action", nil)
