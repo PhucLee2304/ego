@@ -308,7 +308,21 @@ func (s *service) GetAttemptHistory(ctx context.Context, userID string, attemptI
 	if err != nil {
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to read attempt history", err)
 	}
+	s.attachClassroom(ctx, response)
 	return response, nil
+}
+
+// attachClassroom điền ClassroomID cho bài giao để client mở kết quả trong lớp.
+// Không tìm được lớp thì bỏ qua: client quay về trang lịch sử chung.
+func (s *service) attachClassroom(ctx context.Context, response *dto.AttemptResponse) {
+	if response == nil || response.AssignmentID == nil || response.ClassroomID != nil {
+		return
+	}
+	assignment, err := s.repo.GetAssignmentForAttemptValidation(ctx, *response.AssignmentID)
+	if err != nil {
+		return
+	}
+	response.ClassroomID = &assignment.ClassroomID
 }
 
 func partInSet(part model.PartCode, parts map[model.PartCode]struct{}) bool {

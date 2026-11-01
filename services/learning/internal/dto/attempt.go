@@ -157,14 +157,17 @@ type AttemptResponse struct {
 	CorrectAnswers *int                `json:"correctAnswers,omitempty"`
 	Score          *float64            `json:"score,omitempty"`
 	// Giám sát: chỉ có giá trị khi proctored.
-	Proctored         bool                    `json:"proctored"`
-	MaxViolations     *int                    `json:"maxViolations,omitempty"`
-	ViolationCount    *int                    `json:"violationCount,omitempty"`
-	IntegrityOutcome  *string                 `json:"integrityOutcome,omitempty"`
-	TerminationReason *string                 `json:"terminationReason,omitempty"`
-	CreatedAt         time.Time               `json:"createdAt"`
-	UpdatedAt         time.Time               `json:"updatedAt"`
-	Sections          []*ExamQuestionsSection `json:"sections,omitempty"`
+	Proctored         bool    `json:"proctored"`
+	MaxViolations     *int    `json:"maxViolations,omitempty"`
+	ViolationCount    *int    `json:"violationCount,omitempty"`
+	IntegrityOutcome  *string `json:"integrityOutcome,omitempty"`
+	TerminationReason *string `json:"terminationReason,omitempty"`
+	// Bài giao trong lớp: client mở kết quả trong tab Classwork của lớp đó.
+	AssignmentID *uint                   `json:"assignmentId,omitempty"`
+	ClassroomID  *uint                   `json:"classroomId,omitempty"`
+	CreatedAt    time.Time               `json:"createdAt"`
+	UpdatedAt    time.Time               `json:"updatedAt"`
+	Sections     []*ExamQuestionsSection `json:"sections,omitempty"`
 }
 
 type AttemptExamSummary struct {
@@ -206,6 +209,7 @@ func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 			return string(value)
 		}),
 		Parts:          parts,
+		AssignmentID:   assignmentID(attempt),
 		Duration:       attempt.Duration,
 		StartedAt:      attempt.StartedAt,
 		ExpiresAt:      attempt.ExpiresAt,
@@ -355,4 +359,11 @@ type UpdateAttemptAnswerResponse struct {
 	QuestionID       uint      `json:"questionId"`
 	SelectedOptionID *uint     `json:"selectedOptionId,omitempty"`
 	AnsweredAt       time.Time `json:"answeredAt"`
+}
+
+func assignmentID(attempt *model.Attempt) *uint {
+	if attempt.ContextType != model.AttemptContextTypeClassroomAssignment {
+		return nil
+	}
+	return attempt.ContextID
 }

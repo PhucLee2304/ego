@@ -48,7 +48,7 @@ type AppConfig struct {
 }
 
 // DefaultIntegrityConsentVersion phải khớp hằng integrityConsentVersion của FE.
-const DefaultIntegrityConsentVersion = "2026-10-v2"
+const DefaultIntegrityConsentVersion = "2026-11-v4"
 
 func LoadAppConfig() (*AppConfig, error) {
 	config := &AppConfig{

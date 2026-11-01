@@ -28,6 +28,7 @@ func (s *service) SubmitAttempt(ctx context.Context, userID string, attemptID ui
 		}
 		return nil, httpx.FromError(err, "[ERROR] Failed to submit attempt")
 	}
+	s.attachClassroom(ctx, response)
 	return response, nil
 }
 
