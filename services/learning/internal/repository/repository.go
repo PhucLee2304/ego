@@ -44,6 +44,7 @@ type Repository interface {
 	TouchAttemptSession(ctx context.Context, attemptID uint, at time.Time) error
 	CreateIntegrityEvent(ctx context.Context, event *model.AttemptIntegrityEvent) error
 	GetIntegrityEvent(ctx context.Context, attemptID uint, eventID string) (*model.AttemptIntegrityEvent, error)
+	GetAttemptTeacherNote(ctx context.Context, attemptID uint, userID string) (*string, error)
 	HasIntegrityViolationForEpisode(ctx context.Context, attemptID uint, startEventID string) (bool, error)
 	GetAssignmentIntegrityEvent(ctx context.Context, assignmentID uint, eventID string) (*model.AttemptIntegrityEventRow, error)
 	MarkIntegrityEventReviewed(ctx context.Context, id uint, review model.IntegrityReview, by string, at time.Time) (bool, error)

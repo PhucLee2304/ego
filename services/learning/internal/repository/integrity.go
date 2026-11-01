@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"ego/services/learning/internal/model"
@@ -70,6 +71,36 @@ func (r *repository) GetIntegrityEvent(ctx context.Context, attemptID uint, even
 		return nil, err
 	}
 	return &event, nil
+}
+
+// GetAttemptTeacherNote lấy lời nhắn giáo viên gửi học sinh theo trạng thái hiện tại:
+// lý do mở lại khi REINSTATED, ghi chú lần đình chỉ gần nhất khi giáo viên đình chỉ.
+func (r *repository) GetAttemptTeacherNote(ctx context.Context, attemptID uint, userID string) (*string, error) {
+	var attempt model.Attempt
+	if err := r.db.WithContext(ctx).
+		Select("id", "integrity_outcome", "termination_reason", "reinstate_note").
+		Where("id = ? AND user_id = ?", attemptID, userID).
+		First(&attempt).Error; err != nil {
+		return nil, err
+	}
+	switch {
+	case attempt.IntegrityOutcome == model.IntegrityOutcomeReinstated:
+		return attempt.ReinstateNote, nil
+	case attempt.TerminationReason != nil && *attempt.TerminationReason == model.IntegrityTerminationTeacherBanned:
+		var event model.AttemptIntegrityEvent
+		err := r.db.WithContext(ctx).
+			Where("attempt_id = ? AND type = ?", attemptID, model.IntegrityEventTeacherBanned).
+			Order("received_at DESC").
+			First(&event).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return event.Detail, nil
+	}
+	return nil, nil
 }
 
 // HasIntegrityViolationForEpisode: episode (startEventID) đã được tính vi phạm chưa.

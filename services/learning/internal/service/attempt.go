@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	platformdb "ego/platform/db"
@@ -309,7 +310,21 @@ func (s *service) GetAttemptHistory(ctx context.Context, userID string, attemptI
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to read attempt history", err)
 	}
 	s.attachClassroom(ctx, response)
+	s.attachTeacherNote(ctx, userID, response)
 	return response, nil
+}
+
+// attachTeacherNote đọc lời nhắn từ attempt hiện tại vì history là bản chụp lúc nộp,
+// còn đình chỉ / mở lại có thể xảy ra sau đó. Lỗi thì bỏ qua: banner vẫn hiện, chỉ thiếu lời nhắn.
+func (s *service) attachTeacherNote(ctx context.Context, userID string, response *dto.AttemptResponse) {
+	if response == nil || !response.Proctored {
+		return
+	}
+	note, err := s.repo.GetAttemptTeacherNote(ctx, response.ID, userID)
+	if err != nil || note == nil || strings.TrimSpace(*note) == "" {
+		return
+	}
+	response.TeacherNote = note
 }
 
 // attachClassroom điền ClassroomID cho bài giao để client mở kết quả trong lớp.

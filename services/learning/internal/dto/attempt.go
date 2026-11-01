@@ -162,6 +162,8 @@ type AttemptResponse struct {
 	ViolationCount    *int    `json:"violationCount,omitempty"`
 	IntegrityOutcome  *string `json:"integrityOutcome,omitempty"`
 	TerminationReason *string `json:"terminationReason,omitempty"`
+	// TeacherNote: lời nhắn giáo viên cho học sinh khi đình chỉ / mở lại.
+	TeacherNote *string `json:"teacherNote,omitempty"`
 	// Bài giao trong lớp: client mở kết quả trong tab Classwork của lớp đó.
 	AssignmentID *uint                   `json:"assignmentId,omitempty"`
 	ClassroomID  *uint                   `json:"classroomId,omitempty"`
