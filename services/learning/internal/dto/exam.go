@@ -23,6 +23,9 @@ type GetExamsResponse struct {
 type GetExamsQuery struct {
 	httpx.PaginationQuery
 	Type model.ExamType `schema:"type" validate:"omitempty,oneof=THPT TOEIC"`
+	// Tùy chọn: tìm theo tiêu đề và lọc theo năm.
+	Search string `schema:"search"`
+	Year   *int   `schema:"year"`
 }
 
 type ExamSectionSummary struct {
@@ -163,6 +166,7 @@ func (q *GetExamsQuery) Normalize() {
 	q.PaginationQuery.Normalize()
 
 	q.Type = model.ExamType(strings.ToUpper(strings.TrimSpace(string(q.Type))))
+	q.Search = strings.TrimSpace(q.Search)
 	// THPT is the intentional product default for the public exam catalog.
 	if q.Type == "" {
 		q.Type = model.ExamTypeTHPT

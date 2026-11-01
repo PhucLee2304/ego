@@ -95,6 +95,7 @@ var (
 type Service interface {
 	// Exam
 	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int64, *httpx.HTTPError)
+	GetExamYears(ctx context.Context, examType model.ExamType) ([]int, *httpx.HTTPError)
 	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError)
 
 	// Attempt

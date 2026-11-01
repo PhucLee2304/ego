@@ -14,11 +14,28 @@ import (
 type GetAttemptsQuery struct {
 	httpx.PaginationQuery
 	Status model.AttemptStatus `schema:"status" validate:"required,oneof=ACTIVE SUBMITTED CANCELLED"`
+	// Tùy chọn: bỏ attempt theo mode (vd ASSIGNMENT cho lịch sử tự luyện).
+	ExcludeMode model.AttemptMode `schema:"excludeMode" validate:"omitempty,oneof=PRACTICE TEST ASSIGNMENT"`
+	// Tùy chọn: chỉ lấy attempt của đề thuộc các loại này, phân cách bằng dấu phẩy (vd "TOEIC,THPT").
+	ExamType string `schema:"examType"`
 }
 
 func (q *GetAttemptsQuery) Normalize() {
 	q.PaginationQuery.Normalize()
 	q.Status = model.AttemptStatus(strings.ToUpper(strings.TrimSpace(string(q.Status))))
+	q.ExcludeMode = model.AttemptMode(strings.ToUpper(strings.TrimSpace(string(q.ExcludeMode))))
+	q.ExamType = strings.ToUpper(strings.TrimSpace(q.ExamType))
+}
+
+// ExamTypes tách ExamType thành danh sách, bỏ phần tử rỗng.
+func (q GetAttemptsQuery) ExamTypes() []model.ExamType {
+	var types []model.ExamType
+	for _, t := range strings.Split(q.ExamType, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			types = append(types, model.ExamType(t))
+		}
+	}
+	return types
 }
 
 type CreateExamAttemptRequest struct {

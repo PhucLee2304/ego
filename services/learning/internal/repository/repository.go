@@ -14,7 +14,8 @@ import (
 
 type Repository interface {
 	// Exam
-	GetListExam(ctx context.Context, examType model.ExamType, limit, offset int32) ([]*model.Exam, int64, error)
+	GetListExam(ctx context.Context, filter ExamFilter, limit, offset int32) ([]*model.Exam, int64, error)
+	GetExamYears(ctx context.Context, examType model.ExamType) ([]int, error)
 	GetExamByID(ctx context.Context, id uint) (*model.Exam, error)
 	CreateExam(ctx context.Context, exam *model.Exam) error
 	GetQuestionsByExamID(ctx context.Context, id uint) (*model.Exam, error)
@@ -29,7 +30,7 @@ type Repository interface {
 
 	// Attempt
 	GetActiveAttemptByUserID(ctx context.Context, userID string) (*model.Attempt, error)
-	GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, status model.AttemptStatus, limit, offset int32) ([]*model.Attempt, int64, error)
+	GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, filter AttemptFilter, limit, offset int32) ([]*model.Attempt, int64, error)
 	GetAttemptQuestionsByIDAndUserID(ctx context.Context, id uint, userID string) (*model.Attempt, error)
 	GetAttemptForLifecycle(ctx context.Context, id uint, userID string) (*model.Attempt, error)
 	CreateAttempt(ctx context.Context, attempt *model.Attempt) error

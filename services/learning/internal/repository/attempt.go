@@ -22,15 +22,29 @@ func (r *repository) GetActiveAttemptByUserID(ctx context.Context, userID string
 	return &attempt, nil
 }
 
-func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, status model.AttemptStatus, limit, offset int32) ([]*model.Attempt, int64, error) {
+// AttemptFilter lọc lịch sử attempt của một user; ExcludeMode và ExamTypes để trống thì bỏ qua.
+type AttemptFilter struct {
+	Status      model.AttemptStatus
+	ExcludeMode model.AttemptMode
+	ExamTypes   []model.ExamType
+}
+
+func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, filter AttemptFilter, limit, offset int32) ([]*model.Attempt, int64, error) {
 	var attempts []*model.Attempt
 	var total int64
 
-	query := r.db.WithContext(ctx).
-		Model(&model.Attempt{}).
-		Where("user_id = ? AND status = ?", userID, status)
+	scope := func(db *gorm.DB) *gorm.DB {
+		db = db.Where("attempts.user_id = ? AND attempts.status = ?", userID, filter.Status)
+		if filter.ExcludeMode != "" {
+			db = db.Where("attempts.mode <> ?", filter.ExcludeMode)
+		}
+		if len(filter.ExamTypes) > 0 {
+			db = db.Where("attempts.exam_id IN (?)", r.db.Model(&model.Exam{}).Select("id").Where("type IN ?", filter.ExamTypes))
+		}
+		return db
+	}
 
-	if err := query.Count(&total).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&model.Attempt{}).Scopes(scope).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -38,8 +52,8 @@ func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID st
 		Preload("Exam").
 		Preload("Answers").
 		Preload("History").
-		Where("user_id = ? AND status = ?", userID, status).
-		Order("id DESC").
+		Scopes(scope).
+		Order("attempts.id DESC").
 		Limit(int(limit)).
 		Offset(int(offset)).
 		Find(&attempts).Error; err != nil {

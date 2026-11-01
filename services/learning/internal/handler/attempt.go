@@ -66,6 +66,8 @@ func (h *handler) CreateAttempt(w http.ResponseWriter, r *http.Request) {
 // @Param        page      query     int     false  "Page number" default(1)
 // @Param        pageSize  query     int     false  "Page size" default(10)
 // @Param        status    query     string  true   "Attempt status" Enums(ACTIVE, SUBMITTED, CANCELLED)
+// @Param        excludeMode  query  string  false  "Exclude attempts of this mode" Enums(PRACTICE, TEST, ASSIGNMENT)
+// @Param        examType     query  string  false  "Comma-separated exam types, e.g. TOEIC,THPT"
 // @Success      200  {object}  httpx.PaginatedResponse[dto.AttemptResponse]
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError

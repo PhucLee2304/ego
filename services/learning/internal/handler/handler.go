@@ -24,6 +24,7 @@ func New(s service.Service) Handler {
 func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
 	// Exam
 	mux.HandleFunc("GET /exams", mw.Handle(h.GetList))
+	mux.HandleFunc("GET /exams/years", mw.Handle(h.GetYears))
 	mux.HandleFunc("GET /exams/{id}", mw.Handle(h.GetByID))
 
 	// Attempt
