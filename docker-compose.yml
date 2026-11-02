@@ -39,7 +39,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - C:\Users\Admin\Desktop\AppTiengAnh\assets:/etc/nginx/assets:ro
+      - ../Desktop/AppTiengAnh/assets:/etc/nginx/assets:ro
     depends_on:
       identity:
         condition: service_started
@@ -363,7 +363,7 @@ services:
     env_file:
       - ./services/vocabgram/.env
     volumes:
-      - C:\Users\Admin\Desktop\AppTiengAnh\assets:/app/assets:ro
+      - ../Desktop/AppTiengAnh/assets:/app/assets:ro
     depends_on:
       vocabgram-db:
         condition: service_healthy
@@ -381,11 +381,11 @@ services:
     env_file:
       - ./services/vocabgram/.env
     volumes:
-      - C:\Users\Admin\Desktop\AppTiengAnh\assets:/app/assets:ro
-      - C:\Users\Admin\Desktop\AppTiengAnh:/app/services/vocabgram/cmd/seed/dict:ro
-      - C:\Users\Admin\Desktop\AppTiengAnh:/app/services/dictionary/cmd/seed:ro
-      - C:\Users\Admin\NguPhapTiengAnh:/app/services/vocabgram/cmd/seed/grammar:ro
-      - C:\Users\Admin\NguPhapTiengAnh:/app/services/grammar/cmd/seed:ro
+      - ../Desktop/AppTiengAnh/assets:/app/assets:ro
+      - ../Desktop/AppTiengAnh:/app/services/vocabgram/cmd/seed/dict:ro
+      - ../Desktop/AppTiengAnh:/app/services/dictionary/cmd/seed:ro
+      - ../NguPhapTiengAnh:/app/services/vocabgram/cmd/seed/grammar:ro
+      - ../NguPhapTiengAnh:/app/services/grammar/cmd/seed:ro
     depends_on:
       vocabgram-db:
         condition: service_healthy
@@ -403,8 +403,8 @@ services:
     env_file:
       - ./services/vocabgram/.env
     volumes:
-      - C:\Users\Admin\Desktop\AppTiengAnh:/app/services/vocabgram/cmd/seed:ro
-      - C:\Users\Admin\Desktop\AppTiengAnh:/app/services/dictionary/cmd/seed:ro
+      - ../Desktop/AppTiengAnh:/app/services/vocabgram/cmd/seed:ro
+      - ../Desktop/AppTiengAnh:/app/services/dictionary/cmd/seed:ro
     depends_on:
       vocabgram-db:
         condition: service_healthy
@@ -425,8 +425,8 @@ services:
     environment:
       SEED_TARGET: dictionary
     volumes:
-      - C:\Users\Admin\Desktop\AppTiengAnh\assets:/app/assets:ro
-      - C:\Users\Admin\Desktop\AppTiengAnh:/app/services/dictionary/cmd/seed:ro
+      - ../Desktop/AppTiengAnh/assets:/app/assets:ro
+      - ../Desktop/AppTiengAnh:/app/services/dictionary/cmd/seed:ro
     depends_on:
       vocabgram-db:
         condition: service_healthy
@@ -444,7 +444,7 @@ services:
     env_file:
       - ./services/vocabgram/.env
     volumes:
-      - C:\Users\Admin\Desktop\AppTiengAnh:/app/services/dictionary/cmd/seed:ro
+      - ../Desktop/AppTiengAnh:/app/services/dictionary/cmd/seed:ro
     depends_on:
       vocabgram-db:
         condition: service_healthy
@@ -464,7 +464,7 @@ services:
     environment:
       SEED_TARGET: grammar
     volumes:
-      - C:\Users\Admin\NguPhapTiengAnh:/app/services/grammar/cmd/seed:ro
+      - ../NguPhapTiengAnh:/app/services/grammar/cmd/seed:ro
     depends_on:
       vocabgram-db:
         condition: service_healthy
