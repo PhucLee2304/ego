@@ -117,3 +117,46 @@ type GetFlashcardsResponse struct {
 	PageCounts int                 `json:"pageCounts"`
 	Total      int64               `json:"total"`
 }
+
+
+// ---- Topic DTOs ----
+
+type TopicResponse struct {
+	ID          string `json:"id"`
+	Category    string `json:"category"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Icon        string `json:"icon"`
+	Level       string `json:"level"`
+	WordCount   int    `json:"wordCount"`
+}
+
+type TopicWordItemResponse struct {
+	ID       uint   `json:"id"`
+	Word     string `json:"word"`
+	Phonetic string `json:"phonetic,omitempty"`
+}
+
+type GetTopicWordsQuery struct {
+	Page     int `schema:"page"`
+	PageSize int `schema:"pageSize"`
+}
+
+func (q *GetTopicWordsQuery) Normalize() {
+	if q.Page < 1 {
+		q.Page = 1
+	}
+	if q.PageSize < 1 {
+		q.PageSize = 20
+	} else if q.PageSize > 100 {
+		q.PageSize = 100
+	}
+}
+
+type GetTopicWordsResponse struct {
+	Topic      TopicResponse           `json:"topic"`
+	Data       []TopicWordItemResponse `json:"data"`
+	Page       int                     `json:"page"`
+	PageCounts int                     `json:"pageCounts"`
+	Total      int64                   `json:"total"`
+}

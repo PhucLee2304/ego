@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	tokenClient "ego/api/gen/go/token"
+	identityClient "ego/api/gen/go/identity"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	"ego/platform/rpc"
@@ -59,18 +59,18 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to migrate database")
 	}
 
-	tokenConn, err := grpc.NewClient(
-		appConfig.AuthServiceAddr,
+	identityConn, err := grpc.NewClient(
+		appConfig.IdentityServiceAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(rpc.TimeoutInterceptor(5*time.Second)),
 	)
 	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to auth service")
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to identity service")
 	}
-	defer tokenConn.Close()
+	defer identityConn.Close()
 
-	tokenServiceClient := tokenClient.NewTokenServiceClient(tokenConn)
-	authMiddleware := jwt.NewAuthMiddleware(tokenServiceClient)
+	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
+	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 
 	mux := http.NewServeMux()
 

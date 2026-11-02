@@ -51,13 +51,13 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 func (h *handler) GetCurriculum(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok || userID == "" {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated", nil))
 		return
 	}
 
 	resp, err := h.service.GetCurriculum(r.Context(), userID)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to get curriculum")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get curriculum", err))
 		return
 	}
 
@@ -81,24 +81,24 @@ func (h *handler) GetCurriculum(w http.ResponseWriter, r *http.Request) {
 func (h *handler) GetUnit(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok || userID == "" {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated", nil))
 		return
 	}
 
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid unit ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid unit ID", err))
 		return
 	}
 
 	resp, err := h.service.GetUnit(r.Context(), userID, uint(id))
 	if err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[NOT_FOUND] Unit not found")
+			httpx.Error(w, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Unit not found", err))
 			return
 		}
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to get unit")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get unit", err))
 		return
 	}
 
@@ -123,30 +123,30 @@ func (h *handler) GetUnit(w http.ResponseWriter, r *http.Request) {
 func (h *handler) SubmitProgress(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok || userID == "" {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated", nil))
 		return
 	}
 
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid unit ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid unit ID", err))
 		return
 	}
 
 	var body dto.SubmitProgressRequest
 	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body: "+err.Error())
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
 		return
 	}
 
 	resp, err := h.service.SubmitProgress(r.Context(), userID, uint(id), body.Completed)
 	if err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[NOT_FOUND] Unit not found")
+			httpx.Error(w, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Unit not found", err))
 			return
 		}
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to submit progress")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to submit progress", err))
 		return
 	}
 

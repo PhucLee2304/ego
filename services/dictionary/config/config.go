@@ -18,7 +18,7 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr string
+	IdentityServiceAddr string
 	SeedFilePath    string
 	AudioBasePath   string
 	SeedBatchSize   int
@@ -36,7 +36,7 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "23042004"),
 		DBName:     getEnv("DB_NAME", "dictionarydb"),
 
-		AuthServiceAddr: getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
+		IdentityServiceAddr: getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
 		SeedFilePath:    getEnv("SEED_FILE_PATH", "/app/services/dictionary/cmd/seed/dictionary_data_offline.json"),
 		AudioBasePath:   getEnv("AUDIO_BASE_PATH", "/app/assets"),
 		SeedBatchSize:   getIntEnv("SEED_BATCH_SIZE", 500, 2000),

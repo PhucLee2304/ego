@@ -22,3 +22,12 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=seed-builder /app/seed .
 CMD ["./seed"]
+
+FROM builder AS seed-topics-builder
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o seed_topics services/dictionary/cmd/seed_topics/main.go
+
+FROM alpine:3.19 AS seed-topics
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=seed-topics-builder /app/seed_topics .
+CMD ["./seed_topics"]

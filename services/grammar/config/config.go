@@ -18,8 +18,8 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	AuthServiceAddr string
-	SeedFilePath    string
+	IdentityServiceAddr string
+	SeedFilePath        string
 }
 
 func LoadAppConfig() (*AppConfig, error) {
@@ -34,8 +34,8 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBPassword: getEnv("DB_PASSWORD", "23042004"),
 		DBName:     getEnv("DB_NAME", "grammardb"),
 
-		AuthServiceAddr: getEnv("AUTH_SERVICE_ADDR", "auth:50053"),
-		SeedFilePath:    getEnv("SEED_FILE_PATH", "/app/services/grammar/cmd/seed/Grammar.json"),
+		IdentityServiceAddr: getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
+		SeedFilePath:        getEnv("SEED_FILE_PATH", "/app/services/grammar/cmd/seed/Grammar.json"),
 	}
 
 	config.DSN = fmt.Sprintf(

@@ -19,6 +19,8 @@ type Handler interface {
 	GetFlashcards(w http.ResponseWriter, r *http.Request)
 	AddFlashcard(w http.ResponseWriter, r *http.Request)
 	DeleteFlashcard(w http.ResponseWriter, r *http.Request)
+	ListTopics(w http.ResponseWriter, r *http.Request)
+	GetTopicWords(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -36,6 +38,8 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 	mux.HandleFunc("GET /flashcards", mw.Handle(h.GetFlashcards))
 	mux.HandleFunc("POST /flashcards", mw.Handle(h.AddFlashcard))
 	mux.HandleFunc("DELETE /flashcards/{id}", mw.Handle(h.DeleteFlashcard))
+	mux.HandleFunc("GET /topics", mw.Handle(h.ListTopics))
+	mux.HandleFunc("GET /topics/{id}/words", mw.Handle(h.GetTopicWords))
 }
 
 // LookupWord godoc
@@ -53,17 +57,17 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 func (h *handler) LookupWord(w http.ResponseWriter, r *http.Request) {
 	word := r.PathValue("word")
 	if word == "" {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Word is required")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Word is required", nil))
 		return
 	}
 
 	resp, err := h.service.LookupWord(r.Context(), word)
 	if err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[NOT_FOUND] Word not found: "+word)
+			httpx.Error(w, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Word not found: "+word, nil))
 			return
 		}
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to look up word")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to look up word", nil))
 		return
 	}
 
@@ -92,7 +96,7 @@ func (h *handler) SearchWords(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.SearchWords(r.Context(), q.Q, q.Page, q.PageSize)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to search words")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to search words", nil))
 		return
 	}
 
@@ -114,17 +118,17 @@ func (h *handler) SearchWords(w http.ResponseWriter, r *http.Request) {
 func (h *handler) GetThesaurus(w http.ResponseWriter, r *http.Request) {
 	word := r.PathValue("word")
 	if word == "" {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Word is required")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Word is required", nil))
 		return
 	}
 
 	resp, err := h.service.GetThesaurus(r.Context(), word)
 	if err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[NOT_FOUND] Word not found: "+word)
+			httpx.Error(w, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Word not found: "+word, nil))
 			return
 		}
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to get thesaurus")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get thesaurus", nil))
 		return
 	}
 
@@ -147,7 +151,7 @@ func (h *handler) GetThesaurus(w http.ResponseWriter, r *http.Request) {
 func (h *handler) GetFlashcards(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok || userID == "" {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated", nil))
 		return
 	}
 
@@ -159,7 +163,7 @@ func (h *handler) GetFlashcards(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.GetFlashcards(r.Context(), userID, q.Page, q.PageSize)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to get flashcards")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get flashcards", nil))
 		return
 	}
 
@@ -183,23 +187,23 @@ func (h *handler) GetFlashcards(w http.ResponseWriter, r *http.Request) {
 func (h *handler) AddFlashcard(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok || userID == "" {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated", nil))
 		return
 	}
 
 	var body dto.AddFlashcardRequest
 	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid request body: "+err.Error())
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body: "+err.Error(), nil))
 		return
 	}
 
 	resp, err := h.service.AddFlashcard(r.Context(), userID, body.WordID, body.Note)
 	if err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[NOT_FOUND] Word not found")
+			httpx.Error(w, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Word not found", nil))
 			return
 		}
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to add flashcard")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to add flashcard", nil))
 		return
 	}
 
@@ -223,25 +227,88 @@ func (h *handler) AddFlashcard(w http.ResponseWriter, r *http.Request) {
 func (h *handler) DeleteFlashcard(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok || userID == "" {
-		httpx.Error(w, http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated")
+		httpx.Error(w, httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] User not authenticated", nil))
 		return
 	}
 
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "[ERROR] Invalid flashcard ID")
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid flashcard ID", nil))
 		return
 	}
 
 	if err := h.service.DeleteFlashcard(r.Context(), userID, uint(id)); err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			httpx.Error(w, http.StatusNotFound, "[NOT_FOUND] Flashcard not found")
+			httpx.Error(w, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Flashcard not found", nil))
 			return
 		}
-		httpx.Error(w, http.StatusInternalServerError, "[ERROR] Failed to delete flashcard")
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to delete flashcard", nil))
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListTopics godoc
+// @Summary      List all vocabulary topics
+// @Description  Get a list of all vocabulary categories and topics
+// @Tags         Dictionary
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200   {array}   dto.TopicResponse
+// @Failure      500   {object}  httpx.ErrorResponse
+// @Router       /topics [get]
+func (h *handler) ListTopics(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.ListTopics(r.Context())
+	if err != nil {
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to list topics", nil))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resp)
+}
+
+// GetTopicWords godoc
+// @Summary      Get words in a topic
+// @Description  Get paginated list of words for a specific topic
+// @Tags         Dictionary
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id        path      string  true   "Topic ID"
+// @Param        page      query     int     false  "Page number (default 1)"
+// @Param        pageSize  query     int     false  "Page size (default 20, max 100)"
+// @Success      200       {object}  dto.GetTopicWordsResponse
+// @Failure      400       {object}  httpx.ErrorResponse
+// @Failure      404       {object}  httpx.ErrorResponse
+// @Failure      500       {object}  httpx.ErrorResponse
+// @Router       /topics/{id}/words [get]
+func (h *handler) GetTopicWords(w http.ResponseWriter, r *http.Request) {
+	topicID := r.PathValue("id")
+	if topicID == "" {
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Topic ID is required", nil))
+		return
+	}
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
+
+	q := dto.GetTopicWordsQuery{
+		Page:     page,
+		PageSize: pageSize,
+	}
+	q.Normalize()
+
+	resp, err := h.service.GetTopicWords(r.Context(), topicID, q.Page, q.PageSize)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			httpx.Error(w, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Topic not found: "+topicID, nil))
+			return
+		}
+		httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get topic words", nil))
+		return
+	}
+
+	httpx.JSON(w, http.StatusOK, resp)
 }

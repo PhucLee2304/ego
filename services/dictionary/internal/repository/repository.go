@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	dto "ego/services/dictionary/internal/dto"
 	"ego/services/dictionary/internal/model"
 	"errors"
 
@@ -189,4 +190,67 @@ func (r *Repository) WordExists(ctx context.Context, word string) (bool, error) 
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Word{}).Where("LOWER(word) = LOWER(?)", word).Count(&count).Error
 	return count > 0, err
+}
+
+// ListTopics returns all topics ordered by order_index ASC.
+func (r *Repository) ListTopics(ctx context.Context) ([]model.Topic, error) {
+	var topics []model.Topic
+	err := r.db.WithContext(ctx).Order("order_index ASC, id ASC").Find(&topics).Error
+	return topics, err
+}
+
+// GetTopicByID returns a topic by its string ID.
+func (r *Repository) GetTopicByID(ctx context.Context, id string) (*model.Topic, error) {
+	var topic model.Topic
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&topic).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &topic, nil
+}
+
+// GetTopicWords returns paginated words for a topic with optional phonetic/id lookup from words table.
+func (r *Repository) GetTopicWords(ctx context.Context, topicID string, limit, offset int) ([]dto.TopicWordItemResponse, int64, error) {
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&model.TopicWord{}).Where("topic_id = ?", topicID).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	type resultRow struct {
+		WordID   *uint  `gorm:"column:word_id"`
+		Word     string `gorm:"column:word"`
+		Phonetic string `gorm:"column:phonetic"`
+	}
+
+	var rows []resultRow
+	err := r.db.WithContext(ctx).
+		Table("topic_words").
+		Select("topic_words.word, words.id AS word_id, COALESCE(words.phonetic, '') AS phonetic").
+		Joins("LEFT JOIN words ON LOWER(words.word) = LOWER(topic_words.word) AND words.deleted_at IS NULL").
+		Where("topic_words.topic_id = ?", topicID).
+		Order("topic_words.order_num ASC").
+		Limit(limit).
+		Offset(offset).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]dto.TopicWordItemResponse, len(rows))
+	for i, row := range rows {
+		var wid uint
+		if row.WordID != nil {
+			wid = *row.WordID
+		}
+		items[i] = dto.TopicWordItemResponse{
+			ID:       wid,
+			Word:     row.Word,
+			Phonetic: row.Phonetic,
+		}
+	}
+
+	return items, total, nil
 }

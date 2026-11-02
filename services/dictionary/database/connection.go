@@ -36,6 +36,8 @@ func Migrate(db *gorm.DB) error {
 		&model.DefinitionSynonym{},
 		&model.DefinitionAntonym{},
 		&model.UserFlashcard{},
+		&model.Topic{},
+		&model.TopicWord{},
 	)
 	if err != nil {
 		return err

@@ -22,6 +22,8 @@ type Service interface {
 	GetFlashcards(ctx context.Context, userID string, page, pageSize int) (*dto.GetFlashcardsResponse, error)
 	AddFlashcard(ctx context.Context, userID string, wordID uint, note string) (*dto.FlashcardResponse, error)
 	DeleteFlashcard(ctx context.Context, userID string, flashcardID uint) error
+	ListTopics(ctx context.Context) ([]dto.TopicResponse, error)
+	GetTopicWords(ctx context.Context, topicID string, page, pageSize int) (*dto.GetTopicWordsResponse, error)
 }
 
 type service struct {
@@ -239,4 +241,63 @@ func (s *service) mapFlashcardToResponse(c *model.UserFlashcard) dto.FlashcardRe
 			Phonetic: c.Word.Phonetic,
 		},
 	}
+}
+
+// ---- Topics ----
+
+func (s *service) ListTopics(ctx context.Context) ([]dto.TopicResponse, error) {
+	topics, err := s.repo.ListTopics(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]dto.TopicResponse, len(topics))
+	for i, t := range topics {
+		res[i] = dto.TopicResponse{
+			ID:          t.ID,
+			Category:    t.Category,
+			Name:        t.Name,
+			Description: t.Description,
+			Icon:        t.Icon,
+			Level:       t.Level,
+			WordCount:   t.WordCount,
+		}
+	}
+	return res, nil
+}
+
+func (s *service) GetTopicWords(ctx context.Context, topicID string, page, pageSize int) (*dto.GetTopicWordsResponse, error) {
+	topic, err := s.repo.GetTopicByID(ctx, topicID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	limit := pageSize
+	offset := (page - 1) * pageSize
+
+	words, total, err := s.repo.GetTopicWords(ctx, topicID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	pageCounts := int(math.Ceil(float64(total) / float64(pageSize)))
+
+	return &dto.GetTopicWordsResponse{
+		Topic: dto.TopicResponse{
+			ID:          topic.ID,
+			Category:    topic.Category,
+			Name:        topic.Name,
+			Description: topic.Description,
+			Icon:        topic.Icon,
+			Level:       topic.Level,
+			WordCount:   topic.WordCount,
+		},
+		Data:       words,
+		Page:       page,
+		PageCounts: pageCounts,
+		Total:      total,
+	}, nil
 }
