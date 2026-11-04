@@ -8,12 +8,14 @@ import (
 
 	identityClient "ego/api/gen/go/identity"
 	notificationsClient "ego/api/gen/go/notifications"
+	storageClient "ego/api/gen/go/storage"
 	"ego/platform/httpx"
 	learningConfig "ego/services/learning/config"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/media"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
+	"ego/services/learning/internal/socket"
 
 	"google.golang.org/grpc"
 )
@@ -30,6 +32,7 @@ var (
 	ErrClassroomCapacityFull  = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom capacity is full", nil)
 	ErrTeacherCannotJoinClass = httpx.NewError(http.StatusBadRequest, "[ERROR] Teacher cannot join own classroom as student", nil)
 	ErrScheduleInvalidTime    = httpx.NewError(http.StatusBadRequest, "[ERROR] Schedule end time must be after start time", nil)
+	ErrScheduleInPast         = httpx.NewError(http.StatusBadRequest, "[ERROR] Schedule cannot start in the past", nil)
 	ErrCalendarInvalidRange   = httpx.NewError(http.StatusBadRequest, "[ERROR] Calendar range must be valid and no longer than 366 days", nil)
 	ErrRoomLive               = httpx.NewError(http.StatusConflict, "[CONFLICT] The room is currently live", nil)
 	ErrRoomNotLive            = httpx.NewError(http.StatusBadRequest, "[ERROR] This session has not started yet", nil)
@@ -63,6 +66,19 @@ var (
 	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
 )
 
+// Lỗi giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md).
+var (
+	ErrIntegrityConsentRequired   = httpx.NewError(http.StatusBadRequest, "[ERROR] Integrity consent is required for a proctored assignment", nil)
+	ErrIntegrityConsentOutdated   = httpx.NewError(http.StatusConflict, "[CONFLICT] Consent version outdated", nil)
+	ErrAttemptNotProctored        = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt is not proctored", nil)
+	ErrAttemptNotTerminated       = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt is not suspended", nil)
+	ErrAttemptAlreadyTerminated   = httpx.NewError(http.StatusConflict, "[CONFLICT] Attempt is already suspended", nil)
+	ErrIntegrityEventNotFound     = httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Integrity event not found", nil)
+	ErrIntegrityEventNotViolation = httpx.NewError(http.StatusBadRequest, "[ERROR] Only violations can be reviewed", nil)
+	ErrIntegrityReviewConflict    = httpx.NewError(http.StatusConflict, "[CONFLICT] Integrity event was already reviewed with another action", nil)
+	ErrIntegrityLevelInvalid      = httpx.NewError(http.StatusBadRequest, "[ERROR] Level must be LOG, WARNING or VIOLATION", nil)
+)
+
 // Lỗi kiểm tra attempt của assignment (thay ValidateAssignmentAttempt /
 // CreateAssignmentSubmission / UpdateAssignmentSubmissionResult): giữ đúng status
 // + message mà exams cũ trả sau toStatusError + httpx.FromError.
@@ -78,12 +94,13 @@ var (
 
 type Service interface {
 	// Exam
-	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int, *httpx.HTTPError)
+	GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int64, *httpx.HTTPError)
+	GetExamYears(ctx context.Context, examType model.ExamType) ([]int, *httpx.HTTPError)
 	GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError)
 
 	// Attempt
 	CreateAttempt(ctx context.Context, userID string, examID uint, req dto.CreateExamAttemptRequest) (*dto.AttemptResponse, *httpx.HTTPError)
-	GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, *httpx.HTTPError)
+	GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int64, *httpx.HTTPError)
 	GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, *httpx.HTTPError)
 	CancelAttempt(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError)
 	GetAttemptHistory(ctx context.Context, userID string, attemptID uint) (*dto.AttemptResponse, *httpx.HTTPError)
@@ -100,8 +117,8 @@ type Service interface {
 
 	// Classroom
 	CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, *httpx.HTTPError)
-	GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, *httpx.HTTPError)
-	GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, *httpx.HTTPError)
+	GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError)
+	GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError)
 	GetClassroom(ctx context.Context, userID string, id uint) (*dto.ClassroomResponse, *httpx.HTTPError)
 	GetClassroomByCode(ctx context.Context, code string) (*dto.ClassroomByCodeResponse, *httpx.HTTPError)
 	UpdateClassroom(ctx context.Context, teacherID string, id uint, req dto.UpdateClassroomRequest) (*dto.ClassroomResponse, *httpx.HTTPError)
@@ -132,15 +149,13 @@ type Service interface {
 
 	// Assignment
 	CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, *httpx.HTTPError)
-	AssignExistingExam(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.AssignExistingExamRequest) (*dto.CreatedAssignmentsResponse, *httpx.HTTPError)
-	GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int, *httpx.HTTPError)
+	GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int64, *httpx.HTTPError)
 	GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, *httpx.HTTPError)
-	UpdateAssignmentSchedule(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentScheduleRequest) (*dto.AssignmentResponse, *httpx.HTTPError)
+	UpdateAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentRequest) (*dto.AssignmentResponse, *httpx.HTTPError)
 	SetAssignmentActive(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, active bool) (*dto.AssignmentResponse, *httpx.HTTPError)
 
 	// Assignment edit
 	GetEditableAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.EditableAssignmentResponse, *httpx.HTTPError)
-	UpdateAssignmentContent(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.UpdateAssignmentContentRequest) (*dto.EditableAssignmentResponse, *httpx.HTTPError)
 	ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) *httpx.HTTPError
 	GetAssignmentAudits(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) ([]*dto.ExamAuditResponse, *httpx.HTTPError)
 
@@ -178,6 +193,16 @@ type Service interface {
 
 	// Notification outbox
 	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
+
+	// Attempt integrity (giám sát; WS phía học sinh, REST phía giáo viên)
+	ClaimAttemptSession(ctx context.Context, userID, connectionID string, payload socket.AttemptSessionClaimPayload) (*dto.AttemptSessionClaimResponse, error)
+	RecordIntegrityEvent(ctx context.Context, userID, connectionID string, payload socket.AttemptIntegrityEventPayload) (*dto.IntegrityEventAckResponse, error)
+	ReleaseAttemptConnection(ctx context.Context, connectionID string)
+	GetIntegrityEvents(ctx context.Context, teacherID string, classroomID, assignmentID uint, query dto.IntegrityEventsQuery) ([]*dto.AttemptIntegrityEventResponse, int64, *httpx.HTTPError)
+	ReviewIntegrityEvent(ctx context.Context, teacherID string, classroomID, assignmentID uint, eventID string, req dto.ReviewIntegrityEventRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
+	BanAttempt(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string, req dto.BanAttemptRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
+	ReleaseAttemptSession(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
+	ReinstateAttempt(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string, req dto.ReinstateAttemptRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
 }
 
 // NotificationClient là interface hẹp tới notifications service, để test bằng fake.
@@ -191,6 +216,11 @@ type IdentityClient interface {
 	SearchUserIDsByName(ctx context.Context, in *identityClient.SearchUserIDsByNameRequest, opts ...grpc.CallOption) (*identityClient.SearchUserIDsByNameResponse, error)
 }
 
+// StorageClient là interface hẹp tới storage service: chỉ dùng để đổi tên file ảnh lớp thành URL công khai.
+type StorageClient interface {
+	GetPublicURL(ctx context.Context, in *storageClient.GetPublicURLRequest, opts ...grpc.CallOption) (*storageClient.GetPublicURLResponse, error)
+}
+
 // EventPublisher đẩy payload realtime tới mọi kết nối WebSocket của một user.
 type EventPublisher func(userID string, payload any)
 
@@ -199,9 +229,11 @@ type service struct {
 	cfg                *learningConfig.AppConfig
 	notificationClient NotificationClient
 	identityClient     IdentityClient
+	storageClient      StorageClient
 	mediaClient        media.Client
 	roomPublisher      EventPublisher // hub /ws/classrooms
 	attemptPublisher   EventPublisher // hub /ws/exams
+	integrity          *integrityRegistry
 	now                func() time.Time
 }
 
@@ -210,6 +242,7 @@ func New(
 	cfg *learningConfig.AppConfig,
 	notificationClient NotificationClient,
 	identityClient IdentityClient,
+	storageClient StorageClient,
 	mediaClient media.Client,
 	roomPublisher EventPublisher,
 	attemptPublisher EventPublisher,
@@ -219,9 +252,11 @@ func New(
 		cfg:                cfg,
 		notificationClient: notificationClient,
 		identityClient:     identityClient,
+		storageClient:      storageClient,
 		mediaClient:        mediaClient,
 		roomPublisher:      roomPublisher,
 		attemptPublisher:   attemptPublisher,
+		integrity:          newIntegrityRegistry(),
 		now:                time.Now,
 	}
 }

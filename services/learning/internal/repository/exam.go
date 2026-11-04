@@ -9,10 +9,23 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *repository) GetListExam(ctx context.Context, examType model.ExamType, limit, offset int32) ([]*model.Exam, int64, error) {
+// ExamFilter lọc danh sách đề public; Search và Year để trống thì bỏ qua.
+type ExamFilter struct {
+	Type   model.ExamType
+	Search string
+	Year   *int
+}
+
+func (r *repository) GetListExam(ctx context.Context, filter ExamFilter, limit, offset int32) ([]*model.Exam, int64, error) {
 	var exams []*model.Exam
 	var total int64
-	query := r.db.WithContext(ctx).Model(&model.Exam{}).Where("type = ? AND is_public = ?", examType, true)
+	query := r.db.WithContext(ctx).Model(&model.Exam{}).Where("type = ? AND is_public = ?", filter.Type, true)
+	if filter.Search != "" {
+		query = query.Where("title ILIKE ?", "%"+filter.Search+"%")
+	}
+	if filter.Year != nil {
+		query = query.Where("year = ?", *filter.Year)
+	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -27,6 +40,15 @@ func (r *repository) GetListExam(ctx context.Context, examType model.ExamType, l
 	}
 
 	return exams, total, nil
+}
+
+// GetExamYears trả các năm (khác null) của đề public thuộc loại này, mới nhất trước.
+func (r *repository) GetExamYears(ctx context.Context, examType model.ExamType) ([]int, error) {
+	years := []int{}
+	err := r.db.WithContext(ctx).Model(&model.Exam{}).
+		Where("type = ? AND is_public = ? AND year IS NOT NULL", examType, true).
+		Distinct("year").Order("year DESC").Pluck("year", &years).Error
+	return years, err
 }
 
 func (r *repository) GetExamByID(ctx context.Context, id uint) (*model.Exam, error) {

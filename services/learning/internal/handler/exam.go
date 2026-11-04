@@ -16,6 +16,8 @@ import (
 // @Param        page      query     int  false  "Page number" default(1)
 // @Param        pageSize  query     int  false  "Page size"   default(10)
 // @Param        type      query     string  false  "Exam type" Enums(THPT, TOEIC) default(THPT)
+// @Param        search    query     string  false  "Search by title"
+// @Param        year      query     int     false  "Exam year"
 // @Success      200  {object}  httpx.PaginatedResponse[dto.GetExamsResponse]
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
@@ -28,13 +30,40 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Normalize()
 
-	exams, pageCounts, httpErr := h.service.GetList(r.Context(), query)
+	exams, total, httpErr := h.service.GetList(r.Context(), query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(exams, query.PaginationQuery, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(exams, query.PaginationQuery, total))
+}
+
+// GetYears godoc
+// @Summary      Get exam years
+// @Description  Distinct years of public exams of a type, newest first
+// @Tags         Exams
+// @Produce      json
+// @Param        type  query     string  false  "Exam type" Enums(THPT, TOEIC) default(THPT)
+// @Success      200   {array}   int
+// @Failure      400   {object}  httpx.HTTPError
+// @Failure      500   {object}  httpx.HTTPError
+// @Router       /exams/years [get]
+func (h *handler) GetYears(w http.ResponseWriter, r *http.Request) {
+	var query dto.GetExamsQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil {
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
+		return
+	}
+	query.Normalize()
+
+	years, httpErr := h.service.GetExamYears(r.Context(), query.Type)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
+		return
+	}
+
+	httpx.JSON(w, http.StatusOK, years)
 }
 
 // GetByID godoc

@@ -134,6 +134,16 @@ func (r *Repository) AttachToPost(ctx context.Context, ids []uint, userID string
 	return nil
 }
 
+// DetachFromPost gỡ đính kèm khỏi bài; chúng thành orphan và job dọn dẹp sẽ xóa file sau.
+func (r *Repository) DetachFromPost(ctx context.Context, postID uint, ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.PostAttachment{}).
+		Where("post_id = ? AND id IN ?", postID, ids).
+		Updates(map[string]any{"post_id": nil}).Error
+}
+
 func (r *Repository) ListAttachments(ctx context.Context, postID uint) ([]*model.PostAttachment, error) {
 	var attachments []*model.PostAttachment
 	err := r.db.WithContext(ctx).Where("post_id = ?", postID).Order("sort_order ASC, id ASC").Find(&attachments).Error
@@ -177,21 +187,42 @@ func (r *Repository) GetComment(ctx context.Context, id uint) (*model.PostCommen
 	return &comment, err
 }
 
-func (r *Repository) ListComments(ctx context.Context, postID uint) ([]*model.PostComment, error) {
+// ListComments trả một trang comment gốc (parentID nil) hoặc reply của một comment gốc.
+func (r *Repository) ListComments(ctx context.Context, postID uint, parentID *uint, limit, offset int32) ([]*model.PostComment, int64, error) {
+	q := r.db.WithContext(ctx).Model(&model.PostComment{}).Where("post_id = ?", postID)
+	if parentID == nil {
+		q = q.Where("parent_id IS NULL")
+	} else {
+		q = q.Where("parent_id = ?", *parentID)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 	var comments []*model.PostComment
-	err := r.db.WithContext(ctx).
-		Where("post_id = ?", postID).
-		Order("created_at ASC, id ASC").
-		Find(&comments).Error
-	return comments, err
+	err := q.Order("created_at ASC, id ASC").Limit(int(limit)).Offset(int(offset)).Find(&comments).Error
+	return comments, total, err
 }
 
-func (r *Repository) SaveComment(ctx context.Context, comment *model.PostComment) error {
-	return r.db.WithContext(ctx).Save(comment).Error
-}
-
-func (r *Repository) DeleteComment(ctx context.Context, comment *model.PostComment) error {
-	return r.db.WithContext(ctx).Delete(comment).Error
+// CountReplies đếm số reply của từng comment gốc.
+func (r *Repository) CountReplies(ctx context.Context, parentIDs []uint) (map[uint]int64, error) {
+	out := make(map[uint]int64, len(parentIDs))
+	if len(parentIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ParentID uint
+		Count    int64
+	}
+	err := r.db.WithContext(ctx).Model(&model.PostComment{}).
+		Select("parent_id, COUNT(*) AS count").
+		Where("parent_id IN ?", parentIDs).
+		Group("parent_id").
+		Scan(&rows).Error
+	for _, row := range rows {
+		out[row.ParentID] = row.Count
+	}
+	return out, err
 }
 
 func (r *Repository) LikePost(ctx context.Context, postID uint, userID string) (bool, error) {

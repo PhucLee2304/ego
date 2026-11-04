@@ -63,7 +63,7 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 	createNotifications(t, repo)
 	ctx := context.Background()
 
-	items, total, unread, err := repo.GetNotifications(ctx, "1", nil, 1, 0)
+	items, total, unread, err := repo.GetNotifications(ctx, "1", nil, nil, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	read := true
-	items, total, unread, err = repo.GetNotifications(ctx, "1", &read, 10, 0)
+	items, total, unread, err = repo.GetNotifications(ctx, "1", &read, nil, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestNotificationListReadAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	unreadOnly := false
-	items, total, unread, err = repo.GetNotifications(ctx, "1", &unreadOnly, 10, 0)
+	items, total, unread, err = repo.GetNotifications(ctx, "1", &unreadOnly, nil, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestCreateNotificationCommitsBeforeBestEffortPush(t *testing.T) {
 		t.Fatal(err)
 	}
 	sender := &fakeSender{called: make(chan struct{}), invalid: []string{"invalid-token"}}
-	svc := service.New(repo, sender)
+	svc := service.New(repo, sender, nil)
 	if err := svc.CreateNotifications(ctx, []dto.CreateNotificationRequest{{
 		UserID: "1", Title: "Saved first", Body: "Push is optional", SourceService: "TEST",
 		IdempotencyKey: "saved-before-push", Data: map[string]string{"id": "1", "type": "HOME"},
@@ -220,7 +220,7 @@ func TestCreateNotificationsIsIdempotent(t *testing.T) {
 
 func TestCreateNotificationsRPCCommitsAndDeduplicates(t *testing.T) {
 	repo, db := testRepository(t)
-	server := notificationsRpc.New(service.New(repo, nil))
+	server := notificationsRpc.New(service.New(repo, nil, nil))
 	request := &notificationsClient.CreateNotificationsRequest{
 		Recipients: []string{"1", "2"}, Title: "Assignment", Body: "A new assignment is available",
 		SourceService: "CLASSROOMS", Data: map[string]string{"id": "9", "type": "ASSIGNMENT"}, IdempotencyKey: "assignment:9:created",

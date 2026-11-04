@@ -22,15 +22,33 @@ func (r *repository) GetActiveAttemptByUserID(ctx context.Context, userID string
 	return &attempt, nil
 }
 
-func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, status model.AttemptStatus, limit, offset int32) ([]*model.Attempt, int64, error) {
+// AttemptFilter lọc lịch sử attempt của một user; ExcludeMode và ExamTypes để trống thì bỏ qua.
+type AttemptFilter struct {
+	Status      model.AttemptStatus
+	ExcludeMode model.AttemptMode
+	ExamTypes   []model.ExamType
+	Search      string
+}
+
+func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, filter AttemptFilter, limit, offset int32) ([]*model.Attempt, int64, error) {
 	var attempts []*model.Attempt
 	var total int64
 
-	query := r.db.WithContext(ctx).
-		Model(&model.Attempt{}).
-		Where("user_id = ? AND status = ?", userID, status)
+	scope := func(db *gorm.DB) *gorm.DB {
+		db = db.Where("attempts.user_id = ? AND attempts.status = ?", userID, filter.Status)
+		if filter.ExcludeMode != "" {
+			db = db.Where("attempts.mode <> ?", filter.ExcludeMode)
+		}
+		if len(filter.ExamTypes) > 0 {
+			db = db.Where("attempts.exam_id IN (?)", r.db.Model(&model.Exam{}).Select("id").Where("type IN ?", filter.ExamTypes))
+		}
+		if filter.Search != "" {
+			db = db.Where("attempts.exam_id IN (?)", r.db.Model(&model.Exam{}).Select("id").Where("title ILIKE ?", "%"+filter.Search+"%"))
+		}
+		return db
+	}
 
-	if err := query.Count(&total).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&model.Attempt{}).Scopes(scope).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -38,8 +56,8 @@ func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID st
 		Preload("Exam").
 		Preload("Answers").
 		Preload("History").
-		Where("user_id = ? AND status = ?", userID, status).
-		Order("id DESC").
+		Scopes(scope).
+		Order("attempts.id DESC").
 		Limit(int(limit)).
 		Offset(int(offset)).
 		Find(&attempts).Error; err != nil {
@@ -118,8 +136,23 @@ func (r *repository) CreateAttempt(ctx context.Context, attempt *model.Attempt) 
 func (r *repository) UpdateAttempt(ctx context.Context, attempt *model.Attempt) error {
 	return r.db.WithContext(ctx).
 		Model(attempt).
-		Select("status", "submitted_at", "correct_answers", "score", "updated_at").
+		Select("status", "submitted_at", "correct_answers", "raw_score", "score", "updated_at").
 		Updates(attempt).Error
+}
+
+// FinalizeAttempt ghi kết quả chốt chỉ khi attempt còn ACTIVE; false nếu đã bị
+// transaction khác chốt trước.
+func (r *repository) FinalizeAttempt(ctx context.Context, attempt *model.Attempt) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Attempt{}).
+		Where("id = ? AND status = ?", attempt.ID, model.AttemptStatusInProgress).
+		Select("status", "submitted_at", "correct_answers", "raw_score", "score",
+			"integrity_outcome", "terminated_at", "termination_reason", "terminated_by", "updated_at").
+		Updates(attempt)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 // GetActiveListeningOnlyAttempts lấy attempt TOEIC_STRICT đang làm mà layout chỉ gồm

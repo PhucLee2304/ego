@@ -75,6 +75,7 @@ func (h *Handler) DeleteDeviceToken(w http.ResponseWriter, r *http.Request) {
 // @Param page query int false "Page"
 // @Param pageSize query int false "Page size"
 // @Param read query bool false "Read status"
+// @Param category query string false "POSTS | CLASSROOMS | ASSIGNMENTS | ROOMS | EXAMS"
 // @Success 200 {object} dto.NotificationsResponse
 // @Router /notifications [get]
 func (h *Handler) GetNotifications(w http.ResponseWriter, r *http.Request) {

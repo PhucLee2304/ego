@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	identityClient "ego/api/gen/go/identity"
+	storageClient "ego/api/gen/go/storage"
 	platformdb "ego/platform/db"
 	"ego/platform/httpx"
 	"ego/services/learning/internal/dto"
@@ -22,6 +23,11 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	const codeLength = 8
 	const maxCodeAttempts = 5
+
+	avatar, httpErr := s.resolveClassroomAvatar(ctx, req.Avatar)
+	if httpErr != nil {
+		return nil, httpErr
+	}
 
 	// Thử sinh mã lớp tối đa một số lần hữu hạn để xử lý trường hợp mã ngẫu nhiên bị trùng.
 	for codeAttempt := 0; codeAttempt < maxCodeAttempts; codeAttempt++ {
@@ -42,7 +48,7 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 				Code:        string(codeBytes),
 				Name:        strings.TrimSpace(req.Name),
 				Description: req.Description,
-				Avatar:      req.Avatar,
+				Avatar:      avatar,
 				TeacherID:   teacherID,
 				Active:      true,
 			}
@@ -71,7 +77,7 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 	return nil, httpx.NewError(http.StatusInternalServerError, errClassroomServiceFailed, errors.New("[ERROR] Could not generate a unique classroom code"))
 }
 
-func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, *httpx.HTTPError) {
+func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError) {
 	var teacherIDs []string
 	if query.Query != "" {
 		usersResp, err := s.identityClient.SearchUserIDsByName(ctx, &identityClient.SearchUserIDsByNameRequest{Query: query.Query})
@@ -108,10 +114,10 @@ func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) 
 		users = usersResp.Users
 	}
 	responses := dto.ToClassroomResponses(classrooms, users)
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
-func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int, *httpx.HTTPError) {
+func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError) {
 	var teacherIDs []string
 	if query.Query != "" {
 		usersResp, err := s.identityClient.SearchUserIDsByName(ctx, &identityClient.SearchUserIDsByNameRequest{Query: query.Query})
@@ -148,7 +154,7 @@ func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.
 		users = usersResp.Users
 	}
 	responses := dto.ToClassroomResponses(classrooms, users)
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
 func (s *service) GetClassroom(ctx context.Context, userID string, id uint) (*dto.ClassroomResponse, *httpx.HTTPError) {
@@ -205,6 +211,10 @@ func (s *service) GetClassroomByCode(ctx context.Context, code string) (*dto.Cla
 }
 
 func (s *service) UpdateClassroom(ctx context.Context, teacherID string, id uint, req dto.UpdateClassroomRequest) (*dto.ClassroomResponse, *httpx.HTTPError) {
+	avatar, httpErr := s.resolveClassroomAvatar(ctx, req.Avatar)
+	if httpErr != nil {
+		return nil, httpErr
+	}
 	var response *dto.ClassroomResponse
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		classroom, err := repo.GetClassroomByID(ctx, id)
@@ -223,8 +233,8 @@ func (s *service) UpdateClassroom(ctx context.Context, teacherID string, id uint
 		if req.Description != nil {
 			classroom.Description = req.Description
 		}
-		if req.Avatar != nil {
-			classroom.Avatar = req.Avatar
+		if avatar != nil {
+			classroom.Avatar = avatar
 		}
 		if err := repo.UpdateClassroom(ctx, classroom); err != nil {
 			return err
@@ -296,4 +306,22 @@ func (s *service) GetClassroomPostAccess(ctx context.Context, classroomID uint, 
 		}
 	}
 	return classroom, isApproved, nil
+}
+
+// resolveClassroomAvatar đổi tên file đã upload vào thư mục avatars thành URL công khai, giống avatar user ở identity.
+func (s *service) resolveClassroomAvatar(ctx context.Context, fileName *string) (*string, *httpx.HTTPError) {
+	if fileName == nil {
+		return nil, nil
+	}
+	if name := *fileName; name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid avatar", nil)
+	}
+	resp, err := s.storageClient.GetPublicURL(ctx, &storageClient.GetPublicURLRequest{
+		Folders:  []string{"avatars"},
+		FileName: *fileName,
+	})
+	if err != nil {
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get avatar URL", err)
+	}
+	return &resp.Url, nil
 }

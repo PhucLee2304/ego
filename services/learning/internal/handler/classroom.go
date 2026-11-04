@@ -67,12 +67,12 @@ func (h *handler) GetClassrooms(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Normalize()
 
-	resp, pageCounts, httpErr := h.service.GetClassrooms(r.Context(), query)
+	resp, total, httpErr := h.service.GetClassrooms(r.Context(), query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, total))
 }
 
 // GetMyClassrooms godoc
@@ -105,12 +105,12 @@ func (h *handler) GetMyClassrooms(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Normalize()
 
-	resp, pageCounts, httpErr := h.service.GetMyClassrooms(r.Context(), userID, query)
+	resp, total, httpErr := h.service.GetMyClassrooms(r.Context(), userID, query)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, pageCounts))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(resp, query.PaginationQuery, total))
 }
 
 // GetClassroom godoc

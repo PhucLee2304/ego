@@ -15,7 +15,9 @@ type ExamAudit struct {
 	Before       datatypes.JSON `gorm:"type:jsonb;not null"`
 	After        datatypes.JSON `gorm:"type:jsonb;not null"`
 	ScoreChanges datatypes.JSON `gorm:"type:jsonb;not null"`
-	RegradedAt   *time.Time     `gorm:"index"`
+	// Changes là danh sách dòng mô tả thay đổi (tiếng Anh) để hiện trong Change history.
+	Changes    datatypes.JSON `gorm:"type:jsonb;not null;default:'[]'"`
+	RegradedAt *time.Time     `gorm:"index"`
 }
 
 type ExamAuditScoreChange struct {

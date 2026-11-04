@@ -9,7 +9,8 @@ import (
 
 type NotificationsQuery struct {
 	httpx.PaginationQuery
-	Read *bool `schema:"read"`
+	Read     *bool  `schema:"read"`
+	Category string `schema:"category" validate:"omitempty,oneof=POSTS CLASSROOMS ASSIGNMENTS ROOMS EXAMS"`
 }
 
 type NotificationResponse struct {
@@ -26,6 +27,8 @@ type NotificationsResponse struct {
 	Page          int                     `json:"page"`
 	PageCount     int                     `json:"pageCount"`
 	UnreadCount   int64                   `json:"unreadCount"`
+	// UnreadByCategory: số chưa đọc theo nhóm (POSTS, CLASSROOMS…), nhóm 0 thì không có key.
+	UnreadByCategory map[string]int64 `json:"unreadByCategory"`
 }
 
 type RegisterDeviceTokenRequest struct {

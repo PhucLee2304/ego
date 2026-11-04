@@ -12,7 +12,7 @@ import (
 // đáp án đã lưu (thay RPC SubmitAssignmentAttempts của exams). Gọi trong tx của
 // assignment qua withRepoDeferringEvents: mỗi bài nộp là một SAVEPOINT; bài nộp lỗi
 // được bỏ qua và để worker auto-submit làm lại vì expires_at đã được đặt về now.
-func (s *service) submitAssignmentAttempts(ctx context.Context, assignmentID uint) (int, error) {
+func (s *service) submitAssignmentAttempts(ctx context.Context, assignmentID uint, reason string) (int, error) {
 	if err := s.repo.ExpireActiveAssignmentAttempts(ctx, assignmentID, time.Now()); err != nil {
 		return 0, err
 	}
@@ -24,7 +24,7 @@ func (s *service) submitAssignmentAttempts(ctx context.Context, assignmentID uin
 	submitted := 0
 	var errs []error
 	for _, attempt := range attempts {
-		if _, err := s.submitAttempt(ctx, attempt.UserID, attempt.ID, nil); err != nil {
+		if _, err := s.submitAttemptWithReason(ctx, attempt.UserID, attempt.ID, reason); err != nil {
 			if errors.Is(err, ErrAttemptAlreadySubmitted) || errors.Is(err, ErrAttemptCancelled) {
 				continue
 			}
@@ -59,7 +59,7 @@ func (s *service) submitStudentAssignmentAttempts(ctx context.Context, studentID
 	submitted := 0
 	var errs []error
 	for _, attempt := range attempts {
-		if _, err := s.submitAttempt(ctx, studentID, attempt.ID, nil); err != nil {
+		if _, err := s.submitAttemptWithReason(ctx, studentID, attempt.ID, SubmitReasonRemovedFromClass); err != nil {
 			if errors.Is(err, ErrAttemptAlreadySubmitted) || errors.Is(err, ErrAttemptCancelled) {
 				continue
 			}

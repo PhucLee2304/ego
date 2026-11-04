@@ -17,8 +17,10 @@ func (r *repository) GetAssignmentSubmissionByAssignmentAndStudent(ctx context.C
 	return &submission, nil
 }
 
+// DeleteAssignmentSubmission xóa hẳn (không xóa mềm): unique (assignment_id,
+// student_id) gồm cả dòng đã xóa mềm, nên xóa mềm thì học sinh không làm lại được sau reset.
 func (r *repository) DeleteAssignmentSubmission(ctx context.Context, assignmentID uint, studentID string) error {
-	return r.db.WithContext(ctx).
+	return r.db.WithContext(ctx).Unscoped().
 		Where("assignment_id = ? AND student_id = ?", assignmentID, studentID).
 		Delete(&model.AssignmentSubmission{}).Error
 }

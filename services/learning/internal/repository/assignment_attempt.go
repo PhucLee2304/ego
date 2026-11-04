@@ -8,6 +8,7 @@ import (
 	"ego/services/learning/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Truy vấn attempt theo assignment (context CLASSROOM_ASSIGNMENT).
@@ -58,7 +59,7 @@ func (r *repository) UpdateActiveAssignmentAttemptSchedule(ctx context.Context, 
 
 func (r *repository) ResetAssignmentAttempt(ctx context.Context, assignmentID uint, studentID string) error {
 	var attempt model.Attempt
-	if err := r.db.WithContext(ctx).Where("context_type = ? AND context_id = ? AND user_id = ?", model.AttemptContextTypeClassroomAssignment, assignmentID, studentID).First(&attempt).Error; err != nil {
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("context_type = ? AND context_id = ? AND user_id = ?", model.AttemptContextTypeClassroomAssignment, assignmentID, studentID).First(&attempt).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}

@@ -46,6 +46,7 @@ type RoomParticipantStateResponse struct {
 	CameraAllowed          bool       `json:"cameraAllowed"`
 	HandRaisedAt           *time.Time `json:"handRaisedAt,omitempty"`
 	RemovedAt              *time.Time `json:"removedAt,omitempty"`
+	RemovedReason          *string    `json:"removedReason,omitempty"`
 	ScreenShareRequestedAt *time.Time `json:"screenShareRequestedAt,omitempty"`
 	ScreenShareApprovedAt  *time.Time `json:"screenShareApprovedAt,omitempty"`
 	UpdatedAt              time.Time  `json:"updatedAt"`
@@ -89,6 +90,7 @@ func ToRoomParticipantStateResponse(state *model.RoomParticipantState) *RoomPart
 		CameraAllowed:          state.CameraAllowed,
 		HandRaisedAt:           state.HandRaisedAt,
 		RemovedAt:              state.RemovedAt,
+		RemovedReason:          state.RemovedReason,
 		ScreenShareRequestedAt: state.ScreenShareRequestedAt,
 		ScreenShareApprovedAt:  state.ScreenShareApprovedAt,
 		UpdatedAt:              state.UpdatedAt,

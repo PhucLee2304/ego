@@ -95,12 +95,17 @@ func importTOEIC(tx *gorm.DB, data *seedData, uploads *uploadResult, audio map[s
 					groupID = &existingID
 				} else {
 					audioURL := toPublicURLPointer(uploads, row.AudioURL)
-					imageURL := toPublicURLPointer(uploads, row.ImageURL)
+					imageURLs := make([]string, 0, len(row.ImageURLs))
+					for _, sourceURL := range row.ImageURLs {
+						if url := toPublicURLPointer(uploads, sourceURL); url != nil {
+							imageURLs = append(imageURLs, *url)
+						}
+					}
 					group := model.Group{
 						Title:       buildGroupTitle(row.Part, row.GroupOrder),
 						Instruction: row.PassageText,
 						AudioURL:    audioURL,
-						ImageURL:    imageURL,
+						ImageURLs:   imageURLs,
 						Transcript:  row.AudioTranscript,
 						Explanation: row.Explanation,
 						Order:       row.GroupOrder,

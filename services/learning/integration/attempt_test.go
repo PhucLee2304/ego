@@ -58,7 +58,7 @@ func seedTOEIC(t *testing.T, db *gorm.DB) *model.Exam {
 }
 
 func newAttemptService(db *gorm.DB) service.Service {
-	return service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil)
+	return service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil, nil)
 }
 
 // Luồng attempt standalone: TEST cả đề, chặn attempt thứ hai, ẩn lời giải khi

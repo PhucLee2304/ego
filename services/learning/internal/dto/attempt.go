@@ -14,11 +14,31 @@ import (
 type GetAttemptsQuery struct {
 	httpx.PaginationQuery
 	Status model.AttemptStatus `schema:"status" validate:"required,oneof=ACTIVE SUBMITTED CANCELLED"`
+	// Tùy chọn: bỏ attempt theo mode (vd ASSIGNMENT cho lịch sử tự luyện).
+	ExcludeMode model.AttemptMode `schema:"excludeMode" validate:"omitempty,oneof=PRACTICE TEST ASSIGNMENT"`
+	// Tùy chọn: chỉ lấy attempt của đề thuộc các loại này, phân cách bằng dấu phẩy (vd "TOEIC,THPT").
+	ExamType string `schema:"examType"`
+	// Tùy chọn: tìm theo tên đề (không phân biệt hoa thường).
+	Search string `schema:"search"`
 }
 
 func (q *GetAttemptsQuery) Normalize() {
 	q.PaginationQuery.Normalize()
 	q.Status = model.AttemptStatus(strings.ToUpper(strings.TrimSpace(string(q.Status))))
+	q.ExcludeMode = model.AttemptMode(strings.ToUpper(strings.TrimSpace(string(q.ExcludeMode))))
+	q.ExamType = strings.ToUpper(strings.TrimSpace(q.ExamType))
+	q.Search = strings.TrimSpace(q.Search)
+}
+
+// ExamTypes tách ExamType thành danh sách, bỏ phần tử rỗng.
+func (q GetAttemptsQuery) ExamTypes() []model.ExamType {
+	var types []model.ExamType
+	for _, t := range strings.Split(q.ExamType, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			types = append(types, model.ExamType(t))
+		}
+	}
+	return types
 }
 
 type CreateExamAttemptRequest struct {
@@ -28,6 +48,8 @@ type CreateExamAttemptRequest struct {
 	Duration    *model.AttemptDuration   `json:"duration,omitempty" validate:"omitempty,oneof=10 15 20 30 45 60 75 90 120"`
 	ContextType model.AttemptContextType `json:"contextType" validate:"required,oneof=STANDALONE CLASSROOM_ASSIGNMENT"`
 	ContextID   *uint                    `json:"contextId,omitempty" validate:"omitempty,gt=0"`
+	// Bắt buộc khi assignment có giám sát (PLAN_ATTEMPT_INTEGRITY.md mục 1.7).
+	IntegrityConsent *IntegrityConsentRequest `json:"integrityConsent,omitempty"`
 }
 
 func (r *CreateExamAttemptRequest) Normalize() {
@@ -137,26 +159,37 @@ func ValidateCreateExamAttemptRequestForExam(examType model.ExamType, req Create
 }
 
 type AttemptResponse struct {
-	ID             uint                    `json:"id"`
-	ExamID         uint                    `json:"examId"`
-	Exam           *AttemptExamSummary     `json:"exam,omitempty"`
-	Mode           string                  `json:"mode"`
-	Flow           string                  `json:"flow"`
-	Stage          *string                 `json:"stage,omitempty"`
-	Status         string                  `json:"status"`
-	Section        *string                 `json:"section,omitempty"`
-	Parts          []string                `json:"parts,omitempty"`
-	Duration       *int                    `json:"duration,omitempty"`
-	StartedAt      time.Time               `json:"startedAt"`
-	ExpiresAt      *time.Time              `json:"expiresAt,omitempty"`
-	SubmittedAt    *time.Time              `json:"submittedAt,omitempty"`
-	TotalQuestions int                     `json:"totalQuestions"`
-	AnsweredCount  int                     `json:"answeredCount"`
-	CorrectAnswers *int                    `json:"correctAnswers,omitempty"`
-	Score          *float64                `json:"score,omitempty"`
-	CreatedAt      time.Time               `json:"createdAt"`
-	UpdatedAt      time.Time               `json:"updatedAt"`
-	Sections       []*ExamQuestionsSection `json:"sections,omitempty"`
+	ID             uint                `json:"id"`
+	ExamID         uint                `json:"examId"`
+	Exam           *AttemptExamSummary `json:"exam,omitempty"`
+	Mode           string              `json:"mode"`
+	Flow           string              `json:"flow"`
+	Stage          *string             `json:"stage,omitempty"`
+	Status         string              `json:"status"`
+	Section        *string             `json:"section,omitempty"`
+	Parts          []string            `json:"parts,omitempty"`
+	Duration       *int                `json:"duration,omitempty"`
+	StartedAt      time.Time           `json:"startedAt"`
+	ExpiresAt      *time.Time          `json:"expiresAt,omitempty"`
+	SubmittedAt    *time.Time          `json:"submittedAt,omitempty"`
+	TotalQuestions int                 `json:"totalQuestions"`
+	AnsweredCount  int                 `json:"answeredCount"`
+	CorrectAnswers *int                `json:"correctAnswers,omitempty"`
+	Score          *float64            `json:"score,omitempty"`
+	// Giám sát: chỉ có giá trị khi proctored.
+	Proctored         bool    `json:"proctored"`
+	MaxViolations     *int    `json:"maxViolations,omitempty"`
+	ViolationCount    *int    `json:"violationCount,omitempty"`
+	IntegrityOutcome  *string `json:"integrityOutcome,omitempty"`
+	TerminationReason *string `json:"terminationReason,omitempty"`
+	// TeacherNote: lời nhắn giáo viên cho học sinh khi đình chỉ / mở lại.
+	TeacherNote *string `json:"teacherNote,omitempty"`
+	// Bài giao trong lớp: client mở kết quả trong tab Classwork của lớp đó.
+	AssignmentID *uint                   `json:"assignmentId,omitempty"`
+	ClassroomID  *uint                   `json:"classroomId,omitempty"`
+	CreatedAt    time.Time               `json:"createdAt"`
+	UpdatedAt    time.Time               `json:"updatedAt"`
+	Sections     []*ExamQuestionsSection `json:"sections,omitempty"`
 }
 
 type AttemptExamSummary struct {
@@ -184,7 +217,7 @@ func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 		}
 	}
 
-	return &AttemptResponse{
+	response := &AttemptResponse{
 		ID:     attempt.ID,
 		ExamID: attempt.ExamID,
 		Exam:   exam,
@@ -198,6 +231,7 @@ func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 			return string(value)
 		}),
 		Parts:          parts,
+		AssignmentID:   assignmentID(attempt),
 		Duration:       attempt.Duration,
 		StartedAt:      attempt.StartedAt,
 		ExpiresAt:      attempt.ExpiresAt,
@@ -210,6 +244,20 @@ func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 		UpdatedAt:      attempt.UpdatedAt,
 		Sections:       nil,
 	}
+	applyIntegrityFields(response, attempt)
+	return response
+}
+
+func applyIntegrityFields(response *AttemptResponse, attempt *model.Attempt) {
+	if !attempt.Proctored {
+		return
+	}
+	state := ToIntegrityState(attempt)
+	response.Proctored = true
+	response.MaxViolations = &state.MaxViolations
+	response.ViolationCount = &state.ViolationCount
+	response.IntegrityOutcome = &state.Outcome
+	response.TerminationReason = terminationReason(attempt.TerminationReason)
 }
 
 // attemptFlow: attempt tạo trước khi có cột Flow (hoặc struct dựng tay) coi là FREE.
@@ -333,4 +381,11 @@ type UpdateAttemptAnswerResponse struct {
 	QuestionID       uint      `json:"questionId"`
 	SelectedOptionID *uint     `json:"selectedOptionId,omitempty"`
 	AnsweredAt       time.Time `json:"answeredAt"`
+}
+
+func assignmentID(attempt *model.Attempt) *uint {
+	if attempt.ContextType != model.AttemptContextTypeClassroomAssignment {
+		return nil
+	}
+	return attempt.ContextID
 }

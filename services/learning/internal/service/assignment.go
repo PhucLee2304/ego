@@ -70,14 +70,16 @@ func (s *service) CreateAssignments(ctx context.Context, teacherID string, req d
 		assignments = make([]*model.Assignment, 0, len(req.Schedules))
 		for _, schedule := range req.Schedules {
 			assignments = append(assignments, &model.Assignment{
-				ClassroomID: schedule.ClassroomID,
-				Title:       strings.TrimSpace(req.Title),
-				Description: req.Description,
-				ExamID:      exam.ID,
-				Duration:    schedule.Duration,
-				OpensAt:     schedule.OpensAt,
-				DueAt:       schedule.DueAt,
-				Active:      true,
+				ClassroomID:   schedule.ClassroomID,
+				Title:         strings.TrimSpace(req.Title),
+				Description:   req.Description,
+				ExamID:        exam.ID,
+				Duration:      schedule.Duration,
+				OpensAt:       schedule.OpensAt,
+				DueAt:         schedule.DueAt,
+				Active:        true,
+				Proctored:     schedule.Proctored,
+				MaxViolations: maxViolationsOrDefault(schedule.MaxViolations),
 			})
 		}
 
@@ -115,21 +117,11 @@ func (s *service) CreateAssignments(ctx context.Context, teacherID string, req d
 	return dto.ToCreatedAssignmentsResponse(assignments), nil
 }
 
-func (s *service) AssignExistingExam(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, req dto.AssignExistingExamRequest) (*dto.CreatedAssignmentsResponse, *httpx.HTTPError) {
-	source, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
-	if err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
-	}
-	sourceClassroom, err := s.repo.GetClassroomByID(ctx, classroomID)
-	if err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
-	}
-	if sourceClassroom.TeacherID != teacherID {
-		return nil, ErrClassroomForbidden
-	}
-
-	seen := make(map[uint]struct{}, len(req.Schedules))
-	for _, schedule := range req.Schedules {
+// assignExistingExamTx giao đề của source cho thêm các lớp (cùng giáo viên, đang hoạt động,
+// chưa có đề này) trong transaction của người gọi, kèm thông báo tạo bài và nhắc hạn.
+func assignExistingExamTx(ctx context.Context, repo repository.Repository, teacherID string, source *model.Assignment, schedules []dto.AssignmentScheduleRequest) ([]*model.Assignment, error) {
+	seen := make(map[uint]struct{}, len(schedules))
+	for _, schedule := range schedules {
 		if _, ok := seen[schedule.ClassroomID]; ok {
 			return nil, ErrAssignmentAlreadyExists
 		}
@@ -140,9 +132,9 @@ func (s *service) AssignExistingExam(ctx context.Context, teacherID string, clas
 		if time.Duration(schedule.Duration)*time.Minute > schedule.DueAt.Sub(schedule.OpensAt) {
 			return nil, ErrAssignmentDuration
 		}
-		classroom, err := s.repo.GetClassroomByID(ctx, schedule.ClassroomID)
+		classroom, err := repo.GetClassroomByID(ctx, schedule.ClassroomID)
 		if err != nil {
-			return nil, httpx.FromError(err, errClassroomServiceFailed)
+			return nil, err
 		}
 		if classroom.TeacherID != teacherID {
 			return nil, ErrClassroomForbidden
@@ -150,64 +142,59 @@ func (s *service) AssignExistingExam(ctx context.Context, teacherID string, clas
 		if !classroom.Active {
 			return nil, ErrClassroomNotActive
 		}
-		exists, err := s.repo.AssignmentExistsByClassroomAndExam(ctx, schedule.ClassroomID, source.ExamID)
+		exists, err := repo.AssignmentExistsByClassroomAndExam(ctx, schedule.ClassroomID, source.ExamID)
 		if err != nil {
-			return nil, httpx.FromError(err, errClassroomServiceFailed)
+			return nil, err
 		}
 		if exists {
 			return nil, ErrAssignmentAlreadyExists
 		}
 	}
 
-	var assignments []*model.Assignment
-	err = s.repo.Transaction(ctx, func(repo repository.Repository) error {
-		assignments = make([]*model.Assignment, 0, len(req.Schedules))
-		for _, schedule := range req.Schedules {
-			assignments = append(assignments, &model.Assignment{
-				ClassroomID: schedule.ClassroomID,
-				Title:       source.Title,
-				Description: source.Description,
-				ExamID:      source.ExamID,
-				Duration:    schedule.Duration,
-				OpensAt:     schedule.OpensAt,
-				DueAt:       schedule.DueAt,
-				Active:      true,
-			})
-		}
-		if err := repo.CreateAssignments(ctx, assignments); err != nil {
-			return err
-		}
-		for _, assignment := range assignments {
-			members, err := repo.GetApprovedMembersByClassroom(ctx, assignment.ClassroomID)
-			if err != nil {
-				return err
-			}
-			recipients := make([]string, len(members))
-			for i, member := range members {
-				recipients[i] = member.UserID
-			}
-			if err := createNotificationOutbox(ctx, repo, model.NotificationSourceAssignment, fmt.Sprintf("assignment:%d:created", assignment.ID), recipients,
-				"New assignment", assignment.Title, "ASSIGNMENT", assignment.ID, assignment.ClassroomID, time.Time{}); err != nil {
-				return err
-			}
-			reminderAt := assignment.DueAt.Add(-24 * time.Hour)
-			if reminderAt.Before(time.Now()) {
-				reminderAt = time.Now()
-			}
-			if err := createNotificationOutbox(ctx, repo, model.NotificationSourceAssignment, fmt.Sprintf("assignment:%d:due-reminder", assignment.ID), recipients,
-				"Assignment due soon", assignment.Title+" is due soon", "ASSIGNMENT", assignment.ID, assignment.ClassroomID, reminderAt); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
+	assignments := make([]*model.Assignment, 0, len(schedules))
+	for _, schedule := range schedules {
+		assignments = append(assignments, &model.Assignment{
+			ClassroomID:   schedule.ClassroomID,
+			Title:         source.Title,
+			Description:   source.Description,
+			ExamID:        source.ExamID,
+			Duration:      schedule.Duration,
+			OpensAt:       schedule.OpensAt,
+			DueAt:         schedule.DueAt,
+			Active:        true,
+			Proctored:     schedule.Proctored,
+			MaxViolations: maxViolationsOrDefault(schedule.MaxViolations),
+		})
 	}
-	return dto.ToCreatedAssignmentsResponse(assignments), nil
+	if err := repo.CreateAssignments(ctx, assignments); err != nil {
+		return nil, err
+	}
+	for _, assignment := range assignments {
+		members, err := repo.GetApprovedMembersByClassroom(ctx, assignment.ClassroomID)
+		if err != nil {
+			return nil, err
+		}
+		recipients := make([]string, len(members))
+		for i, member := range members {
+			recipients[i] = member.UserID
+		}
+		if err := createNotificationOutbox(ctx, repo, model.NotificationSourceAssignment, fmt.Sprintf("assignment:%d:created", assignment.ID), recipients,
+			"New assignment", assignment.Title, "ASSIGNMENT", assignment.ID, assignment.ClassroomID, time.Time{}); err != nil {
+			return nil, err
+		}
+		reminderAt := assignment.DueAt.Add(-24 * time.Hour)
+		if reminderAt.Before(time.Now()) {
+			reminderAt = time.Now()
+		}
+		if err := createNotificationOutbox(ctx, repo, model.NotificationSourceAssignment, fmt.Sprintf("assignment:%d:due-reminder", assignment.ID), recipients,
+			"Assignment due soon", assignment.Title+" is due soon", "ASSIGNMENT", assignment.ID, assignment.ClassroomID, reminderAt); err != nil {
+			return nil, err
+		}
+	}
+	return assignments, nil
 }
 
-func (s *service) GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int, *httpx.HTTPError) {
+func (s *service) GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int64, *httpx.HTTPError) {
 	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
 	if err != nil {
 		return nil, 0, httpx.FromError(err, errClassroomServiceFailed)
@@ -260,7 +247,7 @@ func (s *service) GetAssignments(ctx context.Context, userID string, classroomID
 		currentUserID = ""
 	}
 	responses := dto.ToAssignmentResponses(assignments, time.Now(), currentUserID, isTeacher, users)
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
 func (s *service) GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, *httpx.HTTPError) {
@@ -312,4 +299,14 @@ func (s *service) GetAssignment(ctx context.Context, userID string, classroomID 
 		currentUserID = ""
 	}
 	return dto.ToAssignmentResponse(assignment, time.Now(), currentUserID, isTeacher, users), nil
+}
+
+// defaultMaxViolations là số lần vi phạm được phép mặc định (PLAN_ATTEMPT_INTEGRITY.md Q1).
+const defaultMaxViolations = 2
+
+func maxViolationsOrDefault(value *int) int {
+	if value == nil || *value < 1 {
+		return defaultMaxViolations
+	}
+	return *value
 }

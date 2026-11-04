@@ -64,9 +64,9 @@ func verifyManifest(seedDir string, data *seedData) error {
 				return fmt.Errorf("missing audio url in manifest for question %s: %s", row.QuestionID, row.AudioURL)
 			}
 		}
-		if row.ImageURL != "" {
-			if _, ok := manifestByURL[row.ImageURL]; !ok {
-				return fmt.Errorf("missing image url in manifest for question %s: %s", row.QuestionID, row.ImageURL)
+		for _, imageURL := range row.ImageURLs {
+			if _, ok := manifestByURL[imageURL]; !ok {
+				return fmt.Errorf("missing image url in manifest for question %s: %s", row.QuestionID, imageURL)
 			}
 		}
 	}

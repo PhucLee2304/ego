@@ -14,13 +14,16 @@ type Repository struct{ db *gorm.DB }
 
 func New(db *gorm.DB) *Repository { return &Repository{db: db} }
 
-func (r *Repository) GetNotifications(ctx context.Context, userID string, read *bool, limit, offset int) ([]*model.Notification, int64, int64, error) {
+func (r *Repository) GetNotifications(ctx context.Context, userID string, read *bool, types []string, limit, offset int) ([]*model.Notification, int64, int64, error) {
 	base := r.db.WithContext(ctx).Model(&model.Notification{}).Where("user_id = ?", userID)
 	var unreadCount int64
 	if err := base.Session(&gorm.Session{}).Where("read_at IS NULL").Count(&unreadCount).Error; err != nil {
 		return nil, 0, 0, err
 	}
 	filtered := base.Session(&gorm.Session{})
+	if types != nil {
+		filtered = filtered.Where("data->>'type' IN ?", types)
+	}
 	if read != nil {
 		if *read {
 			filtered = filtered.Where("read_at IS NOT NULL")
@@ -37,6 +40,23 @@ func (r *Repository) GetNotifications(ctx context.Context, userID string, read *
 		return nil, 0, 0, err
 	}
 	return notifications, total, unreadCount, nil
+}
+
+// CountUnreadByType đếm thông báo chưa đọc của user theo data.type.
+func (r *Repository) CountUnreadByType(ctx context.Context, userID string) (map[string]int64, error) {
+	var rows []struct {
+		Type  string
+		Count int64
+	}
+	err := r.db.WithContext(ctx).Model(&model.Notification{}).
+		Select("data->>'type' AS type, COUNT(*) AS count").
+		Where("user_id = ? AND read_at IS NULL", userID).
+		Group("data->>'type'").Scan(&rows).Error
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.Type] = row.Count
+	}
+	return out, err
 }
 
 func (r *Repository) UpsertDeviceToken(ctx context.Context, token *model.DeviceToken) error {
