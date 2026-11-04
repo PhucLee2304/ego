@@ -24,6 +24,7 @@ func New(s service.Service) Handler {
 func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
 	// Exam
 	mux.HandleFunc("GET /exams", mw.Handle(h.GetList))
+	mux.HandleFunc("GET /exams/years", mw.Handle(h.GetYears))
 	mux.HandleFunc("GET /exams/{id}", mw.Handle(h.GetByID))
 
 	// Attempt
@@ -56,13 +57,18 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms/assignments", mw.Handle(h.CreateAssignments))
 	mux.HandleFunc("GET /classrooms/{id}/assignments", mw.Handle(h.GetAssignments))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}", mw.Handle(h.GetAssignment))
-	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/classrooms", mw.Handle(h.AssignExistingExam))
-	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}/schedule", mw.Handle(h.UpdateAssignmentSchedule))
 	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}/active", mw.Handle(h.SetAssignmentActive))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/edit", mw.Handle(h.GetEditableAssignment))
-	mux.HandleFunc("PATCH /classrooms/{id}/assignments/{assignmentId}", mw.Handle(h.UpdateAssignmentContent))
+	mux.HandleFunc("PUT /classrooms/{id}/assignments/{assignmentId}", mw.Handle(h.UpdateAssignment))
 	mux.HandleFunc("DELETE /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt", mw.Handle(h.ResetAssignmentAttempt))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/audits", mw.Handle(h.GetAssignmentAudits))
+
+	// Attempt integrity (giám sát)
+	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/integrity-events", mw.Handle(h.GetIntegrityEvents))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/integrity-events/{eventId}/review", mw.Handle(h.ReviewIntegrityEvent))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt/ban", mw.Handle(h.BanAttempt))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt/release-session", mw.Handle(h.ReleaseAttemptSession))
+	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt/reinstate", mw.Handle(h.ReinstateAttempt))
 
 	// Gradebook
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/gradebook", mw.Handle(h.GetGradebook))

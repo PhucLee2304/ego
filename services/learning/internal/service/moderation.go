@@ -207,6 +207,7 @@ func (s *service) RemoveParticipant(ctx context.Context, teacherID string, class
 	now := time.Now()
 	next := *state
 	next.RemovedAt = &now
+	next.RemovedReason = reason
 	next.HandRaisedAt, next.ScreenShareRequestedAt, next.ScreenShareApprovedAt = nil, nil, nil
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		if err := repo.UpdateRoomParticipantState(ctx, &next); err != nil {

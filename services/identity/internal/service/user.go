@@ -79,7 +79,7 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 	}, nil
 }
 
-func (s *service) GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.User, int, *httpx.HTTPError) {
+func (s *service) GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.User, int64, *httpx.HTTPError) {
 	users, total, err := s.repo.GetList(ctx, query.Limit(), query.Offset())
 	if err != nil {
 		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get users", err)
@@ -96,5 +96,5 @@ func (s *service) GetList(ctx context.Context, query httpx.PaginationQuery) ([]*
 		}
 	}
 
-	return userDTOs, httpx.ToPageCounts(total, query.PageSize), nil
+	return userDTOs, total, nil
 }

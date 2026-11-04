@@ -36,7 +36,7 @@ type ExamQuestionGroup struct {
 	Title       string          `json:"title"`
 	Instruction string          `json:"instruction"`
 	AudioURL    *string         `json:"audioUrl"`
-	ImageURL    *string         `json:"imageUrl"`
+	ImageURLs   []string        `json:"imageUrls"`
 	Transcript  string          `json:"transcript"`
 	Explanation string          `json:"explanation"`
 	Order       int             `json:"order"`
@@ -90,7 +90,7 @@ func ToGetExamQuestionsResponse(exam *model.Exam, query GetExamQuestionsQuery) *
 				Title:       group.Title,
 				Instruction: group.Instruction,
 				AudioURL:    group.AudioURL,
-				ImageURL:    group.ImageURL,
+				ImageURLs:   group.ImageURLs,
 				Transcript:  group.Transcript,
 				Explanation: group.Explanation,
 				Order:       group.Order,

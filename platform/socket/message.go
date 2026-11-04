@@ -21,11 +21,14 @@ type Error struct {
 	Success   bool        `json:"success"`
 	Code      string      `json:"code"`
 	Message   string      `json:"message"`
+	Details   any         `json:"details,omitempty"`
 }
 
 type HandlerError struct {
 	Code    ErrorCode
 	Message string
+	// Details là dữ liệu máy đọc được kèm lỗi (vd retryAfterMs), gửi trong field details.
+	Details any
 }
 
 func (e *HandlerError) Error() string {
@@ -34,4 +37,9 @@ func (e *HandlerError) Error() string {
 
 func NewHandlerError(code ErrorCode, message string) *HandlerError {
 	return &HandlerError{Code: code, Message: message}
+}
+
+func (e *HandlerError) WithDetails(details any) *HandlerError {
+	e.Details = details
+	return e
 }

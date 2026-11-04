@@ -6,6 +6,7 @@ import (
 	"ego/services/learning/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (r *repository) GetPrivateAssignmentExam(ctx context.Context, id uint) (*model.Exam, error) {
@@ -56,9 +57,13 @@ func (r *repository) UpdateQuestionScoring(ctx context.Context, questionID uint,
 	return r.db.WithContext(ctx).Model(&model.Option{}).Where("question_id = ? AND id = ?", questionID, correctOptionID).Update("is_correct", true).Error
 }
 
+// GetSubmittedAttemptsByExamID khóa các attempt đã nộp để chấm lại (mục 1.6 của
+// PLAN_ATTEMPT_INTEGRITY.md: đình chỉ/khôi phục không chen giữa lúc chấm lại).
 func (r *repository) GetSubmittedAttemptsByExamID(ctx context.Context, examID uint) ([]*model.Attempt, error) {
 	var attempts []*model.Attempt
 	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Order("id ASC").
 		Preload("Answers").Preload("History").
 		Preload("Exam.Sections").
 		Preload("Exam.Sections.Questions", "group_id IS NULL").

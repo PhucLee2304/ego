@@ -40,7 +40,7 @@ func TestRaiseAndLowerHands(t *testing.T) {
 			events = append(events, sentRoomEvent{recipient: recipient, eventType: event.Type, userID: activity.UserID})
 		}
 	}
-	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}, publisher, nil)
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}}, publisher, nil)
 	takeEvents := func() []sentRoomEvent {
 		taken := events
 		events = nil

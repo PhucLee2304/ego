@@ -194,11 +194,13 @@ func (s *service) EndRoom(ctx context.Context, teacherID string, roomID uint) (*
 	if s.mediaClient == nil {
 		return nil, ErrMediaUnavailable
 	}
-	if err := s.mediaClient.DeleteRoom(ctx, media.RoomName(room.ID)); err != nil {
-		return nil, httpx.FromError(errors.Join(ErrMediaUnavailable, err), errClassroomServiceFailed)
-	}
+	// Đánh dấu ENDED trước rồi mới xóa phòng LiveKit: học sinh bị ngắt kết nối sẽ hỏi lại trạng thái
+	// phòng, nếu còn thấy LIVE thì xin token mới và LiveKit tự tạo lại phòng, khiến họ vẫn ở trong lớp.
 	if err := s.finishRoom(ctx, room); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
+	}
+	if err := s.mediaClient.DeleteRoom(ctx, media.RoomName(room.ID)); err != nil {
+		return nil, httpx.FromError(errors.Join(ErrMediaUnavailable, err), errClassroomServiceFailed)
 	}
 	return dto.ToRoomResponse(room, true), nil
 }

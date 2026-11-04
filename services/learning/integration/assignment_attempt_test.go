@@ -47,7 +47,7 @@ func newAssignmentAttemptFixture(t *testing.T) (*assignmentFixture, *gradebookEv
 	t.Helper()
 	f := newAssignmentFixture(t)
 	gradebook := &gradebookEvents{}
-	f.svc = service.New(repository.NewRepository(f.db), &config.AppConfig{}, nil, testIdentityClient{}, nil, gradebook.publish, f.events.publish)
+	f.svc = service.New(repository.NewRepository(f.db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, gradebook.publish, f.events.publish)
 	return f, gradebook
 }
 
@@ -244,7 +244,7 @@ func TestAssignmentCorrectionRegradesSubmission(t *testing.T) {
 		questions[i] = dto.UpdateAssignmentQuestionRequest{ID: q.ID, Content: q.Content, Explanation: &explanation, Options: q.Options, OptionIDs: q.OptionIDs, CorrectOptionIndex: 1, ExcludedFromScore: q.ExcludedFromScore}
 	}
 	before := len(gradebook.all())
-	if _, httpErr := f.svc.UpdateAssignmentContent(ctx, "teacher-1", f.classroom.ID, assignment.ID, dto.UpdateAssignmentContentRequest{
+	if _, httpErr := updateContent(ctx, f.svc, "teacher-1", f.classroom.ID, assignment.ID, dto.UpdateAssignmentContentRequest{
 		Title: editable.Title, Description: editable.Description, Questions: questions, Confirm: true, Reason: "Fix key",
 	}); httpErr != nil {
 		t.Fatal(httpErr)

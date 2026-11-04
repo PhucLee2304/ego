@@ -25,10 +25,9 @@ type AssignmentScheduleRequest struct {
 	Duration    int       `json:"duration" validate:"required,gt=0,lte=1440"`
 	OpensAt     time.Time `json:"opensAt" validate:"required"`
 	DueAt       time.Time `json:"dueAt" validate:"required"`
-}
-
-type AssignExistingExamRequest struct {
-	Schedules []AssignmentScheduleRequest `json:"schedules" validate:"required,min=1,dive"`
+	// Giám sát (PLAN_ATTEMPT_INTEGRITY.md mục 1.1): MaxViolations mặc định 2.
+	Proctored     bool `json:"proctored"`
+	MaxViolations *int `json:"maxViolations,omitempty" validate:"omitempty,min=1"`
 }
 
 type UpdateAssignmentScheduleRequest struct {
@@ -36,6 +35,9 @@ type UpdateAssignmentScheduleRequest struct {
 	OpensAt  time.Time `json:"opensAt" validate:"required"`
 	DueAt    time.Time `json:"dueAt" validate:"required"`
 	Confirm  bool      `json:"confirm"`
+	// Không gửi thì giữ nguyên; chỉ áp cho attempt tạo sau (Q4).
+	Proctored     *bool `json:"proctored,omitempty"`
+	MaxViolations *int  `json:"maxViolations,omitempty" validate:"omitempty,min=1"`
 }
 
 type CreateAssignmentQuestionRequest struct {
@@ -54,6 +56,19 @@ type UpdateAssignmentContentRequest struct {
 	Title       string                            `json:"title" validate:"required,notblank"`
 	Description *string                           `json:"description,omitempty"`
 	Questions   []UpdateAssignmentQuestionRequest `json:"questions" validate:"required,min=1,dive"`
+	Confirm     bool                              `json:"confirm"`
+	Reason      string                            `json:"reason" validate:"omitempty"`
+}
+
+// UpdateAssignmentRequest là màn sửa bài, cùng dạng với lúc tạo: toàn bộ nội dung đề và
+// lịch của các lớp được tích. Backend tự so với dữ liệu hiện có: nội dung khác thì sửa đề,
+// lớp đã có bài mà lịch khác thì sửa lịch, lớp chưa có thì giao thêm. Confirm/Reason dùng
+// chung khi thay đổi ảnh hưởng tới bài đang làm.
+type UpdateAssignmentRequest struct {
+	Title       string                            `json:"title" validate:"required,notblank"`
+	Description *string                           `json:"description,omitempty"`
+	Questions   []UpdateAssignmentQuestionRequest `json:"questions" validate:"required,min=1,dive"`
+	Schedules   []AssignmentScheduleRequest       `json:"schedules" validate:"omitempty,dive"`
 	Confirm     bool                              `json:"confirm"`
 	Reason      string                            `json:"reason" validate:"omitempty"`
 }
@@ -85,6 +100,12 @@ type AffectedAssignmentResponse struct {
 	ClassroomID   uint   `json:"classroomId"`
 	ClassroomName string `json:"classroomName"`
 	Active        bool   `json:"active"`
+	// Lịch của lớp đó, để màn sửa mở từ lớp nào cũng sửa được lịch mọi lớp.
+	Duration      int       `json:"duration"`
+	OpensAt       time.Time `json:"opensAt"`
+	DueAt         time.Time `json:"dueAt"`
+	Proctored     bool      `json:"proctored"`
+	MaxViolations int       `json:"maxViolations"`
 }
 
 type EditableAssignmentQuestion struct {
@@ -103,6 +124,7 @@ type ExamAuditResponse struct {
 	ActorID      string                          `json:"actorId"`
 	Actor        *UserInfo                       `json:"actor,omitempty"`
 	Reason       string                          `json:"reason"`
+	Changes      []string                        `json:"changes"`
 	Before       json.RawMessage                 `json:"before"`
 	After        json.RawMessage                 `json:"after"`
 	RegradedAt   *time.Time                      `json:"regradedAt,omitempty"`
@@ -125,38 +147,48 @@ type AssignmentSubmissionResponse struct {
 	Score        *float64               `json:"score,omitempty"`
 	Status       model.SubmissionStatus `json:"status"`
 	SyncStatus   string                 `json:"syncStatus"`
-	CreatedAt    time.Time              `json:"createdAt,omitempty"`
-	UpdatedAt    time.Time              `json:"updatedAt,omitempty"`
+	// Giám sát (chỉ có khi attempt proctored).
+	Proctored         bool      `json:"proctored,omitempty"`
+	ViolationCount    int       `json:"violationCount,omitempty"`
+	PendingViolations int       `json:"pendingViolations,omitempty"`
+	IntegrityOutcome  *string   `json:"integrityOutcome,omitempty"`
+	TerminationReason *string   `json:"terminationReason,omitempty"`
+	CreatedAt         time.Time `json:"createdAt,omitempty"`
+	UpdatedAt         time.Time `json:"updatedAt,omitempty"`
 }
 
 type AssignmentResponse struct {
-	ID          uint                            `json:"id"`
-	ClassroomID uint                            `json:"classroomId"`
-	Title       string                          `json:"title"`
-	Description *string                         `json:"description,omitempty"`
-	ExamID      uint                            `json:"examId"`
-	Duration    int                             `json:"duration"`
-	OpensAt     time.Time                       `json:"opensAt"`
-	DueAt       time.Time                       `json:"dueAt"`
-	Active      bool                            `json:"active"`
-	Submission  *AssignmentSubmissionResponse   `json:"submission,omitempty"`
-	Submissions []*AssignmentSubmissionResponse `json:"submissions,omitempty"`
-	CreatedAt   time.Time                       `json:"createdAt"`
-	UpdatedAt   time.Time                       `json:"updatedAt"`
+	ID            uint                            `json:"id"`
+	ClassroomID   uint                            `json:"classroomId"`
+	Title         string                          `json:"title"`
+	Description   *string                         `json:"description,omitempty"`
+	ExamID        uint                            `json:"examId"`
+	Duration      int                             `json:"duration"`
+	OpensAt       time.Time                       `json:"opensAt"`
+	DueAt         time.Time                       `json:"dueAt"`
+	Active        bool                            `json:"active"`
+	Proctored     bool                            `json:"proctored"`
+	MaxViolations int                             `json:"maxViolations"`
+	Submission    *AssignmentSubmissionResponse   `json:"submission,omitempty"`
+	Submissions   []*AssignmentSubmissionResponse `json:"submissions,omitempty"`
+	CreatedAt     time.Time                       `json:"createdAt"`
+	UpdatedAt     time.Time                       `json:"updatedAt"`
 }
 
 type CreatedAssignmentResponse struct {
-	ID          uint      `json:"id"`
-	ClassroomID uint      `json:"classroomId"`
-	Title       string    `json:"title"`
-	Description *string   `json:"description,omitempty"`
-	ExamID      uint      `json:"examId"`
-	Duration    int       `json:"duration"`
-	OpensAt     time.Time `json:"opensAt"`
-	DueAt       time.Time `json:"dueAt"`
-	Active      bool      `json:"active"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID            uint      `json:"id"`
+	ClassroomID   uint      `json:"classroomId"`
+	Title         string    `json:"title"`
+	Description   *string   `json:"description,omitempty"`
+	ExamID        uint      `json:"examId"`
+	Duration      int       `json:"duration"`
+	OpensAt       time.Time `json:"opensAt"`
+	DueAt         time.Time `json:"dueAt"`
+	Active        bool      `json:"active"`
+	Proctored     bool      `json:"proctored"`
+	MaxViolations int       `json:"maxViolations"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 type CreatedAssignmentsResponse struct {
@@ -165,17 +197,19 @@ type CreatedAssignmentsResponse struct {
 
 func ToAssignmentResponse(assignment *model.Assignment, now time.Time, currentUserID string, includeSubmissions bool, users []*identityClient.UserInfo) *AssignmentResponse {
 	response := &AssignmentResponse{
-		ID:          assignment.ID,
-		ClassroomID: assignment.ClassroomID,
-		Title:       assignment.Title,
-		Description: assignment.Description,
-		ExamID:      assignment.ExamID,
-		Duration:    assignment.Duration,
-		OpensAt:     assignment.OpensAt,
-		DueAt:       assignment.DueAt,
-		Active:      assignment.Active,
-		CreatedAt:   assignment.CreatedAt,
-		UpdatedAt:   assignment.UpdatedAt,
+		ID:            assignment.ID,
+		ClassroomID:   assignment.ClassroomID,
+		Title:         assignment.Title,
+		Description:   assignment.Description,
+		ExamID:        assignment.ExamID,
+		Duration:      assignment.Duration,
+		OpensAt:       assignment.OpensAt,
+		DueAt:         assignment.DueAt,
+		Active:        assignment.Active,
+		Proctored:     assignment.Proctored,
+		MaxViolations: assignment.MaxViolations,
+		CreatedAt:     assignment.CreatedAt,
+		UpdatedAt:     assignment.UpdatedAt,
 	}
 
 	usersByID := ToUserInfoMap(users)
@@ -210,17 +244,19 @@ func ToAssignmentResponses(assignments []*model.Assignment, now time.Time, curre
 
 func ToCreatedAssignmentResponse(assignment *model.Assignment) *CreatedAssignmentResponse {
 	return &CreatedAssignmentResponse{
-		ID:          assignment.ID,
-		ClassroomID: assignment.ClassroomID,
-		Title:       assignment.Title,
-		Description: assignment.Description,
-		ExamID:      assignment.ExamID,
-		Duration:    assignment.Duration,
-		OpensAt:     assignment.OpensAt,
-		DueAt:       assignment.DueAt,
-		Active:      assignment.Active,
-		CreatedAt:   assignment.CreatedAt,
-		UpdatedAt:   assignment.UpdatedAt,
+		ID:            assignment.ID,
+		ClassroomID:   assignment.ClassroomID,
+		Title:         assignment.Title,
+		Description:   assignment.Description,
+		ExamID:        assignment.ExamID,
+		Duration:      assignment.Duration,
+		OpensAt:       assignment.OpensAt,
+		DueAt:         assignment.DueAt,
+		Active:        assignment.Active,
+		Proctored:     assignment.Proctored,
+		MaxViolations: assignment.MaxViolations,
+		CreatedAt:     assignment.CreatedAt,
+		UpdatedAt:     assignment.UpdatedAt,
 	}
 }
 
@@ -250,6 +286,19 @@ func ToAssignmentSubmissionResponse(submission *model.AssignmentSubmission, now 
 		CreatedAt:    submission.CreatedAt,
 		UpdatedAt:    submission.UpdatedAt,
 	}
+}
+
+// ApplySubmissionIntegrity gắn tóm tắt giám sát của attempt vào dòng gradebook.
+func ApplySubmissionIntegrity(response *AssignmentSubmissionResponse, summary *model.AttemptIntegritySummary) {
+	if summary == nil || !summary.Proctored {
+		return
+	}
+	outcome := string(summary.IntegrityOutcome)
+	response.Proctored = true
+	response.ViolationCount = summary.ViolationCount
+	response.PendingViolations = summary.PendingViolations
+	response.IntegrityOutcome = &outcome
+	response.TerminationReason = terminationReason(summary.TerminationReason)
 }
 
 // ToEditableAssignmentQuestions chuyển đề private sang danh sách câu hỏi để sửa
@@ -282,7 +331,12 @@ func ToEditableAssignmentQuestions(exam *model.Exam) []*EditableAssignmentQuesti
 
 // ToExamAuditResponse giữ đúng dữ liệu cũ đi qua gRPC: thời gian làm tròn tới giây.
 func ToExamAuditResponse(audit *model.ExamAudit) (*ExamAuditResponse, error) {
-	item := &ExamAuditResponse{ID: audit.ID, ExamID: audit.ExamID, ActorID: audit.ActorID, Reason: audit.Reason, Before: json.RawMessage(audit.Before), After: json.RawMessage(audit.After), CreatedAt: time.Unix(audit.CreatedAt.Unix(), 0), ScoreChanges: []*ExamAuditScoreChangeResponse{}}
+	item := &ExamAuditResponse{ID: audit.ID, ExamID: audit.ExamID, ActorID: audit.ActorID, Reason: audit.Reason, Before: json.RawMessage(audit.Before), After: json.RawMessage(audit.After), CreatedAt: time.Unix(audit.CreatedAt.Unix(), 0), ScoreChanges: []*ExamAuditScoreChangeResponse{}, Changes: []string{}}
+	if len(audit.Changes) > 0 {
+		if err := json.Unmarshal(audit.Changes, &item.Changes); err != nil {
+			return nil, err
+		}
+	}
 	if audit.RegradedAt != nil {
 		value := time.Unix(audit.RegradedAt.Unix(), 0)
 		item.RegradedAt = &value

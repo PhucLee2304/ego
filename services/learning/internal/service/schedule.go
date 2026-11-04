@@ -26,6 +26,9 @@ func (s *service) CreateSchedule(ctx context.Context, teacherID string, classroo
 	if !req.EndsAt.After(req.StartsAt) {
 		return nil, ErrScheduleInvalidTime
 	}
+	if startsInPast(req.StartsAt) {
+		return nil, ErrScheduleInPast
+	}
 	schedule := &model.Schedule{ClassroomID: classroomID, Title: strings.TrimSpace(req.Title), Description: req.Description, StartsAt: req.StartsAt, EndsAt: req.EndsAt}
 	if schedule.Description != nil {
 		value := strings.TrimSpace(*schedule.Description)
@@ -107,6 +110,9 @@ func (s *service) UpdateSchedule(ctx context.Context, teacherID string, schedule
 	if !req.EndsAt.After(req.StartsAt) {
 		return nil, ErrScheduleInvalidTime
 	}
+	if startsInPast(req.StartsAt) {
+		return nil, ErrScheduleInPast
+	}
 	schedule.Title, schedule.Description = strings.TrimSpace(req.Title), req.Description
 	schedule.StartsAt, schedule.EndsAt = req.StartsAt, req.EndsAt
 	if schedule.Description != nil {
@@ -146,4 +152,11 @@ func (s *service) DeleteSchedule(ctx context.Context, teacherID string, schedule
 		return repo.DeleteSchedule(ctx, schedule)
 	})
 	return httpx.FromError(err, errClassroomServiceFailed)
+}
+
+// schedulePastTolerance bù lệch đồng hồ giữa client và server khi chặn lịch bắt đầu trong quá khứ.
+const schedulePastTolerance = 5 * time.Minute
+
+func startsInPast(startsAt time.Time) bool {
+	return startsAt.Before(time.Now().Add(-schedulePastTolerance))
 }

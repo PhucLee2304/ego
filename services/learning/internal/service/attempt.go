@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	platformdb "ego/platform/db"
@@ -23,6 +24,9 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 		var err error
 		assignment, err = s.validateAssignmentAttempt(ctx, s.repo, userID, *req.ContextID, examID)
 		if err != nil {
+			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
+		}
+		if err := s.checkIntegrityConsent(assignment, req.IntegrityConsent); err != nil {
 			return nil, httpx.FromError(err, "[ERROR] Failed to create attempt")
 		}
 	}
@@ -158,6 +162,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 			}
 			attempt.Stage = &stage
 		}
+		s.applyIntegrityPolicy(attempt, assignment, now)
 
 		if err := repo.CreateAttempt(ctx, attempt); err != nil {
 			return err
@@ -193,8 +198,8 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 	return dto.ToAttemptResponseWithQuestions(attempt), nil
 }
 
-func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int, *httpx.HTTPError) {
-	attempts, total, err := s.repo.GetAttemptsByUserIDAndStatus(ctx, userID, query.Status, query.Limit(), query.Offset())
+func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int64, *httpx.HTTPError) {
+	attempts, total, err := s.repo.GetAttemptsByUserIDAndStatus(ctx, userID, repository.AttemptFilter{Status: query.Status, ExcludeMode: query.ExcludeMode, ExamTypes: query.ExamTypes(), Search: query.Search}, query.Limit(), query.Offset())
 	if err != nil {
 		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get attempts", err)
 	}
@@ -205,7 +210,7 @@ func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetA
 		responses[i] = dto.ToAttemptResponse(attempt, now)
 	}
 
-	return responses, httpx.ToPageCounts(total, query.PageSize), nil
+	return responses, total, nil
 }
 
 func (s *service) GetAttemptQuestions(ctx context.Context, userID string, id uint) (*dto.AttemptResponse, *httpx.HTTPError) {
@@ -304,7 +309,35 @@ func (s *service) GetAttemptHistory(ctx context.Context, userID string, attemptI
 	if err != nil {
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to read attempt history", err)
 	}
+	s.attachClassroom(ctx, response)
+	s.attachTeacherNote(ctx, userID, response)
 	return response, nil
+}
+
+// attachTeacherNote đọc lời nhắn từ attempt hiện tại vì history là bản chụp lúc nộp,
+// còn đình chỉ / mở lại có thể xảy ra sau đó. Lỗi thì bỏ qua: banner vẫn hiện, chỉ thiếu lời nhắn.
+func (s *service) attachTeacherNote(ctx context.Context, userID string, response *dto.AttemptResponse) {
+	if response == nil || !response.Proctored {
+		return
+	}
+	note, err := s.repo.GetAttemptTeacherNote(ctx, response.ID, userID)
+	if err != nil || note == nil || strings.TrimSpace(*note) == "" {
+		return
+	}
+	response.TeacherNote = note
+}
+
+// attachClassroom điền ClassroomID cho bài giao để client mở kết quả trong lớp.
+// Không tìm được lớp thì bỏ qua: client quay về trang lịch sử chung.
+func (s *service) attachClassroom(ctx context.Context, response *dto.AttemptResponse) {
+	if response == nil || response.AssignmentID == nil || response.ClassroomID != nil {
+		return
+	}
+	assignment, err := s.repo.GetAssignmentForAttemptValidation(ctx, *response.AssignmentID)
+	if err != nil {
+		return
+	}
+	response.ClassroomID = &assignment.ClassroomID
 }
 
 func partInSet(part model.PartCode, parts map[model.PartCode]struct{}) bool {

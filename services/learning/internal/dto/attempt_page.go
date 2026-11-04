@@ -45,11 +45,11 @@ type AttemptPageResponse struct {
 }
 
 type AttemptPageGroup struct {
-	Title           string  `json:"title"`
-	Instruction     string  `json:"instruction"`
-	ImageURL        *string `json:"imageUrl"`
-	AudioURL        *string `json:"audioUrl"`
-	AudioDurationMs *int    `json:"audioDurationMs"`
+	Title           string   `json:"title"`
+	Instruction     string   `json:"instruction"`
+	ImageURLs       []string `json:"imageUrls"`
+	AudioURL        *string  `json:"audioUrl"`
+	AudioDurationMs *int     `json:"audioDurationMs"`
 }
 
 type AttemptPageQuestion struct {
@@ -128,7 +128,7 @@ func ToAttemptPageGroup(group *model.Group) *AttemptPageGroup {
 	return &AttemptPageGroup{
 		Title:           group.Title,
 		Instruction:     group.Instruction,
-		ImageURL:        group.ImageURL,
+		ImageURLs:       group.ImageURLs,
 		AudioURL:        group.AudioURL,
 		AudioDurationMs: group.AudioDurationMs,
 	}

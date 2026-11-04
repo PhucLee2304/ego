@@ -5,6 +5,7 @@ import (
 	identityClient "ego/api/gen/go/identity"
 	learningClient "ego/api/gen/go/learning"
 	notificationsClient "ego/api/gen/go/notifications"
+	storageClient "ego/api/gen/go/storage"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	platformRpc "ego/platform/rpc"
@@ -76,6 +77,13 @@ func main() {
 	defer identityConn.Close()
 	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
 
+	storageConn, err := grpc.NewClient(appConfig.StorageServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to storage service")
+	}
+	defer storageConn.Close()
+	storageServiceClient := storageClient.NewStorageServiceClient(storageConn)
+
 	notificationsConn, err := grpc.NewClient(appConfig.NotificationsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to notifications service")
@@ -90,7 +98,7 @@ func main() {
 	classroomsSocket := platformsocket.NewServer(identityServiceClient)
 
 	repo := repository.NewRepository(db)
-	svc := service.New(repo, appConfig, notificationsServiceClient, identityServiceClient, mediaClient, classroomsSocket.BroadcastToUser, examsSocket.BroadcastToUser)
+	svc := service.New(repo, appConfig, notificationsServiceClient, identityServiceClient, storageServiceClient, mediaClient, classroomsSocket.BroadcastToUser, examsSocket.BroadcastToUser)
 
 	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {

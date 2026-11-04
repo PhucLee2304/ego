@@ -31,7 +31,7 @@ type attemptEvents struct {
 func (e *attemptEvents) publish(userID string, payload any) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.events = append(e.events, publishedEvent{userID: userID, eventType: payload.(map[string]any)["type"].(string)})
+	e.events = append(e.events, publishedEvent{userID: userID, eventType: pushType(payload)})
 }
 
 func (e *attemptEvents) types() []string {
@@ -45,7 +45,7 @@ func (e *attemptEvents) types() []string {
 }
 
 func newSubmitService(db *gorm.DB, events *attemptEvents) service.Service {
-	return service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, events.publish)
+	return service.New(repository.NewRepository(db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, nil, events.publish)
 }
 
 func startTOEICTest(t *testing.T, svc service.Service, examID uint, userID string) *dto.AttemptResponse {
