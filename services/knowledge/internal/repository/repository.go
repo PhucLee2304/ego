@@ -4,6 +4,7 @@ import (
 	"context"
 
 	platformdb "ego/platform/db"
+	"ego/services/knowledge/internal/model"
 
 	"gorm.io/gorm"
 )
@@ -11,6 +12,13 @@ import (
 // Repository gom truy vấn của mọi domain trong knowledge (topic, dictionary, grammar).
 // Method của từng domain được nhóm bằng comment `// Domain` và cài đặt ở <domain>.go.
 type Repository interface {
+	// Topic (topic → section → lesson → transcript)
+	GetTopics(ctx context.Context) ([]*model.Topic, error)
+	GetTopicByID(ctx context.Context, id uint) (*model.Topic, error)
+	GetSectionsByTopic(ctx context.Context, topicID uint) ([]*model.Section, error)
+	GetLessonsBySection(ctx context.Context, sectionID uint) ([]*model.Lesson, error)
+	GetLessonByID(ctx context.Context, id uint) (*model.Lesson, error)
+
 	Transaction(ctx context.Context, fn func(Repository) error) error
 }
 

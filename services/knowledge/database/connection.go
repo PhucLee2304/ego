@@ -3,6 +3,7 @@ package database
 import (
 	"ego/platform/logger"
 	"ego/services/knowledge/config"
+	"ego/services/knowledge/internal/model"
 	"errors"
 
 	"gorm.io/driver/postgres"
@@ -27,7 +28,14 @@ func Migrate(db *gorm.DB) error {
 
 	logger.Log.Info().Msg("[STARTUP] Running database migrations")
 
-	if err := db.AutoMigrate(); err != nil {
+	err := db.AutoMigrate(
+		// Topic
+		&model.Topic{},
+		&model.Section{},
+		&model.Lesson{},
+		&model.Transcript{},
+	)
+	if err != nil {
 		return err
 	}
 

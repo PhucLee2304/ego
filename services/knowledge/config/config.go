@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 type AppConfig struct {
@@ -19,6 +20,11 @@ type AppConfig struct {
 	DSN        string
 
 	IdentityServiceAddr string
+	StorageServiceAddr  string
+
+	SeedDir           string
+	SeedUploadWorkers int
+	SeedUploadRetries int
 }
 
 func LoadAppConfig() (*AppConfig, error) {
@@ -34,9 +40,13 @@ func LoadAppConfig() (*AppConfig, error) {
 		DBName:     getEnv("DB_NAME", "knowledgedb"),
 
 		IdentityServiceAddr: getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
+		StorageServiceAddr:  getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
+
+		SeedDir:           getEnv("SEED_DIR", "/app/services/knowledge/seed/topics"),
+		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
+		SeedUploadRetries: getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
 	}
 
-	// Secret không có fallback (CONVENTIONS.md mục 9).
 	if config.DBPassword == "" {
 		return nil, errors.New("[CONFIG] DB_PASSWORD is not set")
 	}
@@ -52,4 +62,20 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func getIntEnv(key string, fallback, max int) int {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	if parsed > max {
+		return max
+	}
+	return parsed
 }
