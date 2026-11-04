@@ -11,7 +11,7 @@ import (
 )
 
 func Connect(cfg *config.AppConfig) (*gorm.DB, error) {
-	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{TranslateError: true})
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +40,9 @@ func Migrate(db *gorm.DB) error {
 		&model.Phonetic{},
 		&model.Meaning{},
 		&model.Definition{},
+
+		// Flashcard
+		&model.Flashcard{},
 	)
 	if err != nil {
 		return err

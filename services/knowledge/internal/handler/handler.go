@@ -20,6 +20,11 @@ type Handler interface {
 	// Word
 	GetWords(w http.ResponseWriter, r *http.Request)
 	GetWordByID(w http.ResponseWriter, r *http.Request)
+
+	// Flashcard
+	GetFlashcards(w http.ResponseWriter, r *http.Request)
+	CreateFlashcard(w http.ResponseWriter, r *http.Request)
+	DeleteFlashcard(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -40,4 +45,9 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 	// Word
 	mux.HandleFunc("GET /words", mw.Handle(h.GetWords))
 	mux.HandleFunc("GET /words/{id}", mw.Handle(h.GetWordByID))
+
+	// Flashcard
+	mux.HandleFunc("GET /flashcards", mw.Handle(h.GetFlashcards))
+	mux.HandleFunc("POST /flashcards", mw.Handle(h.CreateFlashcard))
+	mux.HandleFunc("DELETE /flashcards/{id}", mw.Handle(h.DeleteFlashcard))
 }

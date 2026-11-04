@@ -21,6 +21,11 @@ type Service interface {
 	// Word
 	GetWords(ctx context.Context, query dto.GetWordsQuery) ([]*dto.Word, int64, *httpx.HTTPError)
 	GetWordByID(ctx context.Context, id uint) (*dto.Word, *httpx.HTTPError)
+
+	// Flashcard
+	GetFlashcards(ctx context.Context, userID string, query httpx.PaginationQuery) ([]*dto.Flashcard, int64, *httpx.HTTPError)
+	CreateFlashcard(ctx context.Context, userID string, body dto.CreateFlashcardBody) (*dto.Flashcard, *httpx.HTTPError)
+	DeleteFlashcard(ctx context.Context, userID string, id uint) *httpx.HTTPError
 }
 
 type service struct {
