@@ -18,6 +18,8 @@ type GetAttemptsQuery struct {
 	ExcludeMode model.AttemptMode `schema:"excludeMode" validate:"omitempty,oneof=PRACTICE TEST ASSIGNMENT"`
 	// Tùy chọn: chỉ lấy attempt của đề thuộc các loại này, phân cách bằng dấu phẩy (vd "TOEIC,THPT").
 	ExamType string `schema:"examType"`
+	// Tùy chọn: tìm theo tên đề (không phân biệt hoa thường).
+	Search string `schema:"search"`
 }
 
 func (q *GetAttemptsQuery) Normalize() {
@@ -25,6 +27,7 @@ func (q *GetAttemptsQuery) Normalize() {
 	q.Status = model.AttemptStatus(strings.ToUpper(strings.TrimSpace(string(q.Status))))
 	q.ExcludeMode = model.AttemptMode(strings.ToUpper(strings.TrimSpace(string(q.ExcludeMode))))
 	q.ExamType = strings.ToUpper(strings.TrimSpace(q.ExamType))
+	q.Search = strings.TrimSpace(q.Search)
 }
 
 // ExamTypes tách ExamType thành danh sách, bỏ phần tử rỗng.

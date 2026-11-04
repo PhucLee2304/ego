@@ -199,7 +199,7 @@ func (s *service) CreateAttempt(ctx context.Context, userID string, examID uint,
 }
 
 func (s *service) GetAttempts(ctx context.Context, userID string, query dto.GetAttemptsQuery) ([]*dto.AttemptResponse, int64, *httpx.HTTPError) {
-	attempts, total, err := s.repo.GetAttemptsByUserIDAndStatus(ctx, userID, repository.AttemptFilter{Status: query.Status, ExcludeMode: query.ExcludeMode, ExamTypes: query.ExamTypes()}, query.Limit(), query.Offset())
+	attempts, total, err := s.repo.GetAttemptsByUserIDAndStatus(ctx, userID, repository.AttemptFilter{Status: query.Status, ExcludeMode: query.ExcludeMode, ExamTypes: query.ExamTypes(), Search: query.Search}, query.Limit(), query.Offset())
 	if err != nil {
 		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get attempts", err)
 	}

@@ -27,6 +27,7 @@ type AttemptFilter struct {
 	Status      model.AttemptStatus
 	ExcludeMode model.AttemptMode
 	ExamTypes   []model.ExamType
+	Search      string
 }
 
 func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID string, filter AttemptFilter, limit, offset int32) ([]*model.Attempt, int64, error) {
@@ -40,6 +41,9 @@ func (r *repository) GetAttemptsByUserIDAndStatus(ctx context.Context, userID st
 		}
 		if len(filter.ExamTypes) > 0 {
 			db = db.Where("attempts.exam_id IN (?)", r.db.Model(&model.Exam{}).Select("id").Where("type IN ?", filter.ExamTypes))
+		}
+		if filter.Search != "" {
+			db = db.Where("attempts.exam_id IN (?)", r.db.Model(&model.Exam{}).Select("id").Where("title ILIKE ?", "%"+filter.Search+"%"))
 		}
 		return db
 	}
