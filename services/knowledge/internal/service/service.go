@@ -17,6 +17,10 @@ type Service interface {
 	GetSectionsByTopic(ctx context.Context, topicID uint) (*dto.GetSectionsResponse, *httpx.HTTPError)
 	GetLessonsBySection(ctx context.Context, sectionID uint) (*dto.GetLessonsResponse, *httpx.HTTPError)
 	GetLessonByID(ctx context.Context, id uint) (*dto.GetLessonByIDResponse, *httpx.HTTPError)
+
+	// Word
+	GetWords(ctx context.Context, query dto.GetWordsQuery) ([]*dto.Word, int64, *httpx.HTTPError)
+	GetWordByID(ctx context.Context, id uint) (*dto.Word, *httpx.HTTPError)
 }
 
 type service struct {

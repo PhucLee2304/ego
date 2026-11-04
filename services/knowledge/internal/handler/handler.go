@@ -16,6 +16,10 @@ type Handler interface {
 	GetSectionsByTopic(w http.ResponseWriter, r *http.Request)
 	GetLessonsBySection(w http.ResponseWriter, r *http.Request)
 	GetLessonByID(w http.ResponseWriter, r *http.Request)
+
+	// Word
+	GetWords(w http.ResponseWriter, r *http.Request)
+	GetWordByID(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -32,4 +36,8 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 	mux.HandleFunc("GET /topics/{id}", mw.Handle(h.GetSectionsByTopic))
 	mux.HandleFunc("GET /sections/{id}/lessons", mw.Handle(h.GetLessonsBySection))
 	mux.HandleFunc("GET /lessons/{id}", mw.Handle(h.GetLessonByID))
+
+	// Word
+	mux.HandleFunc("GET /words", mw.Handle(h.GetWords))
+	mux.HandleFunc("GET /words/{id}", mw.Handle(h.GetWordByID))
 }

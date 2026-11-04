@@ -19,6 +19,10 @@ type Repository interface {
 	GetLessonsBySection(ctx context.Context, sectionID uint) ([]*model.Lesson, error)
 	GetLessonByID(ctx context.Context, id uint) (*model.Lesson, error)
 
+	// Word
+	GetWords(ctx context.Context, query string, limit, offset int32) ([]*model.Word, int64, error)
+	GetWordByID(ctx context.Context, id uint) (*model.Word, error)
+
 	Transaction(ctx context.Context, fn func(Repository) error) error
 }
 

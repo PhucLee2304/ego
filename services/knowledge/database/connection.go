@@ -34,8 +34,18 @@ func Migrate(db *gorm.DB) error {
 		&model.Section{},
 		&model.Lesson{},
 		&model.Transcript{},
+
+		// Word
+		&model.Word{},
+		&model.Phonetic{},
+		&model.Meaning{},
+		&model.Definition{},
 	)
 	if err != nil {
+		return err
+	}
+
+	if err := db.Exec(model.CreateWordUniqueIndexSQL).Error; err != nil {
 		return err
 	}
 
