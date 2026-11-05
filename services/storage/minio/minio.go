@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-func (c *Client) GeneratePresignedUploadURL(ctx context.Context, folders []BucketFolder, fileName string, contentType string) (*string, error) {
+func (c *Client) GeneratePresignedUploadURL(ctx context.Context, folders []BucketFolder, fileName string, contentType string, internal bool) (*string, error) {
 	objectKey := BuildObjectKey(folders, fileName)
 	if objectKey == "" {
 		return nil, errors.New("[MINIO] Object key cannot be empty")
@@ -21,7 +21,12 @@ func (c *Client) GeneratePresignedUploadURL(ctx context.Context, folders []Bucke
 		contentType = "application/octet-stream"
 	}
 
-	request, err := c.PresignClient.PresignPutObject(ctx, &s3.PutObjectInput{
+	presignClient := c.PresignClient
+	if internal {
+		presignClient = c.InternalPresignClient
+	}
+
+	request, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(c.Bucket),
 		Key:         aws.String(objectKey),
 		ContentType: aws.String(contentType),

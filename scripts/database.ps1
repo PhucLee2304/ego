@@ -15,7 +15,7 @@ $databases = @{
 if ($Action -eq "seed") {
     $allowed = @("knowledge-topics", "learning")
     if ($Service -notin $allowed) { throw "Seed is only available for: $($allowed -join ', ')" }
-    docker compose --profile seed run --rm "$Service-seed"
+    docker compose --profile seed run --rm --no-deps --build "$Service-seed"
     if ($LASTEXITCODE -ne 0) { throw "Seed failed for $Service" }
     exit
 }

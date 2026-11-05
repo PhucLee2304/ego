@@ -13,9 +13,9 @@ type GrammarUnit struct {
 	Title  string `gorm:"type:text;not null"`
 	Theory string `gorm:"type:text;not null"`
 
-	Examples   []GrammarExample   `gorm:"foreignKey:UnitID;references:ID"`
-	Practices  []GrammarPractice  `gorm:"foreignKey:UnitID;references:ID"`
-	Progresses []UserUnitProgress `gorm:"foreignKey:UnitID;references:ID"`
+	Examples   []GrammarExample   `gorm:"foreignKey:UnitID;references:ID;constraint:OnDelete:CASCADE"`
+	Practices  []GrammarPractice  `gorm:"foreignKey:UnitID;references:ID;constraint:OnDelete:CASCADE"`
+	Progresses []UserUnitProgress `gorm:"foreignKey:UnitID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
 // GrammarExample là một câu ví dụ của unit.
@@ -24,7 +24,7 @@ type GrammarExample struct {
 	Content string `gorm:"type:text;not null"`
 
 	UnitID uint        `gorm:"not null;index"`
-	Unit   GrammarUnit `gorm:"foreignKey:UnitID;references:ID;constraint:OnDelete:CASCADE"`
+	Unit   GrammarUnit `gorm:"foreignKey:UnitID;references:ID"`
 }
 
 // GrammarPractice là một câu hỏi trắc nghiệm của unit.
@@ -37,7 +37,7 @@ type GrammarPractice struct {
 	SortOrder   int                         `gorm:"not null;default:0"`
 
 	UnitID uint        `gorm:"not null;index"`
-	Unit   GrammarUnit `gorm:"foreignKey:UnitID;references:ID;constraint:OnDelete:CASCADE"`
+	Unit   GrammarUnit `gorm:"foreignKey:UnitID;references:ID"`
 }
 
 // UserUnitProgress là trạng thái hoàn thành phần luyện tập của một người với
@@ -48,5 +48,5 @@ type UserUnitProgress struct {
 	Completed bool   `gorm:"not null;default:false"`
 
 	UnitID uint        `gorm:"not null;index;uniqueIndex:idx_user_unit_progresses_user_unit"`
-	Unit   GrammarUnit `gorm:"foreignKey:UnitID;references:ID;constraint:OnDelete:CASCADE"`
+	Unit   GrammarUnit `gorm:"foreignKey:UnitID;references:ID"`
 }

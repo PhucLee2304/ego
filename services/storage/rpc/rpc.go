@@ -20,7 +20,7 @@ func New(minioClient *minio.Client) storageClient.StorageServiceServer {
 
 func (s *server) GeneratePresignedUploadURL(ctx context.Context, req *storageClient.GeneratePresignedUploadURLRequest) (*storageClient.GeneratePresignedUploadURLResponse, error) {
 	folders := toBucketFolders(req.Folders)
-	url, err := s.minioClient.GeneratePresignedUploadURL(ctx, folders, req.FileName, req.ContentType)
+	url, err := s.minioClient.GeneratePresignedUploadURL(ctx, folders, req.FileName, req.ContentType, req.Internal)
 	if err != nil {
 		return nil, err
 	}

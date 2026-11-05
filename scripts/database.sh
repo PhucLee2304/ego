@@ -3,7 +3,7 @@ set -eu
 
 case "$ACTION:$SERVICE" in
   seed:knowledge-topics|seed:learning)
-    docker compose --profile seed run --rm "${SERVICE}-seed"
+    docker compose --profile seed run --rm --no-deps --build "${SERVICE}-seed"
     ;;
   seed:*)
     echo "Seed is only available for knowledge-topics, learning" >&2

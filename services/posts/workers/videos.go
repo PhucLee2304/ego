@@ -16,6 +16,7 @@ import (
 	"ego/platform/logger"
 	"ego/services/posts/internal/model"
 	"ego/services/posts/internal/repository"
+
 	"github.com/google/uuid"
 )
 
@@ -125,7 +126,7 @@ func processVideo(ctx context.Context, repo *repository.Repository, storageClien
 }
 
 func uploadProcessed(ctx context.Context, client storage.StorageServiceClient, folders []string, name, contentType, path string) (string, error) {
-	presigned, err := client.GeneratePresignedUploadURL(ctx, &storage.GeneratePresignedUploadURLRequest{Folders: folders, FileName: name, ContentType: contentType})
+	presigned, err := client.GeneratePresignedUploadURL(ctx, &storage.GeneratePresignedUploadURLRequest{Folders: folders, FileName: name, ContentType: contentType, Internal: true})
 	if err != nil {
 		return "", err
 	}

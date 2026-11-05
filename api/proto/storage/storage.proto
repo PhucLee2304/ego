@@ -45,6 +45,9 @@ message GeneratePresignedUploadURLRequest {
   repeated string folders = 1;
   string file_name = 2;
   string content_type = 3;
+  // true: ký URL theo host nội bộ (R2_HOST, vd http://minio:9000) để caller
+  // trong mạng docker (seed) upload thẳng vào MinIO, không đi qua domain public.
+  bool internal = 4;
 }
 
 message GeneratePresignedUploadURLResponse {

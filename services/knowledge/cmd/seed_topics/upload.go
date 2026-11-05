@@ -200,6 +200,7 @@ func uploadOne(ctx context.Context, httpClient *http.Client, storage storageClie
 		Folders:     job.folders,
 		FileName:    job.fileName,
 		ContentType: job.contentType,
+		Internal:    true, // upload thẳng vào MinIO qua mạng docker, không qua Cloudflare (giới hạn 100 MB)
 	})
 	if err != nil {
 		return "", true, fmt.Errorf("generate presigned upload url for %s: %w", job.localPath, err)

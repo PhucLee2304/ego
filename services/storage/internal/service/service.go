@@ -24,7 +24,7 @@ func New(client *minio.Client) Service {
 func (s *service) GeneratePresignUploadURL(ctx context.Context, req dto.PresignUploadRequest) (*dto.PresignUploadResponse, *httpx.HTTPError) {
 	folders := []minio.BucketFolder{req.Folder}
 
-	url, err := s.client.GeneratePresignedUploadURL(ctx, folders, req.FileName, req.ContentType)
+	url, err := s.client.GeneratePresignedUploadURL(ctx, folders, req.FileName, req.ContentType, false)
 	if err != nil {
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to generate upload URL", err)
 	}

@@ -13,7 +13,7 @@ type Theme struct {
 	OrderIndex  int     `gorm:"not null;default:0"`
 	WordCount   int     `gorm:"not null;default:0"`
 
-	Words []ThemeWord `gorm:"foreignKey:ThemeID;references:ID"`
+	Words []ThemeWord `gorm:"foreignKey:ThemeID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
 // ThemeWord là một từ (dạng chữ) thuộc theme. Khi đọc, từ được khớp sang bảng
@@ -24,5 +24,5 @@ type ThemeWord struct {
 	OrderNum int    `gorm:"not null;default:0"`
 
 	ThemeID uint  `gorm:"not null;index;uniqueIndex:idx_theme_words_theme_word"`
-	Theme   Theme `gorm:"foreignKey:ThemeID;references:ID;constraint:OnDelete:CASCADE"`
+	Theme   Theme `gorm:"foreignKey:ThemeID;references:ID"`
 }
