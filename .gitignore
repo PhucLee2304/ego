@@ -40,8 +40,6 @@ api/gen/
 **/credentials/*
 **/docs/
 **/docs/*
-services/topics/seed
-services/topics/seed/**
 services/learning/seed
 services/learning/seed/**
 services/knowledge/seed

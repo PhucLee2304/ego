@@ -2,24 +2,20 @@
 set -eu
 
 case "$ACTION:$SERVICE" in
-  seed:topics|seed:learning|seed:grammar|seed:dictionary|seed:dictionary-topics|seed:vocabgram|seed:vocabgram-topics)
+  seed:knowledge-topics|seed:learning)
     docker compose --profile seed run --rm "${SERVICE}-seed"
     ;;
   seed:*)
-    echo "Seed is only available for topics, learning, grammar, dictionary, dictionary-topics, vocabgram, vocabgram-topics" >&2
+    echo "Seed is only available for knowledge-topics, learning" >&2
     exit 1
     ;;
   reset-db:identity|reset-db:users)
     docker exec ego-users-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
     docker compose restart identity
     ;;
-  reset-db:topics|reset-db:learning|reset-db:notifications)
+  reset-db:knowledge|reset-db:learning|reset-db:notifications)
     docker exec "ego-${SERVICE}-db" sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
     docker compose restart "$SERVICE"
-    ;;
-  reset-db:dictionary|reset-db:grammar|reset-db:vocabgram)
-    docker exec vocabgram-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
-    docker compose restart vocabgram
     ;;
   *)
     echo "Unsupported service: $SERVICE" >&2
