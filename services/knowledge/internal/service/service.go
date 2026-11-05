@@ -22,6 +22,10 @@ type Service interface {
 	GetWords(ctx context.Context, query dto.GetWordsQuery) ([]*dto.Word, int64, *httpx.HTTPError)
 	GetWordByID(ctx context.Context, id uint) (*dto.Word, *httpx.HTTPError)
 
+	// Theme
+	GetThemes(ctx context.Context) ([]*dto.Theme, *httpx.HTTPError)
+	GetWordsByTheme(ctx context.Context, id uint, query httpx.PaginationQuery) (*dto.GetThemeWordsResponse, *httpx.HTTPError)
+
 	// Flashcard
 	GetFlashcards(ctx context.Context, userID string, query httpx.PaginationQuery) ([]*dto.Flashcard, int64, *httpx.HTTPError)
 	CreateFlashcard(ctx context.Context, userID string, body dto.CreateFlashcardBody) (*dto.Flashcard, *httpx.HTTPError)

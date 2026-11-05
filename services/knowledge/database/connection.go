@@ -41,6 +41,10 @@ func Migrate(db *gorm.DB) error {
 		&model.Meaning{},
 		&model.Definition{},
 
+		// Theme
+		&model.Theme{},
+		&model.ThemeWord{},
+
 		// Flashcard
 		&model.Flashcard{},
 	)

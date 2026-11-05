@@ -21,6 +21,10 @@ type Handler interface {
 	GetWords(w http.ResponseWriter, r *http.Request)
 	GetWordByID(w http.ResponseWriter, r *http.Request)
 
+	// Theme
+	GetThemes(w http.ResponseWriter, r *http.Request)
+	GetWordsByTheme(w http.ResponseWriter, r *http.Request)
+
 	// Flashcard
 	GetFlashcards(w http.ResponseWriter, r *http.Request)
 	CreateFlashcard(w http.ResponseWriter, r *http.Request)
@@ -45,6 +49,10 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 	// Word
 	mux.HandleFunc("GET /words", mw.Handle(h.GetWords))
 	mux.HandleFunc("GET /words/{id}", mw.Handle(h.GetWordByID))
+
+	// Theme
+	mux.HandleFunc("GET /themes", mw.Handle(h.GetThemes))
+	mux.HandleFunc("GET /themes/{id}", mw.Handle(h.GetWordsByTheme))
 
 	// Flashcard
 	mux.HandleFunc("GET /flashcards", mw.Handle(h.GetFlashcards))

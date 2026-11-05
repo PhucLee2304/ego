@@ -23,6 +23,10 @@ type Repository interface {
 	GetWords(ctx context.Context, query string, limit, offset int32) ([]*model.Word, int64, error)
 	GetWordByID(ctx context.Context, id uint) (*model.Word, error)
 
+	// Theme
+	GetThemes(ctx context.Context) ([]*model.Theme, error)
+	GetThemeByID(ctx context.Context, id uint, limit, offset int32) (*model.Theme, []*model.Word, int64, error)
+
 	// Flashcard
 	GetFlashcards(ctx context.Context, userID string, limit, offset int32) ([]*model.Flashcard, int64, error)
 	CreateFlashcard(ctx context.Context, flashcard *model.Flashcard) error
