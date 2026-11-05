@@ -214,6 +214,7 @@ func uploadOne(ctx context.Context, httpClient *http.Client, storage storageClie
 		Folders:     job.Folders,
 		FileName:    job.FileName,
 		ContentType: job.ContentType,
+		Internal:    true,
 	})
 	if err != nil {
 		return "", true, fmt.Errorf("generate presigned upload url for %s: %w", job.LocalPath, err)

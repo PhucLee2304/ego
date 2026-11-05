@@ -25,10 +25,10 @@ services:
     environment:
       SERVICE: storage
 
-  topics:
+  knowledge:
     <<: *air-service
     environment:
-      SERVICE: topics
+      SERVICE: knowledge
 
   learning:
     <<: *air-service

@@ -3,8 +3,8 @@
 Chuẩn gốc là `services/identity`. Gặp chỗ nào chưa rõ thì mở identity ra xem và làm theo.
 
 **Phạm vi áp dụng:**
-- Bắt buộc cho service mới và cho mọi service đang được refactor (`learning` — gộp từ exams + classrooms — đã theo chuẩn này).
-- Code cũ ở các service khác (topics, storage, notifications, posts) chỉ phải theo khi đụng tới phần đó; không refactor hàng loạt.
+- Bắt buộc cho service mới và cho mọi service đang được refactor (`learning` — gộp từ exams + classrooms — và `knowledge` — gộp từ topics + dictionary + grammar — đã theo chuẩn này).
+- Code cũ ở các service khác (storage, notifications, posts) chỉ phải theo khi đụng tới phần đó; không refactor hàng loạt.
 
 ---
 

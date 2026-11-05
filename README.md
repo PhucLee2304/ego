@@ -8,13 +8,15 @@ Hệ thống Backend Microservices được viết bằng Go, sử dụng gRPC c
 |---|---:|
 | identity | 50052 |
 | storage | 50054 |
-| topics | 50055 |
+| knowledge | 50055 |
 | notifications | 50058 |
 | learning | 50059 |
 
 `identity` là service gộp từ `auth` + `users` (dùng chung DB `users-db`), contract gRPC ở `api/proto/identity/identity.proto` (`IdentityService`: token + user). Các service khác gọi identity qua một biến duy nhất `IDENTITY_SERVICE_ADDR` (mặc định `identity:50052`). Route public cũ `/auth/api/v1/...`, `/users/api/v1/...` vẫn giữ nguyên.
 
 `learning` là service gộp từ `exams` + `classrooms` (một DB `learning-db`), contract gRPC `api/proto/learning/learning.proto` (`LearningService.GetClassroomPostAccess`, posts gọi qua `LEARNING_SERVICE_ADDR`, mặc định `learning:50059`). Route public cũ `/exams/api/v1/...`, `/classrooms/api/v1/...` (kể cả 2 WebSocket `/exams/api/v1/ws/exams`, `/classrooms/api/v1/ws/classrooms`) vẫn giữ nguyên, nginx chuyển về `learning`; Swagger ở `/learning/`. Seed đề: `make seed learning`.
+
+`knowledge` là service gộp từ `topics` (video topic → section → lesson → transcript) + `vocabgram` (dictionary + grammar của vietanh), một DB `knowledge-db`. Route public cũ vẫn giữ, nginx chuyển cả 3 prefix về `knowledge`: `/topics/api/v1/...` (topics, sections, lessons), `/dictionary/api/v1/...` (words, flashcards, themes), `/grammar/api/v1/...` (units, progress); Swagger ở `/knowledge/`. Audio phát âm nằm trên MinIO. Seed tách theo loại dữ liệu, mỗi loại một container: video topic `make seed knowledge-topics` (dictionary, grammar sẽ là `knowledge-dictionary`, `knowledge-grammar`).
 
 ## 🛠 Yêu cầu hệ thống (Prerequisites)
 
@@ -50,7 +52,7 @@ make swag
 ## 🚀 Khởi chạy dự án
 
 Toàn bộ hệ thống được đóng gói và chạy thông qua Docker Compose. Hệ thống bao gồm các thành phần:
-- Microservices: identity, storage, topics, learning, notifications, posts
+- Microservices: identity, storage, knowledge, learning, notifications, posts
 - Database: `PostgreSQL`
 - API Gateway: `Nginx`
 - Giao diện Docs: `Swagger UI`
