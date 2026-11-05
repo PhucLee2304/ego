@@ -21,14 +21,19 @@ type Handler interface {
 	GetWords(w http.ResponseWriter, r *http.Request)
 	GetWordByID(w http.ResponseWriter, r *http.Request)
 
-	// Theme
-	GetThemes(w http.ResponseWriter, r *http.Request)
-	GetWordsByTheme(w http.ResponseWriter, r *http.Request)
-
 	// Flashcard
 	GetFlashcards(w http.ResponseWriter, r *http.Request)
 	CreateFlashcard(w http.ResponseWriter, r *http.Request)
 	DeleteFlashcard(w http.ResponseWriter, r *http.Request)
+
+	// Theme
+	GetThemes(w http.ResponseWriter, r *http.Request)
+	GetWordsByTheme(w http.ResponseWriter, r *http.Request)
+
+	// Grammar
+	GetUnits(w http.ResponseWriter, r *http.Request)
+	GetUnitByID(w http.ResponseWriter, r *http.Request)
+	UpdateProgress(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -50,12 +55,17 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 	mux.HandleFunc("GET /words", mw.Handle(h.GetWords))
 	mux.HandleFunc("GET /words/{id}", mw.Handle(h.GetWordByID))
 
-	// Theme
-	mux.HandleFunc("GET /themes", mw.Handle(h.GetThemes))
-	mux.HandleFunc("GET /themes/{id}", mw.Handle(h.GetWordsByTheme))
-
 	// Flashcard
 	mux.HandleFunc("GET /flashcards", mw.Handle(h.GetFlashcards))
 	mux.HandleFunc("POST /flashcards", mw.Handle(h.CreateFlashcard))
 	mux.HandleFunc("DELETE /flashcards/{id}", mw.Handle(h.DeleteFlashcard))
+
+	// Theme
+	mux.HandleFunc("GET /themes", mw.Handle(h.GetThemes))
+	mux.HandleFunc("GET /themes/{id}", mw.Handle(h.GetWordsByTheme))
+
+	// Grammar
+	mux.HandleFunc("GET /units", mw.Handle(h.GetUnits))
+	mux.HandleFunc("GET /units/{id}", mw.Handle(h.GetUnitByID))
+	mux.HandleFunc("PUT /units/{id}/progress", mw.Handle(h.UpdateProgress))
 }

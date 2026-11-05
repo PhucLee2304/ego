@@ -45,6 +45,12 @@ func Migrate(db *gorm.DB) error {
 		&model.Theme{},
 		&model.ThemeWord{},
 
+		// Grammar
+		&model.GrammarUnit{},
+		&model.GrammarExample{},
+		&model.GrammarPractice{},
+		&model.UserUnitProgress{},
+
 		// Flashcard
 		&model.Flashcard{},
 	)
