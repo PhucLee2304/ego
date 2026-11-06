@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"ego/services/knowledge/internal/model"
+
+	"gorm.io/gorm"
 )
 
 func (r *repository) GetTopics(ctx context.Context) ([]*model.Topic, error) {
@@ -40,7 +42,12 @@ func (r *repository) GetLessonsBySection(ctx context.Context, sectionID uint) ([
 
 func (r *repository) GetLessonByID(ctx context.Context, id uint) (*model.Lesson, error) {
 	var lesson model.Lesson
-	if err := r.db.WithContext(ctx).Preload("Transcripts").Where("id = ?", id).First(&lesson).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Preload("Transcripts", func(db *gorm.DB) *gorm.DB {
+			return db.Order(`"order"`)
+		}).
+		Where("id = ?", id).
+		First(&lesson).Error; err != nil {
 		return nil, err
 	}
 	return &lesson, nil
