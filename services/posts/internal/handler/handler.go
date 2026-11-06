@@ -41,6 +41,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMiddleware *jwt.AuthMid
 	mux.HandleFunc("GET /comments/{id}", authMiddleware.Handle(h.GetPostComment))
 	mux.HandleFunc("POST /comments/{id}/like", authMiddleware.Handle(h.LikePostComment))
 	mux.HandleFunc("DELETE /comments/{id}/like", authMiddleware.Handle(h.UnlikePostComment))
+	mux.HandleFunc("GET /admin/stats", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.GetAdminStats)))
 	mux.HandleFunc("GET /admin/posts", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.ListPostsForModeration)))
 	mux.HandleFunc("POST /admin/posts/{id}/hide", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.HidePost)))
 	mux.HandleFunc("DELETE /admin/posts/{id}/hide", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.UnhidePost)))

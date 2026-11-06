@@ -22,6 +22,9 @@ func New(s service.Service) Handler {
 }
 
 func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
+	// Stats (admin)
+	mux.HandleFunc("GET /admin/stats", mw.Handle(rm.RequireRole("admin")(h.GetAdminStats)))
+
 	// Exam
 	mux.HandleFunc("GET /exams", mw.Handle(h.GetList))
 	mux.HandleFunc("GET /exams/years", mw.Handle(h.GetYears))

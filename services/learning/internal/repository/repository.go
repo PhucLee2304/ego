@@ -165,6 +165,9 @@ type Repository interface {
 	CancelNotificationOutbox(ctx context.Context, eventKeyPrefix string) error
 
 	Transaction(ctx context.Context, fn func(Repository) error) error
+
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, rng httpx.StatsRange) (*dto.AdminStatsResponse, []string, error)
 }
 
 type repository struct {

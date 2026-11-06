@@ -35,6 +35,9 @@ type Service interface {
 	GetUnits(ctx context.Context, userID string) (*dto.GetUnitsResponse, *httpx.HTTPError)
 	GetUnitByID(ctx context.Context, userID string, id uint) (*dto.Unit, *httpx.HTTPError)
 	UpdateProgress(ctx context.Context, userID string, id uint, body dto.UpdateProgressBody) (*dto.Progress, *httpx.HTTPError)
+
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, query httpx.StatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError)
 }
 
 type service struct {

@@ -15,12 +15,13 @@ type Handler struct{ service service.Service }
 
 func New(service service.Service) *Handler { return &Handler{service: service} }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
 	mux.HandleFunc("POST /notifications/device-tokens", mw.Handle(h.RegisterDeviceToken))
 	mux.HandleFunc("DELETE /notifications/device-tokens", mw.Handle(h.DeleteDeviceToken))
 	mux.HandleFunc("GET /notifications", mw.Handle(h.GetNotifications))
 	mux.HandleFunc("PATCH /notifications/read", mw.Handle(h.MarkRead))
 	mux.HandleFunc("DELETE /notifications", mw.Handle(h.DeleteNotifications))
+	mux.HandleFunc("GET /admin/stats", mw.Handle(rm.RequireRole("admin")(h.GetAdminStats)))
 }
 
 // RegisterDeviceToken godoc

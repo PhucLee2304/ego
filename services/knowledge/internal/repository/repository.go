@@ -4,6 +4,8 @@ import (
 	"context"
 
 	platformdb "ego/platform/db"
+	"ego/platform/httpx"
+	"ego/services/knowledge/internal/dto"
 	"ego/services/knowledge/internal/model"
 
 	"gorm.io/gorm"
@@ -36,6 +38,9 @@ type Repository interface {
 	GetUnits(ctx context.Context, userID string) ([]*model.GrammarUnit, error)
 	GetUnitByID(ctx context.Context, userID string, id uint) (*model.GrammarUnit, error)
 	UpsertProgress(ctx context.Context, progress *model.UserUnitProgress) error
+
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, rng httpx.StatsRange) (*dto.AdminStatsResponse, error)
 
 	Transaction(ctx context.Context, fn func(Repository) error) error
 }

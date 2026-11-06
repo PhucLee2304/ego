@@ -203,6 +203,9 @@ type Service interface {
 	BanAttempt(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string, req dto.BanAttemptRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
 	ReleaseAttemptSession(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
 	ReinstateAttempt(ctx context.Context, teacherID string, classroomID, assignmentID uint, studentID string, req dto.ReinstateAttemptRequest) (*dto.AttemptIntegrityResponse, *httpx.HTTPError)
+
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, query httpx.StatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError)
 }
 
 // NotificationClient là interface hẹp tới notifications service, để test bằng fake.

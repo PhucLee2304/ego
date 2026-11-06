@@ -61,6 +61,13 @@ func main() {
 	defer identityConn.Close()
 	identityServiceClient := identityClient.NewIdentityServiceClient(identityConn)
 	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
+	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
+		userResp, err := identityServiceClient.GetUserRole(ctx, &identityClient.GetUserRoleRequest{Id: userID})
+		if err != nil {
+			return "", err
+		}
+		return userResp.Role, nil
+	})
 
 	var sender *push.FCMSender
 	if cfg.FirebaseCredentialsPath != "" {
@@ -80,7 +87,7 @@ func main() {
 	svc := service.New(repo, sender, notificationsSocket.BroadcastToUser)
 	h := handler.New(svc)
 	api := http.NewServeMux()
-	h.RegisterRoutes(api, authMiddleware)
+	h.RegisterRoutes(api, authMiddleware, roleMiddleware)
 	api.Handle("/ws/notifications", notificationsSocket)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { httpxJSON(w, http.StatusOK, `{"status":"OK"}`) })

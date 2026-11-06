@@ -18,6 +18,9 @@ import (
 )
 
 type Service interface {
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, query httpx.StatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError)
+
 	GetNotifications(context.Context, string, dto.NotificationsQuery) (*dto.NotificationsResponse, *httpx.HTTPError)
 	RegisterDeviceToken(context.Context, string, dto.RegisterDeviceTokenRequest) *httpx.HTTPError
 	DeleteDeviceToken(context.Context, string, string) *httpx.HTTPError
