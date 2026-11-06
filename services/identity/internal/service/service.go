@@ -17,6 +17,7 @@ import (
 
 var (
 	ErrInvalidIdToken = errors.New("invalid id token")
+	ErrUserBlocked    = errors.New("user is blocked")
 	// ErrUserNotFound is the role middleware's sentinel so GetRole can serve as
 	// a jwt.RoleResolver without leaking GORM errors.
 	ErrUserNotFound = jwt.ErrUserNotFound
@@ -31,7 +32,9 @@ type Service interface {
 	GetMe(ctx context.Context, userID string) (*dto.User, *httpx.HTTPError)
 	UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, *httpx.HTTPError)
 	GetRole(ctx context.Context, userID string) (string, error)
-	GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.User, int64, *httpx.HTTPError)
+	GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.User, int64, *httpx.HTTPError)
+	GetSummary(ctx context.Context) (*dto.UsersSummary, *httpx.HTTPError)
+	SetBlocked(ctx context.Context, userID string, blocked bool) (*dto.User, *httpx.HTTPError)
 
 	// RPC
 	ValidateToken(ctx context.Context, tokenString string) (string, error)

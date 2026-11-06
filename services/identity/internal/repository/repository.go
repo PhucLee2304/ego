@@ -4,6 +4,7 @@ import (
 	"context"
 
 	platformdb "ego/platform/db"
+	"ego/services/identity/internal/dto"
 	"ego/services/identity/internal/model"
 
 	"gorm.io/gorm"
@@ -15,7 +16,8 @@ type Repository interface {
 	GetByIDs(ctx context.Context, userIDs []string) ([]*model.User, error)
 	SearchUserIDsByName(ctx context.Context, query string) ([]string, error)
 	UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error)
-	GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error)
+	GetList(ctx context.Context, query dto.UsersQuery) ([]*model.User, int64, error)
+	GetSummary(ctx context.Context) (*dto.UsersSummary, error)
 	Transaction(ctx context.Context, fn func(Repository) error) error
 }
 

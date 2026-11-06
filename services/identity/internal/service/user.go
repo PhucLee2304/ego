@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -37,13 +38,7 @@ func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, *httpx.H
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to get user")
 	}
-	return &dto.User{
-		ID:     user.ID,
-		Email:  user.Email,
-		Name:   user.Name,
-		Avatar: user.Avatar,
-		Role:   string(user.Role),
-	}, nil
+	return dto.ToUser(user), nil
 }
 
 func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, *httpx.HTTPError) {
@@ -70,31 +65,54 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to update user")
 	}
-	return &dto.User{
-		ID:     user.ID,
-		Email:  user.Email,
-		Name:   user.Name,
-		Avatar: user.Avatar,
-		Role:   string(user.Role),
-	}, nil
+	return dto.ToUser(user), nil
 }
 
-func (s *service) GetList(ctx context.Context, query httpx.PaginationQuery) ([]*dto.User, int64, *httpx.HTTPError) {
-	users, total, err := s.repo.GetList(ctx, query.Limit(), query.Offset())
+func (s *service) GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.User, int64, *httpx.HTTPError) {
+	users, total, err := s.repo.GetList(ctx, query)
 	if err != nil {
 		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get users", err)
 	}
 
 	userDTOs := make([]*dto.User, len(users))
 	for i, user := range users {
-		userDTOs[i] = &dto.User{
-			ID:     user.ID,
-			Email:  user.Email,
-			Name:   user.Name,
-			Avatar: user.Avatar,
-			Role:   string(user.Role),
-		}
+		userDTOs[i] = dto.ToUser(user)
+	}
+	return userDTOs, total, nil
+}
+
+func (s *service) GetSummary(ctx context.Context) (*dto.UsersSummary, *httpx.HTTPError) {
+	summary, err := s.repo.GetSummary(ctx)
+	if err != nil {
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get user summary", err)
+	}
+	return summary, nil
+}
+
+// SetBlocked khoá (blocked = true) hoặc mở khoá một tài khoản CLIENT. Tài khoản ADMIN không khoá được.
+func (s *service) SetBlocked(ctx context.Context, userID string, blocked bool) (*dto.User, *httpx.HTTPError) {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, httpx.FromError(err, "[ERROR] Failed to get user")
+	}
+	if user.Role != model.RoleClient {
+		return nil, httpx.NewError(http.StatusConflict, "[CONFLICT] Only client accounts can be blocked", nil)
+	}
+	if blocked && user.BlockedAt != nil {
+		return nil, httpx.NewError(http.StatusConflict, "[CONFLICT] Account is already blocked", nil)
+	}
+	if !blocked && user.BlockedAt == nil {
+		return nil, httpx.NewError(http.StatusConflict, "[CONFLICT] Account is not blocked", nil)
 	}
 
-	return userDTOs, total, nil
+	var blockedAt *time.Time
+	if blocked {
+		now := time.Now()
+		blockedAt = &now
+	}
+	user, err = s.repo.UpdateMe(ctx, userID, map[string]any{"blocked_at": blockedAt})
+	if err != nil {
+		return nil, httpx.FromError(err, "[ERROR] Failed to update user")
+	}
+	return dto.ToUser(user), nil
 }

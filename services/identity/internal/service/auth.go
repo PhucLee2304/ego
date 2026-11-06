@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 func (s *service) ValidateToken(ctx context.Context, tokenString string) (string, error) {
@@ -28,6 +30,17 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (string, str
 			return "", "", httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] Refresh token expired", err)
 		}
 		return "", "", httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to refresh token", err)
+	}
+
+	user, err := s.repo.GetByID(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", "", httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] Invalid refresh token", err)
+	}
+	if err != nil {
+		return "", "", httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to refresh token", err)
+	}
+	if user.BlockedAt != nil {
+		return "", "", httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Account blocked", ErrUserBlocked)
 	}
 
 	accessToken, newRefreshToken, err := s.jwtManager.Generate(ctx, userID)
@@ -76,10 +89,17 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 		if err != nil {
 			return err
 		}
+		// Rollback cả lần cập nhật email: tài khoản bị khoá không được ghi gì khi đăng nhập.
+		if user.BlockedAt != nil {
+			return ErrUserBlocked
+		}
 
 		accessToken, refreshToken, err = s.jwtManager.Generate(ctx, strconv.Itoa(int(user.ID)))
 		return err
 	})
+	if errors.Is(err, ErrUserBlocked) {
+		return nil, httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Account blocked", err)
+	}
 	if err != nil {
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to login", err)
 	}

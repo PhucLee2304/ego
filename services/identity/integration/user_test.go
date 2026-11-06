@@ -10,11 +10,14 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	identityClient "ego/api/gen/go/identity"
+	"ego/platform/httpx"
 	"ego/platform/jwt"
 	platformRpc "ego/platform/rpc"
 	"ego/services/identity/database"
+	"ego/services/identity/internal/dto"
 	"ego/services/identity/internal/model"
 	"ego/services/identity/internal/repository"
 	"ego/services/identity/internal/service"
@@ -194,7 +197,8 @@ func TestGetListOrdersUsersByID(t *testing.T) {
 	createUser(t, db, "first@example.com", "First", model.RoleClient)
 	createUser(t, db, "second@example.com", "Second", model.RoleClient)
 
-	users, _, err := repository.NewRepository(db).GetList(context.Background(), 10, 0)
+	query := dto.UsersQuery{PaginationQuery: httpx.PaginationQuery{Page: 1, PageSize: 10}}
+	users, _, err := repository.NewRepository(db).GetList(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,5 +235,41 @@ func TestUserTransactionRollsBack(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected user insert to be rolled back, found %d rows", count)
+	}
+}
+
+func TestGetListFiltersAndSummary(t *testing.T) {
+	_, db := testService(t)
+	repo := repository.NewRepository(db)
+	ctx := context.Background()
+	createUser(t, db, "admin@example.com", "Admin Anna", model.RoleAdmin)
+	createUser(t, db, "bob@example.com", "Bob", model.RoleClient)
+	blockedID := createUser(t, db, "carol@example.com", "Carol", model.RoleClient)
+	if err := db.Model(&model.User{}).Where("id = ?", blockedID).Update("blocked_at", time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := true
+	tests := []struct {
+		name  string
+		query dto.UsersQuery
+		want  int64
+	}{
+		{name: "search email", query: dto.UsersQuery{Query: "BOB@"}, want: 1},
+		{name: "search name", query: dto.UsersQuery{Query: "anna"}, want: 1},
+		{name: "role", query: dto.UsersQuery{Role: "CLIENT"}, want: 2},
+		{name: "blocked", query: dto.UsersQuery{Blocked: &blocked}, want: 1},
+	}
+	for _, tt := range tests {
+		tt.query.PaginationQuery = httpx.PaginationQuery{Page: 1, PageSize: 10}
+		_, total, err := repo.GetList(ctx, tt.query)
+		if err != nil || total != tt.want {
+			t.Fatalf("%s: expected %d users, got %d err=%v", tt.name, tt.want, total, err)
+		}
+	}
+
+	summary, err := repo.GetSummary(ctx)
+	if err != nil || summary.Total != 3 || summary.Admins != 1 || summary.Blocked != 1 {
+		t.Fatalf("unexpected summary %#v err=%v", summary, err)
 	}
 }

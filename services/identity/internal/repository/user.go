@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"ego/services/identity/internal/dto"
 	"ego/services/identity/internal/model"
 
 	"gorm.io/gorm"
@@ -76,22 +77,40 @@ func (r *repository) UpdateMe(ctx context.Context, userID string, updates map[st
 	return &user, nil
 }
 
-func (r *repository) GetList(ctx context.Context, limit, offset int32) ([]*model.User, int64, error) {
-	var users []model.User
+func (r *repository) GetList(ctx context.Context, query dto.UsersQuery) ([]*model.User, int64, error) {
+	var users []*model.User
 	var total int64
+	db := r.db.WithContext(ctx).Model(&model.User{})
+	if query.Query != "" {
+		like := "%" + query.Query + "%"
+		db = db.Where("name ILIKE ? OR email ILIKE ?", like, like)
+	}
+	if query.Role != "" {
+		db = db.Where("role = ?", query.Role)
+	}
+	if query.Blocked != nil {
+		if *query.Blocked {
+			db = db.Where("blocked_at IS NOT NULL")
+		} else {
+			db = db.Where("blocked_at IS NULL")
+		}
+	}
 
-	if err := r.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-
-	if err := r.db.WithContext(ctx).Order("id ASC").Limit(int(limit)).Offset(int(offset)).Find(&users).Error; err != nil {
+	if err := db.Order("id ASC").Limit(int(query.Limit())).Offset(int(query.Offset())).Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
+	return users, total, nil
+}
 
-	userPtrs := make([]*model.User, len(users))
-	for i := range users {
-		userPtrs[i] = &users[i]
+func (r *repository) GetSummary(ctx context.Context) (*dto.UsersSummary, error) {
+	var summary dto.UsersSummary
+	if err := r.db.WithContext(ctx).Model(&model.User{}).
+		Select("COUNT(*) AS total, COUNT(*) FILTER (WHERE role = ?) AS admins, COUNT(*) FILTER (WHERE blocked_at IS NOT NULL) AS blocked", model.RoleAdmin).
+		Scan(&summary).Error; err != nil {
+		return nil, err
 	}
-
-	return userPtrs, total, nil
+	return &summary, nil
 }
