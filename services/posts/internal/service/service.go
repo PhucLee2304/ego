@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,12 +13,12 @@ import (
 	notifications "ego/api/gen/go/notifications"
 	storage "ego/api/gen/go/storage"
 	"ego/platform/httpx"
+	"ego/platform/storagekey"
 	postsConfig "ego/services/posts/config"
 	"ego/services/posts/internal/dto"
 	"ego/services/posts/internal/model"
 	"ego/services/posts/internal/repository"
 
-	"github.com/google/uuid"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -94,9 +93,15 @@ func (s *Service) CreateUploadIntent(ctx context.Context, userID string, req dto
 	if req.Size > maxSize {
 		return nil, ErrInvalidAttachment
 	}
-	ext := strings.ToLower(filepath.Ext(req.OriginalName))
-	fileName := uuid.NewString() + ext
-	folder := "posts/uploads/" + userID
+	// Bài viết trong lớp chỉ thành viên đã duyệt hoặc giáo viên của lớp mới được upload.
+	folder := "posts/community"
+	if req.ClassroomID != nil {
+		if _, err := s.classroomAccess(ctx, *req.ClassroomID, userID); err != nil {
+			return nil, httpx.FromError(err, "[ERROR] Failed to create upload intent")
+		}
+		folder = "posts/classrooms"
+	}
+	fileName := storagekey.FileName(req.OriginalName)
 	response, err := s.storage.GeneratePresignedUploadURL(ctx, &storage.GeneratePresignedUploadURLRequest{Folders: strings.Split(folder, "/"), FileName: fileName, ContentType: contentType})
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to create upload intent")

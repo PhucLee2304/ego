@@ -46,6 +46,9 @@ type CreateUploadIntentRequest struct {
 	OriginalName string `json:"originalName" validate:"required,notblank"`
 	ContentType  string `json:"contentType" validate:"required,notblank"`
 	Size         int64  `json:"size" validate:"required,gt=0"`
+	// ClassroomID có khi file đính kèm cho bài viết trong lớp (lưu ở posts/classrooms), bỏ trống là
+	// bài viết cộng đồng (posts/community).
+	ClassroomID *uint `json:"classroomId,omitempty"`
 }
 
 type UploadLimitsResponse struct {

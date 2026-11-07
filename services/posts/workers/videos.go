@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -103,7 +104,9 @@ func processVideo(ctx context.Context, repo *repository.Repository, storageClien
 	if err := exec.CommandContext(ctx, "ffmpeg", "-y", "-ss", "0", "-i", output, "-frames:v", "1", "-q:v", "3", thumbnail).Run(); err != nil {
 		return err
 	}
-	folder := []string{"posts", "videos", item.UserID}
+	// Video đã xử lý nằm cùng folder với file gốc (posts/community hoặc posts/classrooms).
+	parts := strings.Split(strings.Trim(item.ObjectKey, "/"), "/")
+	folder := slices.Clip(parts[:len(parts)-1])
 	videoName, thumbName := uuid.NewString()+".mp4", uuid.NewString()+".jpg"
 	videoURL, err := uploadProcessed(ctx, storageClient, folder, videoName, "video/mp4", output)
 	if err != nil {
@@ -113,7 +116,6 @@ func processVideo(ctx context.Context, repo *repository.Repository, storageClien
 	if err != nil {
 		return err
 	}
-	parts := strings.Split(strings.Trim(item.ObjectKey, "/"), "/")
 	if len(parts) > 1 {
 		_, _ = storageClient.DeleteObject(ctx, &storage.DeleteObjectRequest{Folders: parts[:len(parts)-1], FileName: parts[len(parts)-1]})
 	}

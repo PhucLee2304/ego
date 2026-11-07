@@ -29,13 +29,13 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 		updates["name"] = *body.Name
 	}
 	if body.Avatar != nil {
-		// Avatar chỉ là tên file nằm trực tiếp trong thư mục avatars: không rỗng, không phải "." hay "..",
-		// không chứa "/" hoặc "\" để không trỏ ra thư mục khác.
+		// Avatar là fileName mà storage trả về khi presign, nằm trực tiếp trong avatars/users: không rỗng,
+		// không phải "." hay "..", không chứa "/" hoặc "\" để không trỏ ra thư mục khác.
 		if fileName := *body.Avatar; fileName == "" || fileName == "." || fileName == ".." || strings.ContainsAny(fileName, `/\`) {
 			return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid avatar", nil)
 		}
 		resp, err := s.storageClient.GetPublicURL(ctx, &storageClient.GetPublicURLRequest{
-			Folders:  []string{"avatars"},
+			Folders:  []string{"avatars", "users"},
 			FileName: *body.Avatar,
 		})
 		if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -12,10 +11,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
+var (
+	// ErrInvalidKey: folder hoặc tên file rỗng nên không dựng được object key.
+	ErrInvalidKey = errors.New("[MINIO] Object key cannot be empty")
+	// ErrObjectNotFound: object không tồn tại trong bucket.
+	ErrObjectNotFound = errors.New("[MINIO] Object not found")
+)
+
 func (c *Client) GeneratePresignedUploadURL(ctx context.Context, folders []BucketFolder, fileName string, contentType string, internal bool) (*string, error) {
+	if err := ValidateUploadFolders(folders); err != nil {
+		return nil, err
+	}
 	objectKey := BuildObjectKey(folders, fileName)
 	if objectKey == "" {
-		return nil, errors.New("[MINIO] Object key cannot be empty")
+		return nil, ErrInvalidKey
 	}
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -42,82 +51,10 @@ func (c *Client) GeneratePresignedUploadURL(ctx context.Context, folders []Bucke
 	return &request.URL, nil
 }
 
-func (c *Client) GeneratePresignedDownloadURL(ctx context.Context, folders []BucketFolder, fileName string) (*string, error) {
-	objectKey := BuildObjectKey(folders, fileName)
-	if objectKey == "" {
-		return nil, errors.New("[MINIO] Object key cannot be empty")
-	}
-
-	request, err := c.PresignClient.PresignGetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(c.Bucket),
-		Key:    aws.String(objectKey),
-	},
-		func(options *s3.PresignOptions) {
-			options.Expires = c.Expiry
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &request.URL, nil
-}
-
-func (c *Client) UploadFile(
-	ctx context.Context,
-	folders []BucketFolder,
-	fileName string,
-	reader io.Reader,
-	size int64,
-	contentType string,
-) (*string, error) {
-	objectKey := BuildObjectKey(folders, fileName)
-	if objectKey == "" {
-		return nil, errors.New("[MINIO] Object key cannot be empty")
-	}
-	if reader == nil {
-		return nil, errors.New("[MINIO] Reader cannot be nil")
-	}
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	_, err := c.Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:        aws.String(c.Bucket),
-		Key:           aws.String(objectKey),
-		Body:          reader,
-		ContentType:   aws.String(contentType),
-		ContentLength: aws.Int64(size),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("[MINIO] Failed to upload file: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(c.Endpoint, "/"), c.Bucket, objectKey)
-	return &url, nil
-}
-
-func (c *Client) DownloadFile(ctx context.Context, folders []BucketFolder, fileName string) (io.ReadCloser, error) {
-	objectKey := BuildObjectKey(folders, fileName)
-	if objectKey == "" {
-		return nil, errors.New("[MINIO] Object key cannot be empty")
-	}
-
-	output, err := c.Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(c.Bucket),
-		Key:    aws.String(objectKey),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("[MINIO] Failed to download file: %w", err)
-	}
-
-	return output.Body, nil
-}
-
 func (c *Client) GetPublicURL(folders []BucketFolder, fileName string) (*string, error) {
 	objectKey := BuildObjectKey(folders, fileName)
 	if objectKey == "" {
-		return nil, errors.New("[MINIO] Object key cannot be empty")
+		return nil, ErrInvalidKey
 	}
 	if strings.TrimSpace(c.PublicEndpoint) == "" {
 		return nil, errors.New("[MINIO] R2_PUBLIC_ENDPOINT is required to build a viewable public URL")
@@ -130,12 +67,16 @@ func (c *Client) GetPublicURL(folders []BucketFolder, fileName string) (*string,
 func (c *Client) GetObjectMetadata(ctx context.Context, folders []BucketFolder, fileName string) (int64, string, error) {
 	objectKey := BuildObjectKey(folders, fileName)
 	if objectKey == "" {
-		return 0, "", errors.New("[MINIO] Object key cannot be empty")
+		return 0, "", ErrInvalidKey
 	}
 	output, err := c.Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(c.Bucket),
 		Key:    aws.String(objectKey),
 	})
+	var notFound *types.NotFound
+	if errors.As(err, &notFound) {
+		return 0, "", ErrObjectNotFound
+	}
 	if err != nil {
 		return 0, "", err
 	}
@@ -145,7 +86,7 @@ func (c *Client) GetObjectMetadata(ctx context.Context, folders []BucketFolder, 
 func (c *Client) DeleteObject(ctx context.Context, folders []BucketFolder, fileName string) error {
 	objectKey := BuildObjectKey(folders, fileName)
 	if objectKey == "" {
-		return errors.New("[MINIO] Object key cannot be empty")
+		return ErrInvalidKey
 	}
 	_, err := c.Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(c.Bucket), Key: aws.String(objectKey)})
 	return err
@@ -154,7 +95,7 @@ func (c *Client) DeleteObject(ctx context.Context, folders []BucketFolder, fileN
 func (c *Client) DeleteFolder(ctx context.Context, folder string) (uint32, error) {
 	prefix := strings.Trim(folder, "/")
 	if prefix == "" {
-		return 0, errors.New("[MINIO] Folder cannot be empty")
+		return 0, ErrInvalidKey
 	}
 	prefix += "/"
 
