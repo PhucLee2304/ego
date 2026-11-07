@@ -6,33 +6,14 @@ import (
 	"ego/platform/httpx"
 	"ego/services/identity/internal/dto"
 	"ego/services/identity/internal/model"
+	"ego/services/identity/internal/repository"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
-func (s *service) GetRole(ctx context.Context, userID string) (string, error) {
-	user, err := s.repo.GetByID(ctx, userID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", ErrUserNotFound
-	}
-	if err != nil {
-		return "", err
-	}
-	return string(user.Role), nil
-}
-
-func (s *service) GetUsersInfo(ctx context.Context, userIDs []string) ([]*model.User, error) {
-	return s.repo.GetByIDs(ctx, userIDs)
-}
-
-func (s *service) SearchUserIDsByName(ctx context.Context, query string) ([]string, error) {
-	return s.repo.SearchUserIDsByName(ctx, query)
-}
-
+// **Reviewed**
 func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, *httpx.HTTPError) {
 	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
@@ -41,13 +22,15 @@ func (s *service) GetMe(ctx context.Context, userID string) (*dto.User, *httpx.H
 	return dto.ToUser(user), nil
 }
 
+// **Reviewed**
 func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, *httpx.HTTPError) {
 	updates := map[string]any{}
 	if body.Name != nil {
 		updates["name"] = *body.Name
 	}
 	if body.Avatar != nil {
-		// The avatar must be a plain file name inside the avatars folder.
+		// Avatar chỉ là tên file nằm trực tiếp trong thư mục avatars: không rỗng, không phải "." hay "..",
+		// không chứa "/" hoặc "\" để không trỏ ra thư mục khác.
 		if fileName := *body.Avatar; fileName == "" || fileName == "." || fileName == ".." || strings.ContainsAny(fileName, `/\`) {
 			return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid avatar", nil)
 		}
@@ -61,13 +44,19 @@ func (s *service) UpdateMe(ctx context.Context, userID string, body dto.UpdateUs
 		updates["avatar"] = resp.Url
 	}
 
-	user, err := s.repo.UpdateMe(ctx, userID, updates)
+	var user *model.User
+	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
+		var err error
+		user, err = repo.UpdateMe(ctx, userID, updates)
+		return err
+	})
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to update user")
 	}
 	return dto.ToUser(user), nil
 }
 
+// **Reviewed**
 func (s *service) GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.User, int64, *httpx.HTTPError) {
 	users, total, err := s.repo.GetList(ctx, query)
 	if err != nil {
@@ -81,29 +70,47 @@ func (s *service) GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.Use
 	return userDTOs, total, nil
 }
 
-// SetBlocked khoá (blocked = true) hoặc mở khoá một tài khoản CLIENT. Tài khoản ADMIN không khoá được.
+// SetBlocked khoá (blocked = true) hoặc mở khoá (blocked = false) một tài khoản CLIENT.
+//   - không tìm thấy user: 404;
+//   - user không phải CLIENT (ví dụ ADMIN): 409, không được khoá hay mở khoá;
+//   - khoá tài khoản đang bị khoá: 409 "already blocked";
+//   - mở khoá tài khoản không bị khoá: 409 "not blocked";
+//
+// **Reviewed**
 func (s *service) SetBlocked(ctx context.Context, userID string, blocked bool) (*dto.User, *httpx.HTTPError) {
-	user, err := s.repo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to get user")
-	}
-	if user.Role != model.RoleClient {
-		return nil, httpx.NewError(http.StatusConflict, "[CONFLICT] Only client accounts can be blocked", nil)
-	}
-	if blocked && user.BlockedAt != nil {
-		return nil, httpx.NewError(http.StatusConflict, "[CONFLICT] Account is already blocked", nil)
-	}
-	if !blocked && user.BlockedAt == nil {
-		return nil, httpx.NewError(http.StatusConflict, "[CONFLICT] Account is not blocked", nil)
-	}
+	var user *model.User
+	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
+		var err error
+		user, err = repo.GetByIDForUpdate(ctx, userID)
+		if err != nil {
+			return httpx.FromError(err, "[ERROR] Failed to get user")
+		}
+		if user.Role != model.RoleClient {
+			return httpx.NewError(http.StatusConflict, "[CONFLICT] Only client accounts can be blocked", nil)
+		}
+		if blocked && user.BlockedAt != nil {
+			return httpx.NewError(http.StatusConflict, "[CONFLICT] Account is already blocked", nil)
+		}
+		if !blocked && user.BlockedAt == nil {
+			return httpx.NewError(http.StatusConflict, "[CONFLICT] Account is not blocked", nil)
+		}
 
-	var blockedAt *time.Time
-	if blocked {
-		now := time.Now()
-		blockedAt = &now
-	}
-	user, err = s.repo.UpdateMe(ctx, userID, map[string]any{"blocked_at": blockedAt})
+		var blockedAt *time.Time
+		if blocked {
+			now := time.Now()
+			blockedAt = &now
+		}
+		user, err = repo.UpdateMe(ctx, userID, map[string]any{"blocked_at": blockedAt})
+		if err != nil {
+			return httpx.FromError(err, "[ERROR] Failed to update user")
+		}
+		return nil
+	})
 	if err != nil {
+		var httpErr *httpx.HTTPError
+		if errors.As(err, &httpErr) {
+			return nil, httpErr
+		}
 		return nil, httpx.FromError(err, "[ERROR] Failed to update user")
 	}
 	return dto.ToUser(user), nil

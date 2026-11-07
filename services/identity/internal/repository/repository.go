@@ -14,6 +14,7 @@ import (
 type Repository interface {
 	UpsertUser(ctx context.Context, user *model.User) (*model.User, error)
 	GetByID(ctx context.Context, userID string) (*model.User, error)
+	GetByIDForUpdate(ctx context.Context, userID string) (*model.User, error)
 	GetByIDs(ctx context.Context, userIDs []string) ([]*model.User, error)
 	SearchUserIDsByName(ctx context.Context, query string) ([]string, error)
 	UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error)

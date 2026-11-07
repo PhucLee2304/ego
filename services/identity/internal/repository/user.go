@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// **Reviewed**
 func (r *repository) UpsertUser(ctx context.Context, user *model.User) (*model.User, error) {
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "firebase_uid"}},
@@ -27,6 +28,7 @@ func (r *repository) UpsertUser(ctx context.Context, user *model.User) (*model.U
 	return &dbUser, nil
 }
 
+// **Reviewed**
 func (r *repository) GetByID(ctx context.Context, userID string) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error; err != nil {
@@ -35,6 +37,19 @@ func (r *repository) GetByID(ctx context.Context, userID string) (*model.User, e
 	return &user, nil
 }
 
+// **Reviewed**
+func (r *repository) GetByIDForUpdate(ctx context.Context, userID string) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", userID).
+		First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// **Reviewed**
 func (r *repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.User, error) {
 	var users []*model.User
 	if len(userIDs) == 0 {
@@ -46,6 +61,7 @@ func (r *repository) GetByIDs(ctx context.Context, userIDs []string) ([]*model.U
 	return users, nil
 }
 
+// **Reviewed**
 func (r *repository) SearchUserIDsByName(ctx context.Context, query string) ([]string, error) {
 	var ids []string
 	query = strings.TrimSpace(query)
@@ -60,6 +76,7 @@ func (r *repository) SearchUserIDsByName(ctx context.Context, query string) ([]s
 	return ids, nil
 }
 
+// **Reviewed**
 func (r *repository) UpdateMe(ctx context.Context, userID string, updates map[string]any) (*model.User, error) {
 	var user model.User
 	result := r.db.WithContext(ctx).
@@ -77,6 +94,7 @@ func (r *repository) UpdateMe(ctx context.Context, userID string, updates map[st
 	return &user, nil
 }
 
+// **Reviewed**
 func (r *repository) GetList(ctx context.Context, query dto.UsersQuery) ([]*model.User, int64, error) {
 	var users []*model.User
 	var total int64

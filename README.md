@@ -12,7 +12,7 @@ Hệ thống Backend Microservices được viết bằng Go, sử dụng gRPC c
 | notifications | 50058 |
 | learning | 50059 |
 
-`identity` là service gộp từ `auth` + `users` (dùng chung DB `users-db`), contract gRPC ở `api/proto/identity/identity.proto` (`IdentityService`: token + user). Các service khác gọi identity qua một biến duy nhất `IDENTITY_SERVICE_ADDR` (mặc định `identity:50052`). Route public cũ `/auth/api/v1/...`, `/users/api/v1/...` vẫn giữ nguyên.
+`identity` là service gộp từ `auth` + `users` (dùng chung DB `users-db`), contract gRPC ở `api/proto/identity/identity.proto` (`IdentityService`: token + user). Các service khác gọi identity qua một biến duy nhất `IDENTITY_SERVICE_ADDR` (mặc định `identity:50052`). Route public đi qua một prefix duy nhất `/identity/api/v1/...` (`auth/login`, `auth/refresh`, `users/me`, `users`, `admin/stats`); prefix cũ `/auth/` và `/users/` đã bỏ.
 
 `learning` là service gộp từ `exams` + `classrooms` (một DB `learning-db`), contract gRPC `api/proto/learning/learning.proto` (`LearningService.GetClassroomPostAccess`, posts gọi qua `LEARNING_SERVICE_ADDR`, mặc định `learning:50059`). Route public cũ `/exams/api/v1/...`, `/classrooms/api/v1/...` (kể cả 2 WebSocket `/exams/api/v1/ws/exams`, `/classrooms/api/v1/ws/classrooms`) vẫn giữ nguyên, nginx chuyển về `learning`; Swagger ở `/learning/`. Seed đề: `make seed learning`.
 

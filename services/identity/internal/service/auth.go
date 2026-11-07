@@ -16,10 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func (s *service) ValidateToken(ctx context.Context, tokenString string) (string, error) {
-	return s.jwtManager.Validate(ctx, tokenString)
-}
-
+// **Reviewed**
 func (s *service) Refresh(ctx context.Context, refreshToken string) (string, string, *httpx.HTTPError) {
 	userID, err := s.jwtManager.ValidateRefresh(ctx, refreshToken)
 	if err != nil {
@@ -50,6 +47,7 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (string, str
 	return accessToken, newRefreshToken, nil
 }
 
+// **Reviewed**
 func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResponse, *httpx.HTTPError) {
 	firebaseUser, err := s.firebaseClient.VerifyIDToken(ctx, body.IdToken)
 	if err != nil {
@@ -89,7 +87,7 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 		if err != nil {
 			return err
 		}
-		// Rollback cả lần cập nhật email: tài khoản bị khoá không được ghi gì khi đăng nhập.
+
 		if user.BlockedAt != nil {
 			return ErrUserBlocked
 		}

@@ -48,6 +48,10 @@ func (f *fakeUserRepository) GetByID(context.Context, string) (*model.User, erro
 	return f.user, f.err
 }
 
+func (f *fakeUserRepository) GetByIDForUpdate(ctx context.Context, userID string) (*model.User, error) {
+	return f.GetByID(ctx, userID)
+}
+
 func (f *fakeUserRepository) UpdateMe(_ context.Context, _ string, updates map[string]any) (*model.User, error) {
 	f.updates = updates
 	return f.user, f.err

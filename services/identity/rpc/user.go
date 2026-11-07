@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+// **Reviewed**
 func (s *server) GetUserRole(ctx context.Context, req *identityClient.GetUserRoleRequest) (*identityClient.GetUserRoleResponse, error) {
 	role, err := s.service.GetRole(ctx, req.Id)
 	if errors.Is(err, service.ErrUserNotFound) {
@@ -26,6 +27,7 @@ func (s *server) GetUserRole(ctx context.Context, req *identityClient.GetUserRol
 	}, nil
 }
 
+// **Reviewed**
 func (s *server) GetUsersInfo(ctx context.Context, req *identityClient.GetUsersInfoRequest) (*identityClient.GetUsersInfoResponse, error) {
 	users, err := s.service.GetUsersInfo(ctx, req.Ids)
 	if err != nil {
@@ -51,6 +53,7 @@ func (s *server) GetUsersInfo(ctx context.Context, req *identityClient.GetUsersI
 	return res, nil
 }
 
+// **Reviewed**
 func (s *server) SearchUserIDsByName(ctx context.Context, req *identityClient.SearchUserIDsByNameRequest) (*identityClient.SearchUserIDsByNameResponse, error) {
 	ids, err := s.service.SearchUserIDsByName(ctx, req.Query)
 	if err != nil {

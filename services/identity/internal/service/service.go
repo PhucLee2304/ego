@@ -31,7 +31,6 @@ type Service interface {
 	// User
 	GetMe(ctx context.Context, userID string) (*dto.User, *httpx.HTTPError)
 	UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, *httpx.HTTPError)
-	GetRole(ctx context.Context, userID string) (string, error)
 	GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.User, int64, *httpx.HTTPError)
 	SetBlocked(ctx context.Context, userID string, blocked bool) (*dto.User, *httpx.HTTPError)
 
@@ -40,6 +39,7 @@ type Service interface {
 
 	// RPC
 	ValidateToken(ctx context.Context, tokenString string) (string, error)
+	GetRole(ctx context.Context, userID string) (string, error)
 	GetUsersInfo(ctx context.Context, userIDs []string) ([]*model.User, error)
 	SearchUserIDsByName(ctx context.Context, query string) ([]string, error)
 }

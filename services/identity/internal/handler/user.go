@@ -19,8 +19,8 @@ import (
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
-// @Router       /me [get]
-func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) {
+// @Router       /users/me [get]
+func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	userID, _ := jwt.GetUserID(r.Context())
 
 	user, httpErr := h.service.GetMe(r.Context(), userID)
@@ -44,8 +44,8 @@ func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) {
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
-// @Router       /me [patch]
-func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+// @Router       /users/me [patch]
+func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	userID, _ := jwt.GetUserID(r.Context())
 
 	var body dto.UpdateUserBody
@@ -86,7 +86,7 @@ func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 // @Failure      403  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
 // @Router       /users [get]
-func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
+func (h *handler) GetList(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	var query dto.UsersQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
@@ -116,8 +116,8 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 // @Failure      403  {object}  httpx.HTTPError
 // @Failure      404  {object}  httpx.HTTPError
 // @Failure      409  {object}  httpx.HTTPError
-// @Router       /users/{id}/block [post]
-func (h *handler) BlockUser(w http.ResponseWriter, r *http.Request) {
+// @Router       /users/{id}/block [put]
+func (h *handler) BlockUser(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	h.setBlocked(w, r, true)
 }
 
@@ -135,11 +135,11 @@ func (h *handler) BlockUser(w http.ResponseWriter, r *http.Request) {
 // @Failure      404  {object}  httpx.HTTPError
 // @Failure      409  {object}  httpx.HTTPError
 // @Router       /users/{id}/block [delete]
-func (h *handler) UnblockUser(w http.ResponseWriter, r *http.Request) {
+func (h *handler) UnblockUser(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	h.setBlocked(w, r, false)
 }
 
-func (h *handler) setBlocked(w http.ResponseWriter, r *http.Request, blocked bool) {
+func (h *handler) setBlocked(w http.ResponseWriter, r *http.Request, blocked bool) { // **Reviewed**
 	id, err := httpx.ParsePathID(r, "id")
 	if err != nil {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid user ID", err))
