@@ -18,6 +18,10 @@ import (
 // classroomClient cài learning.LearningServiceClient.
 type classroomClient struct{}
 
+func (classroomClient) RemoveUserFromLiveRooms(context.Context, *learning.RemoveUserFromLiveRoomsRequest, ...grpc.CallOption) (*learning.RemoveUserFromLiveRoomsResponse, error) {
+	return &learning.RemoveUserFromLiveRoomsResponse{}, nil
+}
+
 func (classroomClient) GetClassroomPostAccess(_ context.Context, req *learning.GetClassroomPostAccessRequest, _ ...grpc.CallOption) (*learning.GetClassroomPostAccessResponse, error) {
 	return &learning.GetClassroomPostAccessResponse{ClassroomId: req.ClassroomId, ClassroomName: "Class 1", TeacherId: "teacher", Active: true, IsTeacher: req.UserId == "teacher", IsApprovedMember: req.UserId != "teacher", ApprovedStudentIds: []string{"student-a", "student-b"}}, nil
 }
