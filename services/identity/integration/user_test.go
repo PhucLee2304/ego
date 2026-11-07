@@ -238,7 +238,7 @@ func TestUserTransactionRollsBack(t *testing.T) {
 	}
 }
 
-func TestGetListFiltersAndSummary(t *testing.T) {
+func TestGetListFilters(t *testing.T) {
 	_, db := testService(t)
 	repo := repository.NewRepository(db)
 	ctx := context.Background()
@@ -267,9 +267,39 @@ func TestGetListFiltersAndSummary(t *testing.T) {
 			t.Fatalf("%s: expected %d users, got %d err=%v", tt.name, tt.want, total, err)
 		}
 	}
+}
 
-	summary, err := repo.GetSummary(ctx)
-	if err != nil || summary.Total != 3 || summary.Admins != 1 || summary.Blocked != 1 {
-		t.Fatalf("unexpected summary %#v err=%v", summary, err)
+func TestGetAdminStats(t *testing.T) {
+	_, db := testService(t)
+	repo := repository.NewRepository(db)
+	ctx := context.Background()
+	old := createUser(t, db, "old@example.com", "Old", model.RoleClient)
+	createUser(t, db, "admin2@example.com", "Admin", model.RoleAdmin)
+	blockedID := createUser(t, db, "new@example.com", "New", model.RoleClient)
+	// 2026-01-05 là thứ Hai; 10:00 giờ Việt Nam = 03:00 UTC.
+	inPeriod := time.Date(2026, 1, 5, 3, 0, 0, 0, time.UTC)
+	if err := db.Model(&model.User{}).Where("id = ?", old).Update("created_at", time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.User{}).Where("id <> ?", old).Update("created_at", inPeriod).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.User{}).Where("id = ?", blockedID).Update("blocked_at", inPeriod.Add(time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := repo.GetAdminStats(ctx, dto.AdminStatsQuery{From: "2026-01-01", To: "2026-01-07"}.Range())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total != 3 || stats.Admins != 1 || stats.Clients != 2 || stats.Blocked != 1 ||
+		stats.Signups.Current != 2 || stats.BlockedInPeriod != 1 || stats.UsersBefore != 1 {
+		t.Fatalf("unexpected totals %#v", stats)
+	}
+	if len(stats.Daily) != 1 || stats.Daily[0].Date != "2026-01-05" || stats.Daily[0].Count != 2 {
+		t.Fatalf("unexpected daily %#v", stats.Daily)
+	}
+	if len(stats.Heatmap) != 1 || stats.Heatmap[0].Weekday != 1 || stats.Heatmap[0].Hour != 10 || stats.Heatmap[0].Count != 2 {
+		t.Fatalf("unexpected heatmap %#v", stats.Heatmap[0])
 	}
 }

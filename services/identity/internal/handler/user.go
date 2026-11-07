@@ -103,26 +103,6 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(users, query.PaginationQuery, total))
 }
 
-// GetSummary godoc
-// @Summary      Get user summary
-// @Description  Admin: total users, admins and blocked accounts.
-// @Tags         Users
-// @Produce      json
-// @Security     BearerAuth
-// @Success      200  {object}  dto.UsersSummary
-// @Failure      401  {object}  httpx.HTTPError
-// @Failure      403  {object}  httpx.HTTPError
-// @Failure      500  {object}  httpx.HTTPError
-// @Router       /users/summary [get]
-func (h *handler) GetSummary(w http.ResponseWriter, r *http.Request) {
-	summary, httpErr := h.service.GetSummary(r.Context())
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, summary)
-}
-
 // BlockUser godoc
 // @Summary      Block a user
 // @Description  Admin: block a CLIENT account. It can no longer log in or refresh its session.

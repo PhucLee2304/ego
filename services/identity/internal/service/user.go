@@ -81,14 +81,6 @@ func (s *service) GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.Use
 	return userDTOs, total, nil
 }
 
-func (s *service) GetSummary(ctx context.Context) (*dto.UsersSummary, *httpx.HTTPError) {
-	summary, err := s.repo.GetSummary(ctx)
-	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get user summary", err)
-	}
-	return summary, nil
-}
-
 // SetBlocked khoá (blocked = true) hoặc mở khoá một tài khoản CLIENT. Tài khoản ADMIN không khoá được.
 func (s *service) SetBlocked(ctx context.Context, userID string, blocked bool) (*dto.User, *httpx.HTTPError) {
 	user, err := s.repo.GetByID(ctx, userID)

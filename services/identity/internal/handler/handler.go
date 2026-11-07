@@ -13,7 +13,7 @@ type Handler interface {
 	GetMe(w http.ResponseWriter, r *http.Request)
 	UpdateMe(w http.ResponseWriter, r *http.Request)
 	GetList(w http.ResponseWriter, r *http.Request)
-	GetSummary(w http.ResponseWriter, r *http.Request)
+	GetAdminStats(w http.ResponseWriter, r *http.Request)
 	BlockUser(w http.ResponseWriter, r *http.Request)
 	UnblockUser(w http.ResponseWriter, r *http.Request)
 }
@@ -31,8 +31,8 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /login", h.Login)
 	mux.HandleFunc("GET /me", mw.Handle(h.GetMe))
 	mux.HandleFunc("PATCH /me", mw.Handle(h.UpdateMe))
+	mux.HandleFunc("GET /admin/stats", mw.Handle(rm.RequireRole("admin")(h.GetAdminStats)))
 	mux.HandleFunc("GET /users", mw.Handle(rm.RequireRole("admin")(h.GetList)))
-	mux.HandleFunc("GET /users/summary", mw.Handle(rm.RequireRole("admin")(h.GetSummary)))
 	mux.HandleFunc("POST /users/{id}/block", mw.Handle(rm.RequireRole("admin")(h.BlockUser)))
 	mux.HandleFunc("DELETE /users/{id}/block", mw.Handle(rm.RequireRole("admin")(h.UnblockUser)))
 }

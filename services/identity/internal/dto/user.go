@@ -36,13 +36,6 @@ func (q *UsersQuery) Normalize() {
 	q.Query = strings.TrimSpace(q.Query)
 }
 
-// UsersSummary là số liệu trên thẻ tiêu đề màn Users, không phụ thuộc bộ lọc.
-type UsersSummary struct {
-	Total   int64 `json:"total"`
-	Admins  int64 `json:"admins"`
-	Blocked int64 `json:"blocked"`
-}
-
 func ToUser(user *model.User) *User {
 	return &User{
 		ID:        user.ID,

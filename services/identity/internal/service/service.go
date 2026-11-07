@@ -33,8 +33,10 @@ type Service interface {
 	UpdateMe(ctx context.Context, userID string, body dto.UpdateUserBody) (*dto.User, *httpx.HTTPError)
 	GetRole(ctx context.Context, userID string) (string, error)
 	GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.User, int64, *httpx.HTTPError)
-	GetSummary(ctx context.Context) (*dto.UsersSummary, *httpx.HTTPError)
 	SetBlocked(ctx context.Context, userID string, blocked bool) (*dto.User, *httpx.HTTPError)
+
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, query dto.AdminStatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError)
 
 	// RPC
 	ValidateToken(ctx context.Context, tokenString string) (string, error)

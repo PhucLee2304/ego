@@ -104,13 +104,3 @@ func (r *repository) GetList(ctx context.Context, query dto.UsersQuery) ([]*mode
 	}
 	return users, total, nil
 }
-
-func (r *repository) GetSummary(ctx context.Context) (*dto.UsersSummary, error) {
-	var summary dto.UsersSummary
-	if err := r.db.WithContext(ctx).Model(&model.User{}).
-		Select("COUNT(*) AS total, COUNT(*) FILTER (WHERE role = ?) AS admins, COUNT(*) FILTER (WHERE blocked_at IS NOT NULL) AS blocked", model.RoleAdmin).
-		Scan(&summary).Error; err != nil {
-		return nil, err
-	}
-	return &summary, nil
-}
