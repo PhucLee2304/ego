@@ -44,10 +44,7 @@ func main() {
 		}
 	}()
 
-	appConfig, err := knowledgeConfig.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
-	}
+	appConfig := knowledgeConfig.LoadAppConfig()
 
 	db, err := database.Connect(appConfig)
 	if err != nil {

@@ -35,10 +35,7 @@ const (
 func main() {
 	logger.Setup(logger.LoggerConfig{Level: "debug", Pretty: true})
 
-	appConfig, err := config.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load app config")
-	}
+	appConfig := config.LoadAppConfig()
 
 	db, err := database.Connect(appConfig)
 	if err != nil {

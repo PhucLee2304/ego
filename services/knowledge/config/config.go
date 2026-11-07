@@ -1,10 +1,11 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
+
+	"ego/platform/logger"
 )
 
 type AppConfig struct {
@@ -27,55 +28,45 @@ type AppConfig struct {
 	SeedUploadRetries int
 }
 
-func LoadAppConfig() (*AppConfig, error) {
+func LoadAppConfig() *AppConfig {
 	config := &AppConfig{
-		Port:     getEnv("APP_PORT", "8080"),
-		Mode:     getEnv("APP_MODE", "development"),
-		GRPCPort: getEnv("GRPC_PORT", "50055"),
+		Port:     mustEnv("APP_PORT"),
+		Mode:     mustEnv("APP_MODE"),
+		GRPCPort: mustEnv("GRPC_PORT"),
 
-		DBHost:     getEnv("DB_HOST", "knowledge-db"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", ""),
-		DBName:     getEnv("DB_NAME", "knowledgedb"),
+		DBHost:     mustEnv("DB_HOST"),
+		DBPort:     mustEnv("DB_PORT"),
+		DBUser:     mustEnv("DB_USER"),
+		DBPassword: mustEnv("DB_PASSWORD"),
+		DBName:     mustEnv("DB_NAME"),
 
-		IdentityServiceAddr: getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
-		StorageServiceAddr:  getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
+		IdentityServiceAddr: mustEnv("IDENTITY_SERVICE_ADDR"),
+		StorageServiceAddr:  mustEnv("STORAGE_SERVICE_ADDR"),
 
-		SeedDir:           getEnv("SEED_DIR", "/app/services/knowledge/seed/topics"),
-		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
-		SeedUploadRetries: getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
-	}
-
-	if config.DBPassword == "" {
-		return nil, errors.New("[CONFIG] DB_PASSWORD is not set")
+		SeedDir:           mustEnv("SEED_DIR"),
+		SeedUploadWorkers: parseInt("SEED_UPLOAD_WORKERS"),
+		SeedUploadRetries: parseInt("SEED_UPLOAD_RETRIES"),
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 
-	return config, nil
+	return config
 }
 
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func mustEnv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		logger.Log.Fatal().Str("key", key).Msg("[CONFIG] Required environment variable is not set")
 	}
-	return fallback
+	return value
 }
 
-func getIntEnv(key string, fallback, max int) int {
-	value, exists := os.LookupEnv(key)
-	if !exists {
-		return fallback
+func parseInt(key string) int {
+	value := mustEnv(key)
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid integer format")
 	}
-
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	if parsed > max {
-		return max
-	}
-	return parsed
+	return n
 }

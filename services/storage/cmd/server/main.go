@@ -50,10 +50,7 @@ func main() {
 	}()
 
 	ctx := context.Background()
-	appConfig, err := storageConfig.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
-	}
+	appConfig := storageConfig.LoadAppConfig()
 
 	minioClient, err := minio.NewS3Client(appConfig)
 	if err != nil {

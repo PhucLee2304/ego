@@ -57,10 +57,7 @@ func main() {
 	appCtx, stopApp := context.WithCancel(ctx)
 	defer stopApp()
 
-	appConfig, err := learningConfig.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
-	}
+	appConfig := learningConfig.LoadAppConfig()
 
 	db, err := database.Connect(appConfig)
 	if err != nil {

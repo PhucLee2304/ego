@@ -27,10 +27,7 @@ func main() {
 
 	ctx := context.Background()
 
-	appConfig, err := config.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[SEED] Failed to load config")
-	}
+	appConfig := config.LoadAppConfig()
 
 	db, err := database.Connect(appConfig)
 	if err != nil {

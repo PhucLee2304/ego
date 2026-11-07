@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"ego/platform/logger"
 )
 
 type AppConfig struct {
@@ -24,54 +26,48 @@ type AppConfig struct {
 	R2Expiry         time.Duration
 }
 
-func LoadAppConfig() (*AppConfig, error) {
+func LoadAppConfig() *AppConfig {
 	config := &AppConfig{
-		Port:                getEnv("APP_PORT", "8082"),
-		Mode:                getEnv("APP_MODE", "development"),
-		GRPCPort:            getEnv("GRPC_PORT", "50054"),
-		IdentityServiceAddr: getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
-		R2Region:            getEnv("R2_REGION", "auto"),
-		R2Endpoint:          getEnv("R2_ENDPOINT", "http://localhost:9002"),
-		R2Host:              getEnv("R2_HOST", "localhost:9002"),
-		R2PublicEndpoint:    getEnv("R2_PUBLIC_ENDPOINT", ""),
-		R2AccessKey:         getEnv("R2_ACCESS_KEY", "root"),
-		R2SecretKey:         getEnv("R2_SECRET_KEY", "root"),
-		R2Bucket:            getEnv("R2_BUCKET", "ego"),
-		R2PublicRead:        parseBool("R2_PUBLIC_READ", false),
-		R2Expiry:            parseDuration("R2_EXPIRY", "15m"),
+		Port:                mustEnv("APP_PORT"),
+		Mode:                mustEnv("APP_MODE"),
+		GRPCPort:            mustEnv("GRPC_PORT"),
+		IdentityServiceAddr: mustEnv("IDENTITY_SERVICE_ADDR"),
+		R2Region:            mustEnv("R2_REGION"),
+		R2Endpoint:          mustEnv("R2_ENDPOINT"),
+		R2Host:              mustEnv("R2_HOST"),
+		R2PublicEndpoint:    mustEnv("R2_PUBLIC_ENDPOINT"),
+		R2AccessKey:         mustEnv("R2_ACCESS_KEY"),
+		R2SecretKey:         mustEnv("R2_SECRET_KEY"),
+		R2Bucket:            mustEnv("R2_BUCKET"),
+		R2PublicRead:        parseBool("R2_PUBLIC_READ"),
+		R2Expiry:            parseDuration("R2_EXPIRY"),
 	}
 
-	return config, nil
+	return config
 }
 
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func mustEnv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		logger.Log.Fatal().Str("key", key).Msg("[CONFIG] Required environment variable is not set")
 	}
-	return fallback
+	return value
 }
 
-func parseBool(key string, fallback bool) bool {
-	value, exists := os.LookupEnv(key)
-	if !exists {
-		return fallback
-	}
-
-	parsed, err := strconv.ParseBool(value)
+func parseDuration(key string) time.Duration {
+	value := mustEnv(key)
+	d, err := time.ParseDuration(value)
 	if err != nil {
-		return fallback
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid duration format")
 	}
-	return parsed
+	return d
 }
 
-func parseDuration(key, fallback string) time.Duration {
-	if value, exists := os.LookupEnv(key); exists {
-		if d, err := time.ParseDuration(value); err == nil {
-			return d
-		}
+func parseBool(key string) bool {
+	value := mustEnv(key)
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid boolean format")
 	}
-	if d, err := time.ParseDuration(fallback); err == nil {
-		return d
-	}
-	return 0
+	return b
 }

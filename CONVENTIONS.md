@@ -13,7 +13,7 @@ Chuẩn gốc là `services/identity`. Gặp chỗ nào chưa rõ thì mở iden
 ```
 services/<svc>/
 ├── cmd/server/main.go        # wiring bằng tay, không chứa logic nghiệp vụ
-├── config/config.go          # AppConfig + LoadAppConfig, getEnv(key, fallback)
+├── config/config.go          # AppConfig + LoadAppConfig, mustEnv(key)
 ├── database/connection.go    # Connect + Migrate
 ├── internal/
 │   ├── model/                # GORM struct + hằng enum
@@ -147,9 +147,9 @@ Mẫu: `RegisterRoutes` trong `services/identity/internal/handler/handler.go`, `
 
 ## 9. Config, khởi động, log
 
-- `config.LoadAppConfig()` đọc env bằng `getEnv(key, fallback)`. Fallback là giá trị docker network (`identity:50052`…).
-- Secret (JWT, mật khẩu, API key) không có fallback.
-- Config dùng chung nhiều service đặt ở `platform/config`.
+- `config.LoadAppConfig()` đọc env bằng `mustEnv(key)`, không có fallback: `.env` của service phải khai báo đủ mọi key. Thiếu hoặc rỗng thì log `[CONFIG]` và dừng service.
+- Giá trị không phải chuỗi đọc qua `parseDuration`/`parseInt`/`parseBool` (trên `mustEnv`); sai định dạng cũng dừng service. Các helper này đặt riêng trong `config.go` của từng service.
+- Mỗi service tự đọc env của mình, kể cả key nhiều service cùng dùng (vd `FIREBASE_CREDENTIALS_PATH`); không có package config dùng chung.
 - Thứ tự trong `main.go` (hoặc `app.Run`):
   1. logger
   2. config

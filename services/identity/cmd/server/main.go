@@ -4,7 +4,6 @@ import (
 	"context"
 	identityClient "ego/api/gen/go/identity"
 	storageClient "ego/api/gen/go/storage"
-	platformConfig "ego/platform/config"
 	"ego/platform/firebase"
 	"ego/platform/jwt"
 	"ego/platform/logger"
@@ -53,21 +52,11 @@ func main() {
 
 	ctx := context.Background()
 
-	appConfig, err := identityConfig.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
-	}
+	appConfig := identityConfig.LoadAppConfig()
 
-	jwtConfig, err := identityConfig.LoadJwtConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load JWT config")
-	}
+	jwtConfig := identityConfig.LoadJwtConfig()
 
-	firebaseConfig, err := platformConfig.LoadFirebaseConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load Firebase config")
-	}
-	firebaseClient, err := firebase.NewClient(ctx, firebaseConfig)
+	firebaseClient, err := firebase.NewClient(ctx, appConfig.FirebaseCredentialsPath)
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to initialize Firebase app")
 	}
