@@ -12,9 +12,11 @@ const (
 
 type PostModerationAudit struct {
 	ID          uint             `gorm:"primaryKey"`
-	PostID      uint             `gorm:"not null;index"`
 	AdminUserID string           `gorm:"type:text;not null;index"`
 	Action      ModerationAction `gorm:"type:text;not null"`
 	Reason      string           `gorm:"type:text;not null"`
 	CreatedAt   time.Time
+
+	PostID uint  `gorm:"not null;index"`
+	Post   *Post `gorm:"foreignKey:PostID;references:ID"`
 }

@@ -9,7 +9,7 @@ import (
 )
 
 // GetAdminStats trả số liệu cộng đồng cho màn thống kê admin, kèm tên top tác giả.
-func (s *Service) GetAdminStats(ctx context.Context, query httpx.StatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError) {
+func (s *service) GetAdminStats(ctx context.Context, query dto.AdminStatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError) {
 	resp, err := s.repo.GetAdminStats(ctx, query.Range())
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to load post stats")
@@ -21,7 +21,7 @@ func (s *Service) GetAdminStats(ctx context.Context, query httpx.StatsQuery) (*d
 	for i, author := range resp.TopAuthors {
 		ids[i] = author.UserID
 	}
-	usersResp, err := s.identity.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
+	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
 	if err != nil {
 		return nil, httpx.FromError(err, "[ERROR] Failed to load post stats")
 	}

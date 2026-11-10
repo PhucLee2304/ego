@@ -54,7 +54,7 @@ WHERE p.deleted_at IS NULL AND p.scope = 'COMMUNITY' AND p.created_at >= @from A
 GROUP BY p.author_id ORDER BY posts DESC, likes DESC, p.author_id LIMIT 5`
 
 // GetAdminStats chạy các câu đếm cho màn thống kê admin; User của top tác giả do service điền.
-func (r *Repository) GetAdminStats(ctx context.Context, rng httpx.StatsRange) (*dto.AdminStatsResponse, error) {
+func (r *repository) GetAdminStats(ctx context.Context, rng httpx.StatsRange) (*dto.AdminStatsResponse, error) {
 	db := r.db.WithContext(ctx)
 	args := map[string]any{
 		"from": rng.From, "to": rng.To, "prev_from": rng.PrevFrom, "prev_to": rng.PrevTo, "tz": httpx.StatsTimeZone,

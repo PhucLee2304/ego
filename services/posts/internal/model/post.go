@@ -2,16 +2,6 @@ package model
 
 import "gorm.io/gorm"
 
-type PostScope string
-type PostStatus string
-
-const (
-	PostScopeCommunity  PostScope  = "COMMUNITY"
-	PostScopeClassroom  PostScope  = "CLASSROOM"
-	PostStatusPublished PostStatus = "PUBLISHED"
-	PostStatusHidden    PostStatus = "HIDDEN"
-)
-
 type Post struct {
 	gorm.Model
 	AuthorID      string     `gorm:"type:text;not null;index"`
@@ -21,4 +11,20 @@ type Post struct {
 	Status        PostStatus `gorm:"type:text;not null;default:PUBLISHED;index"`
 	Pinned        bool       `gorm:"not null;default:false;index"`
 	AllowComments bool       `gorm:"not null;default:true"`
+
+	Attachments []*PostAttachment `gorm:"foreignKey:PostID;references:ID"`
 }
+
+type PostScope string
+
+const (
+	PostScopeCommunity PostScope = "COMMUNITY"
+	PostScopeClassroom PostScope = "CLASSROOM"
+)
+
+type PostStatus string
+
+const (
+	PostStatusPublished PostStatus = "PUBLISHED"
+	PostStatusHidden    PostStatus = "HIDDEN"
+)

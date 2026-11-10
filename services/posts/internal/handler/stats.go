@@ -22,7 +22,7 @@ import (
 // @Failure      403 {object} httpx.HTTPError
 // @Failure      500 {object} httpx.HTTPError
 // @Router       /admin/stats [get]
-func (h *Handler) GetAdminStats(w http.ResponseWriter, r *http.Request) {
+func (h *handler) GetAdminStats(w http.ResponseWriter, r *http.Request) {
 	var query dto.AdminStatsQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))

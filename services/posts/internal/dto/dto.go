@@ -27,7 +27,7 @@ type ModerationPostsQuery struct {
 }
 
 type CreatePostRequest struct {
-	Content       string `json:"content"`
+	Content       string `json:"content" validate:"omitempty,notblank"`
 	AllowComments *bool  `json:"allowComments,omitempty"`
 	AttachmentIDs []uint `json:"attachmentIds,omitempty" validate:"dive,gt=0"`
 }
@@ -37,7 +37,7 @@ func (request CreatePostRequest) CommentsAllowed() bool {
 }
 
 type UpdatePostRequest struct {
-	Content       string  `json:"content"`
+	Content       *string `json:"content,omitempty"`
 	AllowComments *bool   `json:"allowComments,omitempty"`
 	AttachmentIDs *[]uint `json:"attachmentIds,omitempty" validate:"omitempty,dive,gt=0"`
 }
@@ -46,9 +46,9 @@ type CreateUploadIntentRequest struct {
 	OriginalName string `json:"originalName" validate:"required,notblank"`
 	ContentType  string `json:"contentType" validate:"required,notblank"`
 	Size         int64  `json:"size" validate:"required,gt=0"`
-	// ClassroomID có khi file đính kèm cho bài viết trong lớp (lưu ở posts/classrooms), bỏ trống là
-	// bài viết cộng đồng (posts/community).
-	ClassroomID *uint `json:"classroomId,omitempty"`
+	// ClassroomID có khi file đính kèm cho bài viết trong lớp (lưu ở posts/classrooms, chỉ giáo viên của lớp),
+	// bỏ trống là bài viết cộng đồng (posts/community).
+	ClassroomID *uint `json:"classroomId,omitempty" validate:"omitempty,gt=0"`
 }
 
 type UploadLimitsResponse struct {
@@ -120,14 +120,6 @@ func ToAttachmentResponse(attachment *model.PostAttachment) *AttachmentResponse 
 	}
 }
 
-func ToAttachmentResponses(attachments []*model.PostAttachment) []*AttachmentResponse {
-	responses := make([]*AttachmentResponse, len(attachments))
-	for index, attachment := range attachments {
-		responses[index] = ToAttachmentResponse(attachment)
-	}
-	return responses
-}
-
 type CreateCommentRequest struct {
 	Content          string `json:"content" validate:"required,notblank"`
 	ParentID         *uint  `json:"parentId,omitempty" validate:"omitempty,gt=0"`
@@ -136,6 +128,10 @@ type CreateCommentRequest struct {
 
 type ModerationRequest struct {
 	Reason string `json:"reason" validate:"required,notblank"`
+}
+
+type ModerationQuery struct {
+	Reason string `schema:"reason" validate:"required,notblank"`
 }
 
 type UserInfo struct {
@@ -173,14 +169,53 @@ type PostsResponse struct {
 	Total     int64           `json:"total"`
 }
 
-func ToPostResponse(post *model.Post, userID string, teacher bool, likeCount, commentCount int64, liked bool, attachments []*AttachmentResponse) *PostResponse {
-	return &PostResponse{
-		ID: post.ID, AuthorID: post.AuthorID, Scope: post.Scope, ClassroomID: post.ClassroomID,
-		Content: post.Content, Status: post.Status, Pinned: post.Pinned,
-		AllowComments: post.AllowComments, LikeCount: likeCount, CommentCount: commentCount,
-		Liked: liked, CanEdit: post.AuthorID == userID, CanDelete: post.AuthorID == userID,
-		CanPin: teacher, CreatedAt: post.CreatedAt, UpdatedAt: post.UpdatedAt, Attachments: attachments,
+// PostStats là số like, số comment và trạng thái đã like của người xem cho một bài (repository đếm gộp).
+type PostStats struct {
+	PostID       uint
+	LikeCount    int64
+	CommentCount int64
+	Liked        bool
+}
+
+// ToPostResponses ghép bài với số liệu, đính kèm và tác giả; bài thiếu số liệu thì tính là 0.
+func ToPostResponses(posts []*model.Post, userID string, teacher bool, stats map[uint]*PostStats, attachments []*model.PostAttachment, users []*identityClient.UserInfo) []*PostResponse {
+	attachmentsByPost := make(map[uint][]*AttachmentResponse, len(posts))
+	for _, attachment := range attachments {
+		attachmentsByPost[*attachment.PostID] = append(attachmentsByPost[*attachment.PostID], ToAttachmentResponse(attachment))
 	}
+	usersByID := ToUserInfoMap(users)
+	responses := make([]*PostResponse, len(posts))
+	for i, post := range posts {
+		stat := stats[post.ID]
+		if stat == nil {
+			stat = &PostStats{}
+		}
+		postAttachments := attachmentsByPost[post.ID]
+		if postAttachments == nil {
+			postAttachments = []*AttachmentResponse{}
+		}
+		responses[i] = &PostResponse{
+			ID:            post.ID,
+			AuthorID:      post.AuthorID,
+			Author:        usersByID[post.AuthorID],
+			Scope:         post.Scope,
+			ClassroomID:   post.ClassroomID,
+			Content:       post.Content,
+			Status:        post.Status,
+			Pinned:        post.Pinned,
+			AllowComments: post.AllowComments,
+			LikeCount:     stat.LikeCount,
+			CommentCount:  stat.CommentCount,
+			Liked:         stat.Liked,
+			CanEdit:       post.AuthorID == userID,
+			CanDelete:     post.AuthorID == userID,
+			CanPin:        teacher,
+			CreatedAt:     post.CreatedAt,
+			UpdatedAt:     post.UpdatedAt,
+			Attachments:   postAttachments,
+		}
+	}
+	return responses
 }
 
 func ToPostsResponse(posts []*PostResponse, total int64, page, pageSize int) *PostsResponse {
@@ -205,13 +240,34 @@ type CommentResponse struct {
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
-func ToCommentResponse(comment *model.PostComment, userID string, teacher bool, likeCount int64, liked bool) *CommentResponse {
-	return &CommentResponse{
-		ID: comment.ID, PostID: comment.PostID, UserID: comment.UserID, Content: comment.Content,
-		ParentID: comment.ParentID, ReplyToUserID: comment.ReplyToUserID,
-		LikeCount: likeCount, Liked: liked, CanEdit: comment.UserID == userID,
-		CanDelete: comment.UserID == userID || teacher, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,
+// CommentStats là số like, số reply (chỉ comment gốc mới có) và trạng thái đã like của người xem (repository đếm gộp).
+type CommentStats struct {
+	CommentID  uint
+	LikeCount  int64
+	ReplyCount int64
+	Liked      bool
+}
+
+// ToCommentResponses ghép comment với số liệu, người viết và người được reply; thiếu số liệu thì tính là 0.
+func ToCommentResponses(comments []*model.PostComment, userID string, teacher bool, stats map[uint]*CommentStats, users []*identityClient.UserInfo) []*CommentResponse {
+	usersByID := ToUserInfoMap(users)
+	responses := make([]*CommentResponse, len(comments))
+	for i, comment := range comments {
+		stat := stats[comment.ID]
+		if stat == nil {
+			stat = &CommentStats{}
+		}
+		responses[i] = &CommentResponse{
+			ID: comment.ID, PostID: comment.PostID, UserID: comment.UserID, User: usersByID[comment.UserID], Content: comment.Content,
+			ParentID: comment.ParentID, ReplyToUserID: comment.ReplyToUserID,
+			LikeCount: stat.LikeCount, ReplyCount: stat.ReplyCount, Liked: stat.Liked, CanEdit: comment.UserID == userID,
+			CanDelete: comment.UserID == userID || teacher, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,
+		}
+		if comment.ReplyToUserID != nil {
+			responses[i].ReplyToUser = usersByID[*comment.ReplyToUserID]
+		}
 	}
+	return responses
 }
 
 type CommentsResponse struct {
