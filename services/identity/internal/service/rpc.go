@@ -4,13 +4,28 @@ import (
 	"context"
 	"ego/services/identity/internal/model"
 	"errors"
+	"fmt"
 
 	"gorm.io/gorm"
 )
 
 // **Reviewed**
 func (s *service) ValidateToken(ctx context.Context, tokenString string) (string, error) {
-	return s.jwtManager.Validate(ctx, tokenString)
+	userID, err := s.jwtManager.Validate(ctx, tokenString)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidToken, err)
+	}
+	user, err := s.repo.GetByID(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", ErrUserNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if user.BlockedAt != nil {
+		return "", ErrUserBlocked
+	}
+	return userID, nil
 }
 
 // **Reviewed**

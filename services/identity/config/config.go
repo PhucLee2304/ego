@@ -20,7 +20,9 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	StorageServiceAddr string
+	StorageServiceAddr       string
+	NotificationsServiceAddr string
+	LearningServiceAddr      string
 
 	FirebaseCredentialsPath string
 }
@@ -37,7 +39,9 @@ func LoadAppConfig() *AppConfig {
 		DBPassword: mustEnv("DB_PASSWORD"),
 		DBName:     mustEnv("DB_NAME"),
 
-		StorageServiceAddr: mustEnv("STORAGE_SERVICE_ADDR"),
+		StorageServiceAddr:       mustEnv("STORAGE_SERVICE_ADDR"),
+		NotificationsServiceAddr: mustEnv("NOTIFICATIONS_SERVICE_ADDR"),
+		LearningServiceAddr:      mustEnv("LEARNING_SERVICE_ADDR"),
 
 		FirebaseCredentialsPath: mustEnv("FIREBASE_CREDENTIALS_PATH"),
 	}

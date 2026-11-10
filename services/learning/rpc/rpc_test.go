@@ -67,7 +67,7 @@ func TestGetClassroomPostAccess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp, err := New(tt.svc).GetClassroomPostAccess(context.Background(), &learningClient.GetClassroomPostAccessRequest{ClassroomId: 7, UserId: tt.userID})
+			resp, err := New(tt.svc, nil).GetClassroomPostAccess(context.Background(), &learningClient.GetClassroomPostAccessRequest{ClassroomId: 7, UserId: tt.userID})
 			switch {
 			case tt.code != codes.OK:
 				if got := status.Code(err); got != tt.code {

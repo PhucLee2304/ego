@@ -43,10 +43,11 @@ func (s *server) GetUsersInfo(ctx context.Context, req *identityClient.GetUsersI
 			avatar = *user.Avatar
 		}
 		res.Users[i] = &identityClient.UserInfo{
-			Id:     strconv.Itoa(int(user.ID)),
-			Email:  user.Email,
-			Name:   user.Name,
-			Avatar: avatar,
+			Id:      strconv.Itoa(int(user.ID)),
+			Email:   user.Email,
+			Name:    user.Name,
+			Avatar:  avatar,
+			Blocked: user.BlockedAt != nil,
 		}
 	}
 

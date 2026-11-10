@@ -152,7 +152,9 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(platformRpc.ErrorInterceptor()))
-	learningClient.RegisterLearningServiceServer(grpcServer, learningRpc.New(svc))
+	learningClient.RegisterLearningServiceServer(grpcServer, learningRpc.New(svc, func(userID string) int {
+		return examsSocket.DisconnectUser(userID) + classroomsSocket.DisconnectUser(userID)
+	}))
 
 	logger.Log.Info().Str("LEARNING_GRPC_PORT", appConfig.GRPCPort).Msg("[STARTUP] Starting learning gRPC server")
 	go func() {

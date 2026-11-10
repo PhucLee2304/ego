@@ -105,6 +105,32 @@ func (s *Server) BroadcastToUser(userID string, payload any) {
 	}
 }
 
+// CloseCodeUserBlocked là close code gửi cho client khi user bị admin khoá. Trình duyệt không cho đọc
+// mã lỗi HTTP (401) của bước bắt tay WebSocket, nên client chỉ phân biệt được "bị khoá" với "mất mạng"
+// qua close code này: nhận được thì đăng xuất ngay thay vì hiện Offline và thử kết nối lại.
+const CloseCodeUserBlocked = 4003
+
+// DisconnectUser đóng mọi kết nối WebSocket đang mở của một user, dùng khi user bị khoá:
+// Token chỉ được kiểm tra lúc kết nối nên kết nối cũ phải bị đóng chủ động. Mỗi kết nối nhận close
+// frame CloseCodeUserBlocked trước khi bị đóng. Trả số kết nối đã đóng.
+func (s *Server) DisconnectUser(userID string) int {
+	s.mu.RLock()
+	clients := make([]*Client, 0, len(s.clients[userID]))
+	for client := range s.clients[userID] {
+		clients = append(clients, client)
+	}
+	s.mu.RUnlock()
+
+	for _, client := range clients {
+		// WriteControl được gọi song song với writePump an toàn (gorilla cho phép); lỗi ghi bỏ qua vì
+		// kết nối vẫn bị đóng ngay sau đó.
+		_ = client.conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(CloseCodeUserBlocked, "user blocked"), time.Now().Add(s.writeWait))
+		client.Close()
+	}
+	return len(clients)
+}
+
 func (s *Server) register(client *Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -23,6 +23,9 @@ import (
 // ErrClassroomNotFound là lỗi nội bộ (rpc) khi không có lớp.
 var ErrClassroomNotFound = errors.New("classroom not found")
 
+// ErrInvalidUserID: rpc gọi thiếu user id.
+var ErrInvalidUserID = errors.New("[LEARNING] User id is required")
+
 // errClassroomServiceFailed là message lỗi 500 mặc định của các method HTTP phía classrooms (giữ nguyên từ HTTPService cũ).
 const errClassroomServiceFailed = "[ERROR] Classroom service failed"
 
@@ -146,6 +149,7 @@ type Service interface {
 	EndRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError)
 	GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, *httpx.HTTPError)
 	ProcessRoomLifecycle(ctx context.Context) (int, error)
+	RemoveUserFromLiveRooms(ctx context.Context, userID string) (removed, ended int, err error)
 
 	// Assignment
 	CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, *httpx.HTTPError)

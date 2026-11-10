@@ -75,6 +75,9 @@ func (s *service) GetList(ctx context.Context, query dto.UsersQuery) ([]*dto.Use
 //   - user không phải CLIENT (ví dụ ADMIN): 409, không được khoá hay mở khoá;
 //   - khoá tài khoản đang bị khoá: 409 "already blocked";
 //   - mở khoá tài khoản không bị khoá: 409 "not blocked";
+//   - khoá thành công: ghi event UserBlockedOutbox cùng transaction với blocked_at; worker sẽ báo
+//     notifications và learning (xoá token push, đá khỏi phòng live, đóng WebSocket) và tự thử lại khi lỗi;
+//   - mở khoá thành công: huỷ event khoá còn chờ xử lý của user.
 //
 // **Reviewed**
 func (s *service) SetBlocked(ctx context.Context, userID string, blocked bool) (*dto.User, *httpx.HTTPError) {
@@ -101,6 +104,17 @@ func (s *service) SetBlocked(ctx context.Context, userID string, blocked bool) (
 			blockedAt = &now
 		}
 		user, err = repo.UpdateMe(ctx, userID, map[string]any{"blocked_at": blockedAt})
+		if err != nil {
+			return httpx.FromError(err, "[ERROR] Failed to update user")
+		}
+		if blocked {
+			err = repo.CreateUserBlockedOutbox(ctx, &model.UserBlockedOutbox{
+				UserID:        userID,
+				NextAttemptAt: *blockedAt,
+			})
+		} else {
+			err = repo.CancelUserBlockedOutbox(ctx, userID, time.Now())
+		}
 		if err != nil {
 			return httpx.FromError(err, "[ERROR] Failed to update user")
 		}

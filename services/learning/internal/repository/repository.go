@@ -105,6 +105,7 @@ type Repository interface {
 	DeleteRoom(ctx context.Context, room *model.Room) error
 	HasLiveRoomByClassroom(ctx context.Context, classroomID uint) (bool, error)
 	GetLiveRoomsByClassroom(ctx context.Context, classroomID uint) ([]*model.Room, error)
+	GetLiveRoomsByUser(ctx context.Context, userID string) ([]*model.Room, error)
 	GetRoomsForLifecycle(ctx context.Context, now time.Time) ([]*model.Room, error)
 
 	// Participant

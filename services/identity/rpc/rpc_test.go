@@ -43,7 +43,7 @@ func (f *fakeService) SearchUserIDsByName(context.Context, string) ([]string, er
 }
 
 func TestValidateTokenReturnsInvalidResponseWithoutRPCError(t *testing.T) {
-	srv := New(&fakeService{validateErr: errors.New("invalid token")})
+	srv := New(&fakeService{validateErr: service.ErrInvalidToken})
 
 	response, err := srv.ValidateToken(context.Background(), &identityClient.ValidateTokenRequest{Token: "bad-token"})
 	if err != nil {
@@ -129,5 +129,17 @@ func TestSearchUserIDsByNameMapsServiceResponse(t *testing.T) {
 	}
 	if len(response.Ids) != 2 || response.Ids[0] != "3" || response.Ids[1] != "5" {
 		t.Fatalf("unexpected IDs: %#v", response.Ids)
+	}
+}
+
+func TestValidateTokenMapsErrors(t *testing.T) {
+	for _, err := range []error{service.ErrInvalidToken, service.ErrUserNotFound, service.ErrUserBlocked} {
+		resp, rpcErr := New(&fakeService{validateErr: err}).ValidateToken(context.Background(), &identityClient.ValidateTokenRequest{Token: "t"})
+		if rpcErr != nil || resp.GetIsValid() {
+			t.Fatalf("%v: resp=%v err=%v, want invalid without rpc error", err, resp, rpcErr)
+		}
+	}
+	if _, rpcErr := New(&fakeService{validateErr: errors.New("db down")}).ValidateToken(context.Background(), &identityClient.ValidateTokenRequest{Token: "t"}); rpcErr == nil {
+		t.Fatal("expected db error to be returned as rpc error")
 	}
 }

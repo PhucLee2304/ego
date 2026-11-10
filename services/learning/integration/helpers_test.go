@@ -17,13 +17,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// testIdentityClient cài service.IdentityClient: tên user = id, tìm "teacher" ra teacher-1.
+// testIdentityClient cài service.IdentityClient: tên user = id, tìm "teacher" ra teacher-1,
+// id bắt đầu bằng "blocked" là user bị admin khoá.
 type testIdentityClient struct{}
 
 func (testIdentityClient) GetUsersInfo(_ context.Context, req *identityClient.GetUsersInfoRequest, _ ...grpc.CallOption) (*identityClient.GetUsersInfoResponse, error) {
 	users := make([]*identityClient.UserInfo, len(req.Ids))
 	for i, id := range req.Ids {
-		users[i] = &identityClient.UserInfo{Id: id, Email: id + "@example.com", Name: id}
+		users[i] = &identityClient.UserInfo{Id: id, Email: id + "@example.com", Name: id, Blocked: strings.HasPrefix(id, "blocked")}
 	}
 	return &identityClient.GetUsersInfoResponse{Users: users}, nil
 }

@@ -36,14 +36,14 @@ func testService(t *testing.T) (service.Service, *gorm.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrator().DropTable(&model.User{}); err != nil {
+	if err := db.Migrator().DropTable(&model.User{}, &model.UserBlockedOutbox{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
 	// GetRole, GetUsersInfo and SearchUserIDsByName only use the repository.
-	return service.New(nil, nil, repository.NewRepository(db), nil), db
+	return service.New(nil, nil, repository.NewRepository(db), nil, nil, nil), db
 }
 
 func createUser(t *testing.T, db *gorm.DB, email, name string, role model.RoleName) string {

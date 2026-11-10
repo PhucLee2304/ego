@@ -28,6 +28,7 @@ func Migrate(db *gorm.DB) error {
 
 	err := db.AutoMigrate(
 		&model.User{},
+		&model.UserBlockedOutbox{},
 	)
 	if err != nil {
 		return err
