@@ -200,8 +200,6 @@ services:
         condition: service_healthy
       notifications:
         condition: service_healthy
-      livekit:
-        condition: service_healthy
 
   learning-seed:
     build:
@@ -243,9 +241,14 @@ services:
       timeout: 5s
       retries: 5
 
+  # LiveKit tự host, hiện không dùng (learning dùng LiveKit Cloud)
+  # Nằm trong profile riêng nên không được up cùng các service khác
+  # Cần thì chạy: docker compose --profile livekit up -d livekit
   livekit:
     image: livekit/livekit-server:v1.9.10
     container_name: ego-livekit
+    profiles:
+      - livekit
     restart: unless-stopped
     environment:
       LIVEKIT_CONFIG: |
