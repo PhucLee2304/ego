@@ -11,6 +11,9 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o server services/knowledge/cmd/ser
 FROM builder AS seed-topics-builder
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o seed_topics ./services/knowledge/cmd/seed_topics
 
+FROM builder AS seed-offline-builder
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o seed_offline ./services/knowledge/cmd/seed
+
 FROM alpine:3.19 AS server
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
@@ -22,3 +25,9 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=seed-topics-builder /app/seed_topics .
 CMD ["./seed_topics"]
+
+FROM alpine:3.19 AS seed-offline
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=seed-offline-builder /app/seed_offline .
+CMD ["./seed_offline"]

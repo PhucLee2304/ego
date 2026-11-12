@@ -36,13 +36,17 @@ func New(s service.Service) Handler {
 }
 
 func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
-	// Auth
+	// Auth (hỗ trợ cả prefix /auth/ và direct qua legacy gateway)
 	mux.HandleFunc("POST /auth/login", h.Login)
 	mux.HandleFunc("POST /auth/refresh", h.Refresh)
+	mux.HandleFunc("POST /login", h.Login)
+	mux.HandleFunc("POST /refresh", h.Refresh)
 
-	// User
+	// User (hỗ trợ cả /users/me và /me khi gọi qua nginx location /users/)
 	mux.HandleFunc("GET /users/me", mw.Handle(h.GetMe))
 	mux.HandleFunc("PATCH /users/me", mw.Handle(h.UpdateMe))
+	mux.HandleFunc("GET /me", mw.Handle(h.GetMe))
+	mux.HandleFunc("PATCH /me", mw.Handle(h.UpdateMe))
 
 	// User (admin)
 	mux.HandleFunc("GET /users", mw.Handle(rm.RequireRole("admin")(h.GetList)))

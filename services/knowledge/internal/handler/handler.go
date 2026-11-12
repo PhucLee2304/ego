@@ -21,10 +21,23 @@ type Handler interface {
 	GetWords(w http.ResponseWriter, r *http.Request)
 	GetWordByID(w http.ResponseWriter, r *http.Request)
 
-	// Flashcard
-	GetFlashcards(w http.ResponseWriter, r *http.Request)
-	CreateFlashcard(w http.ResponseWriter, r *http.Request)
+	// Flashcard Deck
+	CreateDeck(w http.ResponseWriter, r *http.Request)
+	GetDecks(w http.ResponseWriter, r *http.Request)
+	GetDeckByID(w http.ResponseWriter, r *http.Request)
+	UpdateDeck(w http.ResponseWriter, r *http.Request)
+	DeleteDeck(w http.ResponseWriter, r *http.Request)
+
+	// Flashcard Card & Study
+	SaveWordToDecks(w http.ResponseWriter, r *http.Request)
+	GetWordSaveStatus(w http.ResponseWriter, r *http.Request)
+	GetCardsByDeck(w http.ResponseWriter, r *http.Request)
+	UpdateFlashcardNote(w http.ResponseWriter, r *http.Request)
 	DeleteFlashcard(w http.ResponseWriter, r *http.Request)
+	GetStudyCards(w http.ResponseWriter, r *http.Request)
+	GetAllDueCards(w http.ResponseWriter, r *http.Request)
+	ReviewFlashcard(w http.ResponseWriter, r *http.Request)
+	GetFlashcardUserStats(w http.ResponseWriter, r *http.Request)
 
 	// Theme
 	GetThemes(w http.ResponseWriter, r *http.Request)
@@ -58,10 +71,23 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("GET /words", mw.Handle(h.GetWords))
 	mux.HandleFunc("GET /words/{id}", mw.Handle(h.GetWordByID))
 
-	// Flashcard
-	mux.HandleFunc("GET /flashcards", mw.Handle(h.GetFlashcards))
-	mux.HandleFunc("POST /flashcards", mw.Handle(h.CreateFlashcard))
+	// Flashcard Decks
+	mux.HandleFunc("POST /flashcard-decks", mw.Handle(h.CreateDeck))
+	mux.HandleFunc("GET /flashcard-decks", mw.Handle(h.GetDecks))
+	mux.HandleFunc("GET /flashcard-decks/{id}", mw.Handle(h.GetDeckByID))
+	mux.HandleFunc("PUT /flashcard-decks/{id}", mw.Handle(h.UpdateDeck))
+	mux.HandleFunc("DELETE /flashcard-decks/{id}", mw.Handle(h.DeleteDeck))
+
+	// Flashcard Cards & Study
+	mux.HandleFunc("POST /flashcards/save-word", mw.Handle(h.SaveWordToDecks))
+	mux.HandleFunc("GET /flashcards/status", mw.Handle(h.GetWordSaveStatus))
+	mux.HandleFunc("GET /flashcard-decks/{id}/cards", mw.Handle(h.GetCardsByDeck))
+	mux.HandleFunc("PUT /flashcards/{id}/note", mw.Handle(h.UpdateFlashcardNote))
 	mux.HandleFunc("DELETE /flashcards/{id}", mw.Handle(h.DeleteFlashcard))
+	mux.HandleFunc("GET /flashcard-decks/{id}/study", mw.Handle(h.GetStudyCards))
+	mux.HandleFunc("GET /flashcards/study/due-all", mw.Handle(h.GetAllDueCards))
+	mux.HandleFunc("POST /flashcards/{id}/review", mw.Handle(h.ReviewFlashcard))
+	mux.HandleFunc("GET /flashcards/stats", mw.Handle(h.GetFlashcardUserStats))
 
 	// Theme
 	mux.HandleFunc("GET /themes", mw.Handle(h.GetThemes))
