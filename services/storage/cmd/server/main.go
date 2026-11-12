@@ -50,10 +50,7 @@ func main() {
 	}()
 
 	ctx := context.Background()
-	appConfig, err := storageConfig.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
-	}
+	appConfig := storageConfig.LoadAppConfig()
 
 	minioClient, err := minio.NewS3Client(appConfig)
 	if err != nil {
@@ -93,8 +90,8 @@ func main() {
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
-	service := service.New(minioClient)
-	handler := handler.New(service)
+	storageService := service.New(minioClient)
+	handler := handler.New(storageService)
 	handler.RegisterRoutes(api, authMiddleware)
 
 	server := &http.Server{
@@ -114,8 +111,8 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to start storage gRPC server")
 	}
 
-	rpcServer := storageRpc.New(minioClient)
-	grpcServer := grpc.NewServer()
+	rpcServer := storageRpc.New(storageService)
+	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(rpc.ErrorInterceptor()))
 	storageClient.RegisterStorageServiceServer(grpcServer, rpcServer)
 
 	logger.Log.Info().Str("STORAGE_GRPC_PORT", appConfig.GRPCPort).Msg("[STARTUP] Starting storage gRPC server")

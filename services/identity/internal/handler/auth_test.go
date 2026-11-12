@@ -17,7 +17,7 @@ func TestRefreshMalformedTokenReturnsUnauthorized(t *testing.T) {
 		AccessTokenExpiry:  time.Minute,
 		RefreshTokenExpiry: time.Hour,
 	})
-	svc := service.New(jwtManager, nil, nil, nil)
+	svc := service.New(jwtManager, nil, nil, nil, nil, nil)
 	h := New(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/refresh", bytes.NewBufferString(`{"refreshToken":"not-a-jwt"}`))

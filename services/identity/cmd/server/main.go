@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	identityClient "ego/api/gen/go/identity"
+	learningClient "ego/api/gen/go/learning"
+	notificationsClient "ego/api/gen/go/notifications"
 	storageClient "ego/api/gen/go/storage"
-	platformConfig "ego/platform/config"
 	"ego/platform/firebase"
 	"ego/platform/jwt"
 	"ego/platform/logger"
@@ -16,6 +17,7 @@ import (
 	"ego/services/identity/internal/service"
 	"ego/services/identity/internal/token"
 	identityRpc "ego/services/identity/rpc"
+	"ego/services/identity/workers"
 	"errors"
 	"fmt"
 	"net"
@@ -53,21 +55,11 @@ func main() {
 
 	ctx := context.Background()
 
-	appConfig, err := identityConfig.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
-	}
+	appConfig := identityConfig.LoadAppConfig()
 
-	jwtConfig, err := identityConfig.LoadJwtConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load JWT config")
-	}
+	jwtConfig := identityConfig.LoadJwtConfig()
 
-	firebaseConfig, err := platformConfig.LoadFirebaseConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load Firebase config")
-	}
-	firebaseClient, err := firebase.NewClient(ctx, firebaseConfig)
+	firebaseClient, err := firebase.NewClient(ctx, appConfig.FirebaseCredentialsPath)
 	if err != nil {
 		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to initialize Firebase app")
 	}
@@ -87,9 +79,23 @@ func main() {
 	defer storageConn.Close()
 	storageServiceClient := storageClient.NewStorageServiceClient(storageConn)
 
+	notificationsConn, err := grpc.NewClient(appConfig.NotificationsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to notifications service")
+	}
+	defer notificationsConn.Close()
+	notificationsServiceClient := notificationsClient.NewNotificationServiceClient(notificationsConn)
+
+	learningConn, err := grpc.NewClient(appConfig.LearningServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
+	if err != nil {
+		logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to learning service")
+	}
+	defer learningConn.Close()
+	learningServiceClient := learningClient.NewLearningServiceClient(learningConn)
+
 	jwtManager := token.NewManager(jwtConfig)
 	repo := repository.NewRepository(db)
-	svc := service.New(jwtManager, firebaseClient, repo, storageServiceClient)
+	svc := service.New(jwtManager, firebaseClient, repo, storageServiceClient, notificationsServiceClient, learningServiceClient)
 
 	authMiddleware := jwt.NewAuthMiddlewareWithValidator(svc.ValidateToken)
 	roleMiddleware := jwt.NewRoleMiddleware(svc.GetRole)
@@ -116,6 +122,10 @@ func main() {
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 	handler.New(svc).RegisterRoutes(api, authMiddleware, roleMiddleware)
+
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+	workers.StartUserBlockedOutbox(workerCtx, svc, 2*time.Second, 100)
 
 	logger.Log.Info().Str("IDENTITY_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting identity server")
 	httpServer := &http.Server{Addr: ":" + appConfig.Port, Handler: logger.Middleware(mux)}
@@ -145,6 +155,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	logger.Log.Info().Msg("[SHUTDOWN] Shutting down identity server gracefully")
+	stopWorkers()
 
 	shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

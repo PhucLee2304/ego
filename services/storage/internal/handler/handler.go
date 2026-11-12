@@ -26,7 +26,7 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 }
 
 // @Summary Generate Presigned URL for Uploading File
-// @Description Generates a presigned URL for uploading a file to storage
+// @Description Generates a presigned PUT URL for any folder in the catalog (e.g. "avatars/users", "posts/community"). The server names the file from fileName (normalized, timestamp + random suffix) and returns it.
 // @Tags Storage
 // @Accept json
 // @Produce json
@@ -34,6 +34,7 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 // @Param request body dto.PresignUploadRequest true "Request Body"
 // @Success 200 {object} dto.PresignUploadResponse
 // @Failure 400 {object} httpx.HTTPError
+// @Failure 401 {object} httpx.HTTPError
 // @Failure 500 {object} httpx.HTTPError
 // @Router /presign/upload [post]
 func (h *handler) PresignUploadURL(w http.ResponseWriter, r *http.Request) {

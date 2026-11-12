@@ -1,11 +1,12 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
+
+	"ego/platform/logger"
 )
 
 type AppConfig struct {
@@ -50,100 +51,84 @@ type AppConfig struct {
 // DefaultIntegrityConsentVersion phải khớp hằng integrityConsentVersion của FE.
 const DefaultIntegrityConsentVersion = "2026-11-v4"
 
-func LoadAppConfig() (*AppConfig, error) {
+func LoadAppConfig() *AppConfig {
 	config := &AppConfig{
-		Port:     getEnv("APP_PORT", "8080"),
-		Mode:     getEnv("APP_MODE", "development"),
-		GRPCPort: getEnv("GRPC_PORT", "50059"),
+		Port:     mustEnv("APP_PORT"),
+		Mode:     mustEnv("APP_MODE"),
+		GRPCPort: mustEnv("GRPC_PORT"),
 
-		DBHost:     getEnv("DB_HOST", "learning-db"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "postgres"),
-		DBName:     getEnv("DB_NAME", "learningdb"),
+		DBHost:     mustEnv("DB_HOST"),
+		DBPort:     mustEnv("DB_PORT"),
+		DBUser:     mustEnv("DB_USER"),
+		DBPassword: mustEnv("DB_PASSWORD"),
+		DBName:     mustEnv("DB_NAME"),
 
-		IdentityServiceAddr:      getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
-		StorageServiceAddr:       getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
-		NotificationsServiceAddr: getEnv("NOTIFICATIONS_SERVICE_ADDR", "notifications:50058"),
+		IdentityServiceAddr:      mustEnv("IDENTITY_SERVICE_ADDR"),
+		StorageServiceAddr:       mustEnv("STORAGE_SERVICE_ADDR"),
+		NotificationsServiceAddr: mustEnv("NOTIFICATIONS_SERVICE_ADDR"),
 
-		LiveKitURL:          getEnv("LIVEKIT_URL", "http://livekit:7880"),
-		LiveKitPublicURL:    getEnv("LIVEKIT_PUBLIC_URL", "ws://localhost:7880"),
-		LiveKitAPIKey:       getEnv("LIVEKIT_API_KEY", ""),
-		LiveKitAPISecret:    getEnv("LIVEKIT_API_SECRET", ""),
-		LiveKitJoinTokenTTL: getDurationEnv("LIVEKIT_JOIN_TOKEN_TTL", 5*time.Minute),
+		LiveKitURL:          mustEnv("LIVEKIT_URL"),
+		LiveKitPublicURL:    mustEnv("LIVEKIT_PUBLIC_URL"),
+		LiveKitAPIKey:       mustEnv("LIVEKIT_API_KEY"),
+		LiveKitAPISecret:    mustEnv("LIVEKIT_API_SECRET"),
+		LiveKitJoinTokenTTL: parseDuration("LIVEKIT_JOIN_TOKEN_TTL"),
 
-		MaxStudentsPerClass: getIntEnv("MAX_STUDENTS_PER_CLASS", 50, 50),
+		MaxStudentsPerClass: parseInt("MAX_STUDENTS_PER_CLASS"),
 
-		TOEICStrictFlowEnabled: getBoolEnv("TOEIC_STRICT_FLOW_ENABLED", false),
+		TOEICStrictFlowEnabled: parseBool("TOEIC_STRICT_FLOW_ENABLED"),
 		TOEICListeningGapMs: [4]int{
-			getIntEnv("TOEIC_LISTENING_GAP_PART1_MS", 5000, 60000),
-			getIntEnv("TOEIC_LISTENING_GAP_PART2_MS", 5000, 60000),
-			getIntEnv("TOEIC_LISTENING_GAP_PART3_MS", 8000, 60000),
-			getIntEnv("TOEIC_LISTENING_GAP_PART4_MS", 8000, 60000),
+			parseInt("TOEIC_LISTENING_GAP_PART1_MS"),
+			parseInt("TOEIC_LISTENING_GAP_PART2_MS"),
+			parseInt("TOEIC_LISTENING_GAP_PART3_MS"),
+			parseInt("TOEIC_LISTENING_GAP_PART4_MS"),
 		},
-		TOEICListeningGraceMs: getIntEnv("TOEIC_LISTENING_GRACE_MS", 20000, 120000),
+		TOEICListeningGraceMs: parseInt("TOEIC_LISTENING_GRACE_MS"),
 
-		IntegrityTakeoverDelayMs: getIntEnv("INTEGRITY_TAKEOVER_DELAY_MS", 30000, 600000),
-		IntegrityConsentVersion:  getEnv("INTEGRITY_CONSENT_VERSION", DefaultIntegrityConsentVersion),
+		IntegrityTakeoverDelayMs: parseInt("INTEGRITY_TAKEOVER_DELAY_MS"),
+		IntegrityConsentVersion:  mustEnv("INTEGRITY_CONSENT_VERSION"),
 
-		SeedDir:           getEnv("SEED_DIR", "services/learning/seed"),
-		SeedUploadWorkers: getIntEnv("SEED_UPLOAD_WORKERS", 8, 16),
-		SeedUploadRetries: getIntEnv("SEED_UPLOAD_RETRIES", 5, 10),
-	}
-
-	if config.LiveKitAPIKey == "" || config.LiveKitAPISecret == "" {
-		return nil, errors.New("[CONFIG] LIVEKIT_API_KEY and LIVEKIT_API_SECRET are required")
+		SeedDir:           mustEnv("SEED_DIR"),
+		SeedUploadWorkers: parseInt("SEED_UPLOAD_WORKERS"),
+		SeedUploadRetries: parseInt("SEED_UPLOAD_RETRIES"),
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 
-	return config, nil
+	return config
 }
 
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func mustEnv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		logger.Log.Fatal().Str("key", key).Msg("[CONFIG] Required environment variable is not set")
 	}
-	return fallback
+	return value
 }
 
-func getIntEnv(key string, fallback, max int) int {
-	value, exists := os.LookupEnv(key)
-	if !exists {
-		return fallback
-	}
-
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	if parsed > max {
-		return max
-	}
-	return parsed
-}
-
-func getBoolEnv(key string, fallback bool) bool {
-	value, exists := os.LookupEnv(key)
-	if !exists {
-		return fallback
-	}
-	parsed, err := strconv.ParseBool(value)
+func parseDuration(key string) time.Duration {
+	value := mustEnv(key)
+	d, err := time.ParseDuration(value)
 	if err != nil {
-		return fallback
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid duration format")
 	}
-	return parsed
+	return d
 }
 
-func getDurationEnv(key string, fallback time.Duration) time.Duration {
-	value, exists := os.LookupEnv(key)
-	if !exists {
-		return fallback
+func parseInt(key string) int {
+	value := mustEnv(key)
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid integer format")
 	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil || parsed <= 0 {
-		return fallback
+	return n
+}
+
+func parseBool(key string) bool {
+	value := mustEnv(key)
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid boolean format")
 	}
-	return parsed
+	return b
 }

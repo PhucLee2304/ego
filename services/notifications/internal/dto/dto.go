@@ -23,12 +23,11 @@ type NotificationResponse struct {
 }
 
 type NotificationsResponse struct {
-	Notifications []*NotificationResponse `json:"notifications"`
-	Page          int                     `json:"page"`
-	PageCount     int                     `json:"pageCount"`
-	UnreadCount   int64                   `json:"unreadCount"`
-	// UnreadByCategory: số chưa đọc theo nhóm (POSTS, CLASSROOMS…), nhóm 0 thì không có key.
-	UnreadByCategory map[string]int64 `json:"unreadByCategory"`
+	Notifications    []*NotificationResponse `json:"notifications"`
+	Page             int                     `json:"page"`
+	PageCount        int                     `json:"pageCount"`
+	UnreadCount      int64                   `json:"unreadCount"`
+	UnreadByCategory map[string]int64        `json:"unreadByCategory"` // UnreadByCategory: số chưa đọc theo nhóm (POSTS, CLASSROOMS…), nhóm 0 thì không có key.
 }
 
 type RegisterDeviceTokenRequest struct {
@@ -41,7 +40,7 @@ type DeleteDeviceTokenRequest struct {
 	Token string `json:"token" validate:"required,notblank"`
 }
 
-type NotificationIDsRequest struct {
+type MarkNotificationsReadRequest struct {
 	IDs []uint `json:"ids" validate:"omitempty,dive,gt=0"`
 }
 
@@ -49,8 +48,10 @@ type DeleteNotificationsRequest struct {
 	IDs []uint `json:"ids" validate:"required,min=1,dive,gt=0"`
 }
 
-type CreateNotificationRequest struct {
-	UserID         string
+// CreateNotificationsRequest là một event thông báo gửi tới nhiều người nhận (qua rpc).
+// Mỗi người nhận có idempotency key riêng "<IdempotencyKey>:user:<id>".
+type CreateNotificationsRequest struct {
+	Recipients     []string
 	Title          string
 	Body           string
 	SourceService  string

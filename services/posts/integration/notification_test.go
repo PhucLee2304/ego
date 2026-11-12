@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	identity "ego/api/gen/go/identity"
 	learning "ego/api/gen/go/learning"
 	"ego/services/posts/config"
 	"ego/services/posts/internal/dto"
@@ -18,14 +19,25 @@ import (
 // classroomClient cài learning.LearningServiceClient.
 type classroomClient struct{}
 
+func (classroomClient) RemoveUserFromLiveRooms(context.Context, *learning.RemoveUserFromLiveRoomsRequest, ...grpc.CallOption) (*learning.RemoveUserFromLiveRoomsResponse, error) {
+	return &learning.RemoveUserFromLiveRoomsResponse{}, nil
+}
+
 func (classroomClient) GetClassroomPostAccess(_ context.Context, req *learning.GetClassroomPostAccessRequest, _ ...grpc.CallOption) (*learning.GetClassroomPostAccessResponse, error) {
 	return &learning.GetClassroomPostAccessResponse{ClassroomId: req.ClassroomId, ClassroomName: "Class 1", TeacherId: "teacher", Active: true, IsTeacher: req.UserId == "teacher", IsApprovedMember: req.UserId != "teacher", ApprovedStudentIds: []string{"student-a", "student-b"}}, nil
+}
+
+// identityStub cài service.IdentityClient, không trả thông tin người dùng nào.
+type identityStub struct{}
+
+func (identityStub) GetUsersInfo(context.Context, *identity.GetUsersInfoRequest, ...grpc.CallOption) (*identity.GetUsersInfoResponse, error) {
+	return &identity.GetUsersInfoResponse{}, nil
 }
 
 func TestInteractionAndPinNotificationsUseDirectOwner(t *testing.T) {
 	ctx := context.Background()
 	repo := testRepository(t)
-	svc := service.New(repo, &config.AppConfig{}, classroomClient{}, nil, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, classroomClient{}, identityStub{}, nil, nil)
 
 	post := &model.Post{AuthorID: "author-b", Scope: model.PostScopeCommunity, Content: "Post", Status: model.PostStatusPublished, AllowComments: true}
 	if err := repo.CreatePost(ctx, post); err != nil {
@@ -85,7 +97,7 @@ func TestInteractionAndPinNotificationsUseDirectOwner(t *testing.T) {
 func TestUnlikeAndUnpinDoNotCreateNotifications(t *testing.T) {
 	ctx := context.Background()
 	repo := testRepository(t)
-	svc := service.New(repo, &config.AppConfig{}, classroomClient{}, nil, nil, nil)
+	svc := service.New(repo, &config.AppConfig{}, classroomClient{}, identityStub{}, nil, nil)
 	classroomID := uint(9)
 	post := &model.Post{AuthorID: "teacher", Scope: model.PostScopeClassroom, ClassroomID: &classroomID, Content: "Post", Status: model.PostStatusPublished, AllowComments: true, Pinned: true}
 	if err := repo.CreatePost(ctx, post); err != nil {

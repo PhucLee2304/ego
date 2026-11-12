@@ -69,6 +69,21 @@ func (r *repository) GetLiveRoomsByClassroom(ctx context.Context, classroomID ui
 	return rooms, err
 }
 
+// GetLiveRoomsByUser trả các phòng LIVE thuộc lớp mà user là giáo viên hoặc học sinh đã được duyệt,
+// kèm Schedule.Classroom để biết user có phải giáo viên của phòng không.
+func (r *repository) GetLiveRoomsByUser(ctx context.Context, userID string) ([]*model.Room, error) {
+	var rooms []*model.Room
+	err := r.db.WithContext(ctx).Preload("Schedule.Classroom").
+		Joins("JOIN schedules ON schedules.id = rooms.schedule_id AND schedules.deleted_at IS NULL").
+		Joins("JOIN classrooms ON classrooms.id = schedules.classroom_id AND classrooms.deleted_at IS NULL").
+		Where("rooms.status = ? AND rooms.deleted_at IS NULL", model.RoomStatusLive).
+		Where(`classrooms.teacher_id = ? OR EXISTS (
+			SELECT 1 FROM members WHERE members.classroom_id = classrooms.id AND members.user_id = ?
+			AND members.approved = TRUE AND members.deleted_at IS NULL)`, userID, userID).
+		Find(&rooms).Error
+	return rooms, err
+}
+
 func (r *repository) GetRoomsForLifecycle(ctx context.Context, now time.Time) ([]*model.Room, error) {
 	var rooms []*model.Room
 	err := r.db.WithContext(ctx).Preload("Schedule").Preload("Schedule.Classroom").Where("status IN ?", []model.RoomStatus{model.RoomStatusScheduled, model.RoomStatusLive}).Find(&rooms).Error

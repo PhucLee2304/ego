@@ -308,7 +308,7 @@ func (s *service) GetClassroomPostAccess(ctx context.Context, classroomID uint, 
 	return classroom, isApproved, nil
 }
 
-// resolveClassroomAvatar đổi tên file đã upload vào thư mục avatars thành URL công khai, giống avatar user ở identity.
+// resolveClassroomAvatar đổi tên file đã upload vào avatars/classrooms thành URL công khai, giống avatar user ở identity.
 func (s *service) resolveClassroomAvatar(ctx context.Context, fileName *string) (*string, *httpx.HTTPError) {
 	if fileName == nil {
 		return nil, nil
@@ -317,7 +317,7 @@ func (s *service) resolveClassroomAvatar(ctx context.Context, fileName *string) 
 		return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid avatar", nil)
 	}
 	resp, err := s.storageClient.GetPublicURL(ctx, &storageClient.GetPublicURLRequest{
-		Folders:  []string{"avatars"},
+		Folders:  []string{"avatars", "classrooms"},
 		FileName: *fileName,
 	})
 	if err != nil {

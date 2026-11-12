@@ -5,6 +5,7 @@ import (
 	"ego/platform/jwt"
 	"ego/services/identity/internal/dto"
 	"net/http"
+	"strconv"
 )
 
 // GetMe godoc
@@ -18,8 +19,8 @@ import (
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
-// @Router       /me [get]
-func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) {
+// @Router       /users/me [get]
+func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	userID, _ := jwt.GetUserID(r.Context())
 
 	user, httpErr := h.service.GetMe(r.Context(), userID)
@@ -43,8 +44,8 @@ func (h *handler) GetMe(w http.ResponseWriter, r *http.Request) {
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
-// @Router       /me [patch]
-func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+// @Router       /users/me [patch]
+func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	userID, _ := jwt.GetUserID(r.Context())
 
 	var body dto.UpdateUserBody
@@ -69,20 +70,24 @@ func (h *handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 
 // GetList godoc
 // @Summary      Get user list
-// @Description  Get the list of all users
+// @Description  Admin: list users, searchable by name or email and filterable by role and blocked state.
 // @Tags         Users
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        page     query    int  false "Page number"
-// @Param        pageSize query    int  false "Page size"
+// @Param        query    query    string false "Search by name or email"
+// @Param        role     query    string false "CLIENT or ADMIN"
+// @Param        blocked  query    bool   false "true: blocked only, false: active only"
+// @Param        page     query    int    false "Page number"
+// @Param        pageSize query    int    false "Page size"
 // @Success      200  {object}  httpx.PaginatedResponse[dto.User]
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
+// @Failure      403  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
 // @Router       /users [get]
-func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
-	var query httpx.PaginationQuery
+func (h *handler) GetList(w http.ResponseWriter, r *http.Request) { // **Reviewed**
+	var query dto.UsersQuery
 	if err := httpx.DecodeQuery(r, &query); err != nil {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
 		return
@@ -95,5 +100,55 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(users, query, total))
+	httpx.JSON(w, http.StatusOK, httpx.ToPaginatedResponse(users, query.PaginationQuery, total))
+}
+
+// BlockUser godoc
+// @Summary      Block a user
+// @Description  Admin: block a CLIENT account. It can no longer log in or refresh its session.
+// @Tags         Users
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path      int  true  "User ID"
+// @Success      200  {object}  dto.User
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      403  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      409  {object}  httpx.HTTPError
+// @Router       /users/{id}/block [put]
+func (h *handler) BlockUser(w http.ResponseWriter, r *http.Request) { // **Reviewed**
+	h.setBlocked(w, r, true)
+}
+
+// UnblockUser godoc
+// @Summary      Unblock a user
+// @Description  Admin: unblock a CLIENT account.
+// @Tags         Users
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path      int  true  "User ID"
+// @Success      200  {object}  dto.User
+// @Failure      400  {object}  httpx.HTTPError
+// @Failure      401  {object}  httpx.HTTPError
+// @Failure      403  {object}  httpx.HTTPError
+// @Failure      404  {object}  httpx.HTTPError
+// @Failure      409  {object}  httpx.HTTPError
+// @Router       /users/{id}/block [delete]
+func (h *handler) UnblockUser(w http.ResponseWriter, r *http.Request) { // **Reviewed**
+	h.setBlocked(w, r, false)
+}
+
+func (h *handler) setBlocked(w http.ResponseWriter, r *http.Request, blocked bool) { // **Reviewed**
+	id, err := httpx.ParsePathID(r, "id")
+	if err != nil {
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid user ID", err))
+		return
+	}
+	user, httpErr := h.service.SetBlocked(r.Context(), strconv.FormatUint(uint64(id), 10), blocked)
+	if httpErr != nil {
+		httpx.Error(w, httpErr)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, user)
 }

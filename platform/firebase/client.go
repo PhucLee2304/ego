@@ -3,7 +3,6 @@ package firebase
 import (
 	"context"
 
-	"ego/platform/config"
 	"ego/platform/logger"
 
 	firebasev4 "firebase.google.com/go/v4"
@@ -16,8 +15,8 @@ type Client struct {
 	auth *firebaseAuth.Client
 }
 
-func NewClient(ctx context.Context, cfg *config.FirebaseConfig) (*Client, error) {
-	opt := option.WithCredentialsFile(cfg.FirebaseCredentialsPath)
+func NewClient(ctx context.Context, credentialsPath string) (*Client, error) {
+	opt := option.WithCredentialsFile(credentialsPath)
 	app, err := firebasev4.NewApp(ctx, nil, opt)
 	if err != nil {
 		logger.Log.Error().Err(err).Msg("[FIREBASE] NewClient error")

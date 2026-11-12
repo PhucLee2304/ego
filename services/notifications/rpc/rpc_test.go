@@ -6,37 +6,36 @@ import (
 
 	notificationsClient "ego/api/gen/go/notifications"
 	"ego/services/notifications/internal/dto"
+	"ego/services/notifications/internal/service"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-type fakeCreator struct {
-	requests []dto.CreateNotificationRequest
+type fakeService struct {
+	service.Service
+	req dto.CreateNotificationsRequest
+	err error
 }
 
-func (f *fakeCreator) CreateNotifications(_ context.Context, requests []dto.CreateNotificationRequest) error {
-	f.requests = requests
-	return nil
+func (f *fakeService) CreateNotifications(_ context.Context, req dto.CreateNotificationsRequest) (int, error) {
+	f.req = req
+	return 2, f.err
 }
 
-func TestCreateNotificationsDeduplicatesRecipientsAndBuildsKeys(t *testing.T) {
-	creator := &fakeCreator{}
-	response, err := New(creator).CreateNotifications(context.Background(), &notificationsClient.CreateNotificationsRequest{
-		Recipients: []string{"student-1", "student-1", "student-2"}, Title: "New assignment",
-		Body: "Body", SourceService: "CLASSROOMS", Data: map[string]string{"id": "8", "type": "ASSIGNMENT"},
-		IdempotencyKey: "assignment:8:created",
+func TestCreateNotificationsMapsRequest(t *testing.T) {
+	svc := &fakeService{}
+	resp, err := New(svc, nil).CreateNotifications(context.Background(), &notificationsClient.CreateNotificationsRequest{
+		Recipients: []string{"a", "b"}, Title: "T", SourceService: "POSTS", IdempotencyKey: "k",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.CreatedCount != 2 || len(creator.requests) != 2 {
-		t.Fatalf("unexpected recipients: %#v", response)
-	}
-	if creator.requests[0].IdempotencyKey != "assignment:8:created:user:student-1" || creator.requests[1].IdempotencyKey != "assignment:8:created:user:student-2" {
-		t.Fatalf("unexpected idempotency keys: %#v", creator.requests)
+	if err != nil || resp.CreatedCount != 2 || svc.req.IdempotencyKey != "k" || len(svc.req.Recipients) != 2 {
+		t.Fatalf("resp=%v err=%v req=%+v", resp, err, svc.req)
 	}
 }
 
-func TestCreateNotificationsRejectsInvalidBatch(t *testing.T) {
-	if _, err := New(&fakeCreator{}).CreateNotifications(context.Background(), &notificationsClient.CreateNotificationsRequest{}); err == nil {
-		t.Fatal("expected empty recipients to be rejected")
+func TestCreateNotificationsInvalidArgument(t *testing.T) {
+	_, err := New(&fakeService{err: service.ErrInvalidNotification}, nil).CreateNotifications(context.Background(), &notificationsClient.CreateNotificationsRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
 	}
 }

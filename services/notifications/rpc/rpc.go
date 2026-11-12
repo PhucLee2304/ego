@@ -2,59 +2,62 @@ package rpc
 
 import (
 	"context"
-	"fmt"
-	"strings"
+	"errors"
 
 	notificationsClient "ego/api/gen/go/notifications"
-	"ego/platform/logger"
+	platformRpc "ego/platform/rpc"
 	"ego/services/notifications/internal/dto"
+	"ego/services/notifications/internal/service"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-const maxRecipients = 500
-
-type Server struct {
+type server struct {
 	notificationsClient.UnimplementedNotificationServiceServer
-	service notificationCreator
+	service        service.Service
+	disconnectUser func(userID string) int // disconnectUser đóng mọi WebSocket đang mở của user; nil thì bỏ qua (test).
 }
 
-type notificationCreator interface {
-	CreateNotifications(context.Context, []dto.CreateNotificationRequest) error
+// New nhận thêm disconnectUser để đóng WebSocket của user bị khoá (xem rpc gọi từ identity SetBlocked).
+func New(svc service.Service, disconnectUser func(userID string) int) notificationsClient.NotificationServiceServer {
+	return &server{service: svc, disconnectUser: disconnectUser}
 }
 
-func New(service notificationCreator) *Server { return &Server{service: service} }
+// CreateNotifications tạo thông báo cho nhiều người nhận từ một event. Bên dùng: worker outbox của
+// posts (like, comment, bài viết trong lớp) và learning (lớp học, bài tập, phòng thi, kết quả thi).
+// Request sai trả InvalidArgument; lỗi khác trả nguyên để ErrorInterceptor log và che thành Internal,
+// bên gọi giữ event trong outbox và thử lại.
+func (s *server) CreateNotifications(ctx context.Context, req *notificationsClient.CreateNotificationsRequest) (*notificationsClient.CreateNotificationsResponse, error) {
+	created, err := s.service.CreateNotifications(ctx, dto.CreateNotificationsRequest{
+		Recipients:     req.Recipients,
+		Title:          req.Title,
+		Body:           req.Body,
+		SourceService:  req.SourceService,
+		IdempotencyKey: req.IdempotencyKey,
+		Data:           req.Data,
+	})
+	if errors.Is(err, service.ErrInvalidNotification) {
+		return nil, platformRpc.PublicError(codes.InvalidArgument, err.Error())
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &notificationsClient.CreateNotificationsResponse{CreatedCount: uint32(created)}, nil
+}
 
-func (s *Server) CreateNotifications(ctx context.Context, req *notificationsClient.CreateNotificationsRequest) (*notificationsClient.CreateNotificationsResponse, error) {
-	if len(req.Recipients) == 0 || len(req.Recipients) > maxRecipients {
-		return nil, fmt.Errorf("[ERROR] Recipients must contain between 1 and %d users", maxRecipients)
+// DeleteDeviceTokensByUserID xoá mọi token push của một user. Bên dùng: identity (SetBlocked) gọi sau
+// khi khoá tài khoản để máy của user không nhận push nữa, và đóng WebSocket thông báo của user. userID rỗng trả InvalidArgument.
+func (s *server) DeleteDeviceTokensByUserID(ctx context.Context, req *notificationsClient.DeleteDeviceTokensByUserIDRequest) (*notificationsClient.DeleteDeviceTokensByUserIDResponse, error) {
+	deleted, err := s.service.DeleteDeviceTokensByUserID(ctx, req.UserId)
+	if errors.Is(err, service.ErrInvalidNotification) {
+		return nil, platformRpc.PublicError(codes.InvalidArgument, err.Error())
 	}
-	baseKey := strings.TrimSpace(req.IdempotencyKey)
-	if baseKey == "" || strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.SourceService) == "" {
-		return nil, fmt.Errorf("[ERROR] Title, source service and idempotency key are required")
+	// Đóng WebSocket thông báo kể cả khi xoá token lỗi: kết nối cũ không bị kiểm tra token lại.
+	if s.disconnectUser != nil {
+		s.disconnectUser(req.UserId)
 	}
-
-	seen := make(map[string]struct{}, len(req.Recipients))
-	requests := make([]dto.CreateNotificationRequest, 0, len(req.Recipients))
-	for _, recipient := range req.Recipients {
-		recipient = strings.TrimSpace(recipient)
-		if recipient == "" {
-			return nil, fmt.Errorf("[ERROR] Recipient is required")
-		}
-		if _, exists := seen[recipient]; exists {
-			continue
-		}
-		seen[recipient] = struct{}{}
-		requests = append(requests, dto.CreateNotificationRequest{
-			UserID: recipient, Title: strings.TrimSpace(req.Title), Body: strings.TrimSpace(req.Body),
-			SourceService: strings.TrimSpace(req.SourceService), Data: req.Data,
-			IdempotencyKey: fmt.Sprintf("%s:user:%s", baseKey, recipient),
-		})
+	if err != nil {
+		return nil, err
 	}
-	if err := s.service.CreateNotifications(ctx, requests); err != nil {
-		logger.Log.Error().Err(err).Msg("[NOTIFICATIONS] Failed to create notifications")
-		return nil, status.Error(codes.Internal, "[ERROR] Failed to create notifications")
-	}
-	return &notificationsClient.CreateNotificationsResponse{CreatedCount: uint32(len(requests))}, nil
+	return &notificationsClient.DeleteDeviceTokensByUserIDResponse{DeletedCount: uint32(deleted)}, nil
 }

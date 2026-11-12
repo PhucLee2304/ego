@@ -17,8 +17,8 @@ import (
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
-// @Router       /refresh [post]
-func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) {
+// @Router       /auth/refresh [post]
+func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	var body dto.RefreshBody
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
@@ -48,8 +48,8 @@ func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) {
 // @Failure      400  {object}  httpx.HTTPError
 // @Failure      401  {object}  httpx.HTTPError
 // @Failure      500  {object}  httpx.HTTPError
-// @Router       /login [post]
-func (h *handler) Login(w http.ResponseWriter, r *http.Request) {
+// @Router       /auth/login [post]
+func (h *handler) Login(w http.ResponseWriter, r *http.Request) { // **Reviewed**
 	var body dto.LoginBody
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))

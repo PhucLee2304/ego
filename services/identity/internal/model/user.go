@@ -1,6 +1,10 @@
 package model
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type User struct {
 	gorm.Model
@@ -9,6 +13,8 @@ type User struct {
 	Name        string `gorm:"not null"`
 	Avatar      *string
 	Role        RoleName `gorm:"not null;default:CLIENT"`
+	// BlockedAt khác nil là tài khoản đang bị admin khoá: không đăng nhập và không làm mới phiên được.
+	BlockedAt *time.Time `gorm:"index"`
 }
 
 type RoleName string

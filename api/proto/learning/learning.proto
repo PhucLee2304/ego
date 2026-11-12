@@ -4,10 +4,11 @@ package learning;
 
 option go_package = "ego/api/gen/go/learning";
 
-// LearningService là gRPC nội bộ của learning cho service khác (hiện chỉ posts).
 service LearningService {
   rpc GetClassroomPostAccess(GetClassroomPostAccessRequest)
       returns (GetClassroomPostAccessResponse);
+  rpc RemoveUserFromLiveRooms(RemoveUserFromLiveRoomsRequest)
+      returns (RemoveUserFromLiveRoomsResponse);
 }
 
 message GetClassroomPostAccessRequest {
@@ -23,4 +24,13 @@ message GetClassroomPostAccessResponse {
   bool is_teacher = 5;
   bool is_approved_member = 6;
   repeated string approved_student_ids = 7;
+}
+
+message RemoveUserFromLiveRoomsRequest {
+  string user_id = 1;
+}
+
+message RemoveUserFromLiveRoomsResponse {
+  uint32 removed_count = 1;
+  uint32 ended_count = 2;
 }

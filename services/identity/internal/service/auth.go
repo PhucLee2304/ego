@@ -12,12 +12,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
-func (s *service) ValidateToken(ctx context.Context, tokenString string) (string, error) {
-	return s.jwtManager.Validate(ctx, tokenString)
-}
-
+// **Reviewed**
 func (s *service) Refresh(ctx context.Context, refreshToken string) (string, string, *httpx.HTTPError) {
 	userID, err := s.jwtManager.ValidateRefresh(ctx, refreshToken)
 	if err != nil {
@@ -30,6 +29,17 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (string, str
 		return "", "", httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to refresh token", err)
 	}
 
+	user, err := s.repo.GetByID(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", "", httpx.NewError(http.StatusUnauthorized, "[UNAUTHORIZED] Invalid refresh token", err)
+	}
+	if err != nil {
+		return "", "", httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to refresh token", err)
+	}
+	if user.BlockedAt != nil {
+		return "", "", httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Account blocked", ErrUserBlocked)
+	}
+
 	accessToken, newRefreshToken, err := s.jwtManager.Generate(ctx, userID)
 	if err != nil {
 		return "", "", httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to refresh token", err)
@@ -37,6 +47,7 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (string, str
 	return accessToken, newRefreshToken, nil
 }
 
+// **Reviewed**
 func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResponse, *httpx.HTTPError) {
 	firebaseUser, err := s.firebaseClient.VerifyIDToken(ctx, body.IdToken)
 	if err != nil {
@@ -77,9 +88,16 @@ func (s *service) Login(ctx context.Context, body dto.LoginBody) (*dto.LoginResp
 			return err
 		}
 
+		if user.BlockedAt != nil {
+			return ErrUserBlocked
+		}
+
 		accessToken, refreshToken, err = s.jwtManager.Generate(ctx, strconv.Itoa(int(user.ID)))
 		return err
 	})
+	if errors.Is(err, ErrUserBlocked) {
+		return nil, httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Account blocked", err)
+	}
 	if err != nil {
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to login", err)
 	}

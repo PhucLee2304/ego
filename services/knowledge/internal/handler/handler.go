@@ -9,7 +9,7 @@ import (
 // Handler gom HTTP handler của mọi domain trong knowledge (topic, dictionary, grammar).
 // Handler của từng domain được cài đặt ở <domain>.go và đăng ký trong RegisterRoutes.
 type Handler interface {
-	RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware)
+	RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware)
 
 	// Topic
 	GetTopics(w http.ResponseWriter, r *http.Request)
@@ -34,6 +34,9 @@ type Handler interface {
 	GetUnits(w http.ResponseWriter, r *http.Request)
 	GetUnitByID(w http.ResponseWriter, r *http.Request)
 	UpdateProgress(w http.ResponseWriter, r *http.Request)
+
+	// Stats (admin)
+	GetAdminStats(w http.ResponseWriter, r *http.Request)
 }
 
 type handler struct {
@@ -44,7 +47,7 @@ func New(s service.Service) Handler {
 	return &handler{service: s}
 }
 
-func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
+func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
 	// Topic
 	mux.HandleFunc("GET /topics", mw.Handle(h.GetTopics))
 	mux.HandleFunc("GET /topics/{id}", mw.Handle(h.GetSectionsByTopic))
@@ -68,4 +71,7 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware) {
 	mux.HandleFunc("GET /units", mw.Handle(h.GetUnits))
 	mux.HandleFunc("GET /units/{id}", mw.Handle(h.GetUnitByID))
 	mux.HandleFunc("PUT /units/{id}/progress", mw.Handle(h.UpdateProgress))
+
+	// Stats (admin)
+	mux.HandleFunc("GET /admin/stats", mw.Handle(rm.RequireRole("admin")(h.GetAdminStats)))
 }

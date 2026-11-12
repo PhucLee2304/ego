@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"ego/platform/logger"
 )
 
 type AppConfig struct {
@@ -18,28 +20,36 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	StorageServiceAddr string
+	StorageServiceAddr       string
+	NotificationsServiceAddr string
+	LearningServiceAddr      string
+
+	FirebaseCredentialsPath string
 }
 
-func LoadAppConfig() (*AppConfig, error) {
+func LoadAppConfig() *AppConfig {
 	config := &AppConfig{
-		Port:     getEnv("APP_PORT", "8080"),
-		Mode:     getEnv("APP_MODE", "development"),
-		GRPCPort: getEnv("GRPC_PORT", "50052"),
+		Port:     mustEnv("APP_PORT"),
+		Mode:     mustEnv("APP_MODE"),
+		GRPCPort: mustEnv("GRPC_PORT"),
 
-		DBHost:     getEnv("DB_HOST", "users-db"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "23042004"),
-		DBName:     getEnv("DB_NAME", "usersdb"),
+		DBHost:     mustEnv("DB_HOST"),
+		DBPort:     mustEnv("DB_PORT"),
+		DBUser:     mustEnv("DB_USER"),
+		DBPassword: mustEnv("DB_PASSWORD"),
+		DBName:     mustEnv("DB_NAME"),
 
-		StorageServiceAddr: getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
+		StorageServiceAddr:       mustEnv("STORAGE_SERVICE_ADDR"),
+		NotificationsServiceAddr: mustEnv("NOTIFICATIONS_SERVICE_ADDR"),
+		LearningServiceAddr:      mustEnv("LEARNING_SERVICE_ADDR"),
+
+		FirebaseCredentialsPath: mustEnv("FIREBASE_CREDENTIALS_PATH"),
 	}
 
 	config.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 
-	return config, nil
+	return config
 }
 
 type JwtConfig struct {
@@ -48,34 +58,27 @@ type JwtConfig struct {
 	RefreshTokenExpiry time.Duration
 }
 
-func LoadJwtConfig() (*JwtConfig, error) {
-	accessTokenExpiry, err := time.ParseDuration(os.Getenv("ACCESS_TOKEN_EXPIRY"))
-	if err != nil {
-		return nil, fmt.Errorf("[ERROR][Config][JWT] Failed to parse ACCESS_TOKEN_EXPIRY: %v", err)
+func LoadJwtConfig() *JwtConfig {
+	return &JwtConfig{
+		JwtSecret:          mustEnv("JWT_SECRET"),
+		AccessTokenExpiry:  parseDuration("ACCESS_TOKEN_EXPIRY"),
+		RefreshTokenExpiry: parseDuration("REFRESH_TOKEN_EXPIRY"),
 	}
-
-	refreshTokenExpiry, err := time.ParseDuration(os.Getenv("REFRESH_TOKEN_EXPIRY"))
-	if err != nil {
-		return nil, fmt.Errorf("[ERROR][Config][JWT] Failed to parse REFRESH_TOKEN_EXPIRY: %v", err)
-	}
-
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		return nil, fmt.Errorf("[ERROR][Config][JWT] JWT_SECRET is not set")
-	}
-
-	cfg := JwtConfig{
-		JwtSecret:          jwtSecret,
-		AccessTokenExpiry:  accessTokenExpiry,
-		RefreshTokenExpiry: refreshTokenExpiry,
-	}
-
-	return &cfg, nil
 }
 
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func mustEnv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		logger.Log.Fatal().Str("key", key).Msg("[CONFIG] Required environment variable is not set")
 	}
-	return fallback
+	return value
+}
+
+func parseDuration(key string) time.Duration {
+	value := mustEnv(key)
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid duration format")
+	}
+	return d
 }

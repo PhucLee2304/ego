@@ -6,6 +6,7 @@ option go_package = "ego/api/gen/go/notifications";
 
 service NotificationService {
   rpc CreateNotifications(CreateNotificationsRequest) returns (CreateNotificationsResponse);
+  rpc DeleteDeviceTokensByUserID(DeleteDeviceTokensByUserIDRequest) returns (DeleteDeviceTokensByUserIDResponse);
 }
 
 message CreateNotificationsRequest {
@@ -19,4 +20,12 @@ message CreateNotificationsRequest {
 
 message CreateNotificationsResponse {
   uint32 created_count = 1;
+}
+
+message DeleteDeviceTokensByUserIDRequest {
+  string user_id = 1;
+}
+
+message DeleteDeviceTokensByUserIDResponse {
+  uint32 deleted_count = 1;
 }

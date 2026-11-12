@@ -105,6 +105,7 @@ type Repository interface {
 	DeleteRoom(ctx context.Context, room *model.Room) error
 	HasLiveRoomByClassroom(ctx context.Context, classroomID uint) (bool, error)
 	GetLiveRoomsByClassroom(ctx context.Context, classroomID uint) ([]*model.Room, error)
+	GetLiveRoomsByUser(ctx context.Context, userID string) ([]*model.Room, error)
 	GetRoomsForLifecycle(ctx context.Context, now time.Time) ([]*model.Room, error)
 
 	// Participant
@@ -165,6 +166,9 @@ type Repository interface {
 	CancelNotificationOutbox(ctx context.Context, eventKeyPrefix string) error
 
 	Transaction(ctx context.Context, fn func(Repository) error) error
+
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, rng httpx.StatsRange) (*dto.AdminStatsResponse, []string, error)
 }
 
 type repository struct {

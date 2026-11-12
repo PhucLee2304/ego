@@ -10,11 +10,14 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	identityClient "ego/api/gen/go/identity"
+	"ego/platform/httpx"
 	"ego/platform/jwt"
 	platformRpc "ego/platform/rpc"
 	"ego/services/identity/database"
+	"ego/services/identity/internal/dto"
 	"ego/services/identity/internal/model"
 	"ego/services/identity/internal/repository"
 	"ego/services/identity/internal/service"
@@ -33,14 +36,14 @@ func testService(t *testing.T) (service.Service, *gorm.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrator().DropTable(&model.User{}); err != nil {
+	if err := db.Migrator().DropTable(&model.User{}, &model.UserBlockedOutbox{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
 	// GetRole, GetUsersInfo and SearchUserIDsByName only use the repository.
-	return service.New(nil, nil, repository.NewRepository(db), nil), db
+	return service.New(nil, nil, repository.NewRepository(db), nil, nil, nil), db
 }
 
 func createUser(t *testing.T, db *gorm.DB, email, name string, role model.RoleName) string {
@@ -194,7 +197,8 @@ func TestGetListOrdersUsersByID(t *testing.T) {
 	createUser(t, db, "first@example.com", "First", model.RoleClient)
 	createUser(t, db, "second@example.com", "Second", model.RoleClient)
 
-	users, _, err := repository.NewRepository(db).GetList(context.Background(), 10, 0)
+	query := dto.UsersQuery{PaginationQuery: httpx.PaginationQuery{Page: 1, PageSize: 10}}
+	users, _, err := repository.NewRepository(db).GetList(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,5 +235,71 @@ func TestUserTransactionRollsBack(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected user insert to be rolled back, found %d rows", count)
+	}
+}
+
+func TestGetListFilters(t *testing.T) {
+	_, db := testService(t)
+	repo := repository.NewRepository(db)
+	ctx := context.Background()
+	createUser(t, db, "admin@example.com", "Admin Anna", model.RoleAdmin)
+	createUser(t, db, "bob@example.com", "Bob", model.RoleClient)
+	blockedID := createUser(t, db, "carol@example.com", "Carol", model.RoleClient)
+	if err := db.Model(&model.User{}).Where("id = ?", blockedID).Update("blocked_at", time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := true
+	tests := []struct {
+		name  string
+		query dto.UsersQuery
+		want  int64
+	}{
+		{name: "search email", query: dto.UsersQuery{Query: "BOB@"}, want: 1},
+		{name: "search name", query: dto.UsersQuery{Query: "anna"}, want: 1},
+		{name: "role", query: dto.UsersQuery{Role: "CLIENT"}, want: 2},
+		{name: "blocked", query: dto.UsersQuery{Blocked: &blocked}, want: 1},
+	}
+	for _, tt := range tests {
+		tt.query.PaginationQuery = httpx.PaginationQuery{Page: 1, PageSize: 10}
+		_, total, err := repo.GetList(ctx, tt.query)
+		if err != nil || total != tt.want {
+			t.Fatalf("%s: expected %d users, got %d err=%v", tt.name, tt.want, total, err)
+		}
+	}
+}
+
+func TestGetAdminStats(t *testing.T) {
+	_, db := testService(t)
+	repo := repository.NewRepository(db)
+	ctx := context.Background()
+	old := createUser(t, db, "old@example.com", "Old", model.RoleClient)
+	createUser(t, db, "admin2@example.com", "Admin", model.RoleAdmin)
+	blockedID := createUser(t, db, "new@example.com", "New", model.RoleClient)
+	// 2026-01-05 là thứ Hai; 10:00 giờ Việt Nam = 03:00 UTC.
+	inPeriod := time.Date(2026, 1, 5, 3, 0, 0, 0, time.UTC)
+	if err := db.Model(&model.User{}).Where("id = ?", old).Update("created_at", time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.User{}).Where("id <> ?", old).Update("created_at", inPeriod).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.User{}).Where("id = ?", blockedID).Update("blocked_at", inPeriod.Add(time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := repo.GetAdminStats(ctx, dto.AdminStatsQuery{From: "2026-01-01", To: "2026-01-07"}.Range())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total != 3 || stats.Admins != 1 || stats.Clients != 2 || stats.Blocked != 1 ||
+		stats.Signups.Current != 2 || stats.BlockedInPeriod != 1 || stats.UsersBefore != 1 {
+		t.Fatalf("unexpected totals %#v", stats)
+	}
+	if len(stats.Daily) != 1 || stats.Daily[0].Date != "2026-01-05" || stats.Daily[0].Count != 2 {
+		t.Fatalf("unexpected daily %#v", stats.Daily)
+	}
+	if len(stats.Heatmap) != 1 || stats.Heatmap[0].Weekday != 1 || stats.Heatmap[0].Hour != 10 || stats.Heatmap[0].Count != 2 {
+		t.Fatalf("unexpected heatmap %#v", stats.Heatmap[0])
 	}
 }

@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+
+	"ego/platform/logger"
 )
 
 type AppConfig struct {
@@ -20,23 +22,24 @@ type AppConfig struct {
 
 func LoadAppConfig() *AppConfig {
 	cfg := &AppConfig{
-		Port:                    getEnv("APP_PORT", "8080"),
-		GRPCPort:                getEnv("GRPC_PORT", "50058"),
-		DBHost:                  getEnv("DB_HOST", "notifications-db"),
-		DBPort:                  getEnv("DB_PORT", "5432"),
-		DBUser:                  getEnv("DB_USER", "postgres"),
-		DBPassword:              getEnv("DB_PASSWORD", "23042004"),
-		DBName:                  getEnv("DB_NAME", "notificationsdb"),
-		IdentityServiceAddr:     getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
-		FirebaseCredentialsPath: os.Getenv("FIREBASE_CREDENTIALS_PATH"),
+		Port:                    mustEnv("APP_PORT"),
+		GRPCPort:                mustEnv("GRPC_PORT"),
+		DBHost:                  mustEnv("DB_HOST"),
+		DBPort:                  mustEnv("DB_PORT"),
+		DBUser:                  mustEnv("DB_USER"),
+		DBPassword:              mustEnv("DB_PASSWORD"),
+		DBName:                  mustEnv("DB_NAME"),
+		IdentityServiceAddr:     mustEnv("IDENTITY_SERVICE_ADDR"),
+		FirebaseCredentialsPath: mustEnv("FIREBASE_CREDENTIALS_PATH"),
 	}
 	cfg.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)
 	return cfg
 }
 
-func getEnv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
+func mustEnv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		logger.Log.Fatal().Str("key", key).Msg("[CONFIG] Required environment variable is not set")
 	}
-	return fallback
+	return value
 }

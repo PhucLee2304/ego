@@ -44,10 +44,7 @@ func main() {
 		}
 	}()
 
-	appConfig, err := knowledgeConfig.LoadAppConfig()
-	if err != nil {
-		logger.Log.Fatal().Err(err).Msg("[CONFIG] Failed to load App config")
-	}
+	appConfig := knowledgeConfig.LoadAppConfig()
 
 	db, err := database.Connect(appConfig)
 	if err != nil {
@@ -68,6 +65,13 @@ func main() {
 	svc := service.New(repo)
 
 	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
+	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
+		userResp, err := identityServiceClient.GetUserRole(ctx, &identityClient.GetUserRoleRequest{Id: userID})
+		if err != nil {
+			return "", err
+		}
+		return userResp.Role, nil
+	})
 
 	httpHandler := handler.New(svc)
 
@@ -92,7 +96,7 @@ func main() {
 
 	api := http.NewServeMux()
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
-	httpHandler.RegisterRoutes(api, authMiddleware)
+	httpHandler.RegisterRoutes(api, authMiddleware, roleMiddleware)
 
 	logger.Log.Info().Str("KNOWLEDGE_HTTP_PORT", appConfig.Port).Msg("[STARTUP] Starting knowledge server")
 	httpServer := &http.Server{Addr: ":" + appConfig.Port, Handler: logger.Middleware(mux)}

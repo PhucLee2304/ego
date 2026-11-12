@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"ego/platform/logger"
 )
 
 type AppConfig struct {
@@ -31,27 +33,27 @@ type AppConfig struct {
 	UploadIntentTTL time.Duration
 }
 
-func LoadAppConfig() (*AppConfig, error) {
+func LoadAppConfig() *AppConfig {
 	config := &AppConfig{
-		Port: getEnv("APP_PORT", "8080"),
-		Mode: getEnv("APP_MODE", "development"),
+		Port: mustEnv("APP_PORT"),
+		Mode: mustEnv("APP_MODE"),
 
-		DBHost:     getEnv("DB_HOST", "posts-db"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "postgres"),
-		DBName:     getEnv("DB_NAME", "postsdb"),
+		DBHost:     mustEnv("DB_HOST"),
+		DBPort:     mustEnv("DB_PORT"),
+		DBUser:     mustEnv("DB_USER"),
+		DBPassword: mustEnv("DB_PASSWORD"),
+		DBName:     mustEnv("DB_NAME"),
 
-		IdentityServiceAddr:      getEnv("IDENTITY_SERVICE_ADDR", "identity:50052"),
-		LearningServiceAddr:      getEnv("LEARNING_SERVICE_ADDR", "learning:50059"),
-		NotificationsServiceAddr: getEnv("NOTIFICATIONS_SERVICE_ADDR", "notifications:50058"),
-		StorageServiceAddr:       getEnv("STORAGE_SERVICE_ADDR", "storage:50054"),
-		ImageMaxBytes:            getEnvInt64("POST_IMAGE_MAX_BYTES", 5*1024*1024),
-		FileMaxBytes:             getEnvInt64("POST_FILE_MAX_BYTES", 10*1024*1024),
-		VideoMaxBytes:            getEnvInt64("POST_VIDEO_MAX_BYTES", 20*1024*1024),
-		PostMaxBytes:             getEnvInt64("POST_TOTAL_MAX_BYTES", 50*1024*1024),
-		MaxAttachments:           int(getEnvInt64("POST_MAX_ATTACHMENTS", 10)),
-		UploadIntentTTL:          time.Duration(getEnvInt64("POST_UPLOAD_TTL_MINUTES", 60)) * time.Minute,
+		IdentityServiceAddr:      mustEnv("IDENTITY_SERVICE_ADDR"),
+		LearningServiceAddr:      mustEnv("LEARNING_SERVICE_ADDR"),
+		NotificationsServiceAddr: mustEnv("NOTIFICATIONS_SERVICE_ADDR"),
+		StorageServiceAddr:       mustEnv("STORAGE_SERVICE_ADDR"),
+		ImageMaxBytes:            parseInt64("POST_IMAGE_MAX_BYTES"),
+		FileMaxBytes:             parseInt64("POST_FILE_MAX_BYTES"),
+		VideoMaxBytes:            parseInt64("POST_VIDEO_MAX_BYTES"),
+		PostMaxBytes:             parseInt64("POST_TOTAL_MAX_BYTES"),
+		MaxAttachments:           parseInt("POST_MAX_ATTACHMENTS"),
+		UploadIntentTTL:          time.Duration(parseInt64("POST_UPLOAD_TTL_MINUTES")) * time.Minute,
 	}
 
 	config.DSN = fmt.Sprintf(
@@ -63,24 +65,31 @@ func LoadAppConfig() (*AppConfig, error) {
 		config.DBName,
 	)
 
-	return config, nil
+	return config
 }
 
-func getEnvInt64(key string, fallback int64) int64 {
-	value := getEnv(key, "")
-	if value == "" {
-		return fallback
+func mustEnv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		logger.Log.Fatal().Str("key", key).Msg("[CONFIG] Required environment variable is not set")
 	}
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
+	return value
 }
 
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func parseInt(key string) int {
+	value := mustEnv(key)
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid integer format")
 	}
-	return fallback
+	return n
+}
+
+func parseInt64(key string) int64 {
+	value := mustEnv(key)
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		logger.Log.Fatal().Err(err).Str("key", key).Str("value", value).Msg("[CONFIG] Invalid integer format")
+	}
+	return n
 }
