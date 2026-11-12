@@ -22,6 +22,7 @@ services:
           { "url": "/knowledge/docs/doc.json", "name": "Knowledge" },
           { "url": "/learning/docs/doc.json", "name": "Learning" },
           { "url": "/notifications/docs/doc.json", "name": "Notifications" },
+          { "url": "/posts/docs/doc.json", "name": "Posts" },
           { "url": "/exams/docs/doc.json", "name": "Exams" }
         ]
     networks:

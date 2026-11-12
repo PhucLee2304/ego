@@ -3,495 +3,101 @@ package handler
 import (
 	"net/http"
 
-	"ego/platform/httpx"
 	"ego/platform/jwt"
-	"ego/services/posts/internal/dto"
-	"ego/services/posts/internal/model"
 	"ego/services/posts/internal/service"
 )
 
-type Handler struct {
-	service *service.Service
+// Handler của từng domain được cài đặt ở <domain>.go và đăng ký trong RegisterRoutes.
+type Handler interface {
+	RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware)
+
+	// Upload
+	GetUploadLimits(w http.ResponseWriter, r *http.Request)
+	CreateUploadIntent(w http.ResponseWriter, r *http.Request)
+	CompleteUpload(w http.ResponseWriter, r *http.Request)
+	CancelUpload(w http.ResponseWriter, r *http.Request)
+
+	// Post
+	ListCommunityPosts(w http.ResponseWriter, r *http.Request)
+	ListMyCommunityPosts(w http.ResponseWriter, r *http.Request)
+	CreateCommunityPost(w http.ResponseWriter, r *http.Request)
+	ListClassroomPosts(w http.ResponseWriter, r *http.Request)
+	ListPinnedClassroomPosts(w http.ResponseWriter, r *http.Request)
+	CreateClassroomPost(w http.ResponseWriter, r *http.Request)
+	GetPost(w http.ResponseWriter, r *http.Request)
+	UpdatePost(w http.ResponseWriter, r *http.Request)
+	DeletePost(w http.ResponseWriter, r *http.Request)
+	PinPost(w http.ResponseWriter, r *http.Request)
+	UnpinPost(w http.ResponseWriter, r *http.Request)
+
+	// Comment
+	ListPostComments(w http.ResponseWriter, r *http.Request)
+	GetPostComment(w http.ResponseWriter, r *http.Request)
+	CreatePostComment(w http.ResponseWriter, r *http.Request)
+
+	// Like
+	LikePost(w http.ResponseWriter, r *http.Request)
+	UnlikePost(w http.ResponseWriter, r *http.Request)
+	LikePostComment(w http.ResponseWriter, r *http.Request)
+	UnlikePostComment(w http.ResponseWriter, r *http.Request)
+
+	// Moderation (admin)
+	ListPostsForModeration(w http.ResponseWriter, r *http.Request)
+	HidePost(w http.ResponseWriter, r *http.Request)
+	UnhidePost(w http.ResponseWriter, r *http.Request)
+	DeletePostAsAdmin(w http.ResponseWriter, r *http.Request)
+	GetPostModerationAudits(w http.ResponseWriter, r *http.Request)
+
+	// Stats (admin)
+	GetAdminStats(w http.ResponseWriter, r *http.Request)
 }
 
-func New(postService *service.Service) *Handler {
-	return &Handler{service: postService}
+type handler struct {
+	service service.Service
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMiddleware *jwt.AuthMiddleware, roleMiddleware *jwt.RoleMiddleware) {
-	mux.HandleFunc("GET /posts", authMiddleware.Handle(h.ListCommunityPosts))
-	mux.HandleFunc("GET /post-uploads/config", authMiddleware.Handle(h.GetUploadLimits))
-	mux.HandleFunc("POST /post-uploads", authMiddleware.Handle(h.CreateUploadIntent))
-	mux.HandleFunc("POST /post-uploads/{id}/complete", authMiddleware.Handle(h.CompleteUpload))
-	mux.HandleFunc("DELETE /post-uploads/{id}", authMiddleware.Handle(h.CancelUpload))
-	mux.HandleFunc("GET /posts/me", authMiddleware.Handle(h.ListMyCommunityPosts))
-	mux.HandleFunc("POST /posts", authMiddleware.Handle(h.CreateCommunityPost))
-	mux.HandleFunc("GET /posts/{id}", authMiddleware.Handle(h.GetPost))
-	mux.HandleFunc("PATCH /posts/{id}", authMiddleware.Handle(h.UpdatePost))
-	mux.HandleFunc("DELETE /posts/{id}", authMiddleware.Handle(h.DeletePost))
-	mux.HandleFunc("GET /classrooms/{classroomId}/posts", authMiddleware.Handle(h.ListClassroomPosts))
-	mux.HandleFunc("GET /classrooms/{classroomId}/posts/pinned", authMiddleware.Handle(h.ListPinnedClassroomPosts))
-	mux.HandleFunc("POST /classrooms/{classroomId}/posts", authMiddleware.Handle(h.CreateClassroomPost))
-	mux.HandleFunc("POST /classrooms/{classroomId}/posts/{id}/pin", authMiddleware.Handle(h.PinPost))
-	mux.HandleFunc("DELETE /classrooms/{classroomId}/posts/{id}/pin", authMiddleware.Handle(h.UnpinPost))
-	mux.HandleFunc("POST /posts/{id}/like", authMiddleware.Handle(h.LikePost))
-	mux.HandleFunc("DELETE /posts/{id}/like", authMiddleware.Handle(h.UnlikePost))
-	mux.HandleFunc("GET /posts/{id}/comments", authMiddleware.Handle(h.ListPostComments))
-	mux.HandleFunc("POST /posts/{id}/comments", authMiddleware.Handle(h.CreatePostComment))
-	mux.HandleFunc("GET /comments/{id}", authMiddleware.Handle(h.GetPostComment))
-	mux.HandleFunc("POST /comments/{id}/like", authMiddleware.Handle(h.LikePostComment))
-	mux.HandleFunc("DELETE /comments/{id}/like", authMiddleware.Handle(h.UnlikePostComment))
-	mux.HandleFunc("GET /admin/stats", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.GetAdminStats)))
-	mux.HandleFunc("GET /admin/posts", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.ListPostsForModeration)))
-	mux.HandleFunc("POST /admin/posts/{id}/hide", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.HidePost)))
-	mux.HandleFunc("DELETE /admin/posts/{id}/hide", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.UnhidePost)))
-	mux.HandleFunc("DELETE /admin/posts/{id}", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.DeletePostAsAdmin)))
-	mux.HandleFunc("GET /admin/posts/{id}/audits", authMiddleware.Handle(roleMiddleware.RequireRole("admin")(h.GetPostModerationAudits)))
+func New(s service.Service) Handler {
+	return &handler{service: s}
 }
 
-func (h *Handler) GetUploadLimits(w http.ResponseWriter, _ *http.Request) {
-	httpx.JSON(w, http.StatusOK, h.service.UploadLimits())
-}
+func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm *jwt.RoleMiddleware) {
+	// Upload
+	mux.HandleFunc("GET /uploads/config", mw.Handle(h.GetUploadLimits))
+	mux.HandleFunc("POST /uploads", mw.Handle(h.CreateUploadIntent))
+	mux.HandleFunc("POST /uploads/{id}/complete", mw.Handle(h.CompleteUpload))
+	mux.HandleFunc("DELETE /uploads/{id}", mw.Handle(h.CancelUpload))
 
-func (h *Handler) CreateUploadIntent(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	var request dto.CreateUploadIntentRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	response, httpErr := h.service.CreateUploadIntent(r.Context(), userID, request)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusCreated, response)
-}
+	// Post
+	mux.HandleFunc("GET /posts", mw.Handle(h.ListCommunityPosts))
+	mux.HandleFunc("GET /posts/me", mw.Handle(h.ListMyCommunityPosts))
+	mux.HandleFunc("POST /posts", mw.Handle(h.CreateCommunityPost))
+	mux.HandleFunc("GET /posts/{id}", mw.Handle(h.GetPost))
+	mux.HandleFunc("PATCH /posts/{id}", mw.Handle(h.UpdatePost))
+	mux.HandleFunc("DELETE /posts/{id}", mw.Handle(h.DeletePost))
+	mux.HandleFunc("GET /classrooms/{classroomId}/posts", mw.Handle(h.ListClassroomPosts))
+	mux.HandleFunc("GET /classrooms/{classroomId}/posts/pinned", mw.Handle(h.ListPinnedClassroomPosts))
+	mux.HandleFunc("POST /classrooms/{classroomId}/posts", mw.Handle(h.CreateClassroomPost))
+	mux.HandleFunc("POST /classrooms/{classroomId}/posts/{id}/pin", mw.Handle(h.PinPost))
+	mux.HandleFunc("DELETE /classrooms/{classroomId}/posts/{id}/pin", mw.Handle(h.UnpinPost))
 
-func (h *Handler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	id, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	response, httpErr := h.service.CompleteUpload(r.Context(), userID, id)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
+	// Comment
+	mux.HandleFunc("GET /posts/{id}/comments", mw.Handle(h.ListPostComments))
+	mux.HandleFunc("POST /posts/{id}/comments", mw.Handle(h.CreatePostComment))
+	mux.HandleFunc("GET /comments/{id}", mw.Handle(h.GetPostComment))
 
-func (h *Handler) CancelUpload(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	id, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.CancelUpload(r.Context(), userID, id); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
+	// Like
+	mux.HandleFunc("POST /posts/{id}/like", mw.Handle(h.LikePost))
+	mux.HandleFunc("DELETE /posts/{id}/like", mw.Handle(h.UnlikePost))
+	mux.HandleFunc("POST /comments/{id}/like", mw.Handle(h.LikePostComment))
+	mux.HandleFunc("DELETE /comments/{id}/like", mw.Handle(h.UnlikePostComment))
 
-func (h *Handler) ListCommunityPosts(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	var query dto.PostsQuery
-	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
-		return
-	}
-	response, httpErr := h.service.ListCommunityPosts(r.Context(), userID, query)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
+	// Moderation (admin)
+	mux.HandleFunc("GET /admin/posts", mw.Handle(rm.RequireRole("admin")(h.ListPostsForModeration)))              // ** Not used**
+	mux.HandleFunc("PUT /admin/posts/{id}/hide", mw.Handle(rm.RequireRole("admin")(h.HidePost)))                  // ** Not used**
+	mux.HandleFunc("DELETE /admin/posts/{id}/hide", mw.Handle(rm.RequireRole("admin")(h.UnhidePost)))             // ** Not used**
+	mux.HandleFunc("DELETE /admin/posts/{id}", mw.Handle(rm.RequireRole("admin")(h.DeletePostAsAdmin)))           // ** Not used**
+	mux.HandleFunc("GET /admin/posts/{id}/audits", mw.Handle(rm.RequireRole("admin")(h.GetPostModerationAudits))) // ** Not used**
 
-func (h *Handler) ListMyCommunityPosts(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	var query dto.PostsQuery
-	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
-		return
-	}
-	response, httpErr := h.service.ListMyCommunityPosts(r.Context(), userID, query)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) CreateCommunityPost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	var request dto.CreatePostRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	response, httpErr := h.service.CreateCommunityPost(r.Context(), userID, request)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusCreated, response)
-}
-
-func (h *Handler) ListClassroomPosts(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	classroomID, err := httpx.ParsePathID(r, "classroomId")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var query dto.PostsQuery
-	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
-		return
-	}
-	response, httpErr := h.service.ListClassroomPosts(r.Context(), userID, classroomID, query)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) ListPinnedClassroomPosts(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	classroomID, err := httpx.ParsePathID(r, "classroomId")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var query dto.PostsQuery
-	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
-		return
-	}
-	response, httpErr := h.service.ListPinnedClassroomPosts(r.Context(), userID, classroomID, query)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) CreateClassroomPost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	classroomID, err := httpx.ParsePathID(r, "classroomId")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var request dto.CreatePostRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	response, httpErr := h.service.CreateClassroomPost(r.Context(), userID, classroomID, request)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusCreated, response)
-}
-
-func (h *Handler) GetPost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	response, httpErr := h.service.GetPost(r.Context(), userID, postID)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) UpdatePost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var request dto.UpdatePostRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	response, httpErr := h.service.UpdatePost(r.Context(), userID, postID, request)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) DeletePost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.DeletePost(r.Context(), userID, postID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) PinPost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	classroomID, err := httpx.ParsePathID(r, "classroomId")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.PinPost(r.Context(), userID, classroomID, postID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) UnpinPost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	classroomID, err := httpx.ParsePathID(r, "classroomId")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.UnpinPost(r.Context(), userID, classroomID, postID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) LikePost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.LikePost(r.Context(), userID, postID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) UnlikePost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.UnlikePost(r.Context(), userID, postID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) ListPostComments(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var query dto.CommentsQuery
-	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
-		return
-	}
-	response, httpErr := h.service.ListPostComments(r.Context(), userID, postID, query)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-// GetPostComment godoc
-// @Summary Get a post comment
-// @Tags comments
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Comment ID"
-// @Success 200 {object} dto.CommentResponse
-// @Failure 400 {object} httpx.HTTPError
-// @Failure 404 {object} httpx.HTTPError
-// @Router /comments/{id} [get]
-func (h *Handler) GetPostComment(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	id, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	response, httpErr := h.service.GetPostComment(r.Context(), userID, id)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) CreatePostComment(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var request dto.CreateCommentRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	response, httpErr := h.service.CreatePostComment(r.Context(), userID, postID, request)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusCreated, response)
-}
-
-func (h *Handler) LikePostComment(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	commentID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.LikePostComment(r.Context(), userID, commentID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) UnlikePostComment(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	commentID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	if httpErr := h.service.UnlikePostComment(r.Context(), userID, commentID); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) ListPostsForModeration(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	var query dto.ModerationPostsQuery
-	if err := httpx.DecodeQuery(r, &query); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
-		return
-	}
-	response, httpErr := h.service.ListPostsForModeration(r.Context(), userID, query)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
-}
-
-func (h *Handler) HidePost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var request dto.ModerationRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	if httpErr := h.service.ModeratePost(r.Context(), userID, postID, model.ModerationHide, request.Reason); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) UnhidePost(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var request dto.ModerationRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	if httpErr := h.service.ModeratePost(r.Context(), userID, postID, model.ModerationUnhide, request.Reason); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) DeletePostAsAdmin(w http.ResponseWriter, r *http.Request) {
-	userID, _ := jwt.GetUserID(r.Context())
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	var request dto.ModerationRequest
-	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid request body", err))
-		return
-	}
-	if httpErr := h.service.ModeratePost(r.Context(), userID, postID, model.ModerationDelete, request.Reason); httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) GetPostModerationAudits(w http.ResponseWriter, r *http.Request) {
-	postID, err := httpx.ParsePathID(r, "id")
-	if err != nil {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid ID", err))
-		return
-	}
-	response, httpErr := h.service.GetPostModerationAudits(r.Context(), postID)
-	if httpErr != nil {
-		httpx.Error(w, httpErr)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, response)
+	// Stats (admin)
+	mux.HandleFunc("GET /admin/stats", mw.Handle(rm.RequireRole("admin")(h.GetAdminStats)))
 }

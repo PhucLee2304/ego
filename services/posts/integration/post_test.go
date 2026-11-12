@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"ego/platform/httpx"
 	"ego/services/posts/database"
 	"ego/services/posts/internal/model"
 	"ego/services/posts/internal/repository"
@@ -17,13 +16,13 @@ import (
 	"gorm.io/gorm"
 )
 
-func testRepository(t *testing.T) *repository.Repository {
+func testRepository(t *testing.T) repository.Repository {
 	t.Helper()
 	db, err := gorm.Open(postgres.Open(os.Getenv("POSTS_TEST_DSN")), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrator().DropTable(&model.NotificationOutbox{}, &model.PostModerationAudit{}, &model.CommentLike{}, &model.PostLike{}, &model.PostComment{}, &model.Post{}); err != nil {
+	if err := db.Migrator().DropTable(&model.NotificationOutbox{}, &model.PostModerationAudit{}, &model.CommentLike{}, &model.PostLike{}, &model.PostComment{}, &model.Post{}, &model.PostUploadIntent{}, &model.PostAttachment{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Migrate(db); err != nil {
@@ -37,7 +36,7 @@ func TestPostCommentLikesPinAndOutbox(t *testing.T) {
 	repo := testRepository(t)
 	classroomID := uint(7)
 	post := &model.Post{AuthorID: "teacher", Scope: model.PostScopeClassroom, ClassroomID: &classroomID, Content: "Welcome", Status: model.PostStatusPublished, AllowComments: true}
-	if err := repo.Transaction(ctx, func(tx *repository.Repository) error {
+	if err := repo.Transaction(ctx, func(tx repository.Repository) error {
 		if err := tx.CreatePost(ctx, post); err != nil {
 			return err
 		}
@@ -53,13 +52,24 @@ func TestPostCommentLikesPinAndOutbox(t *testing.T) {
 	if err != nil || created {
 		t.Fatal(err)
 	}
+	// Unlike xóa dòng like; like lại phải tạo được dòng mới.
+	if err := repo.UnlikePost(ctx, post.ID, "student-1"); err != nil {
+		t.Fatal(err)
+	}
+	if stats, err := repo.GetPostStats(ctx, []uint{post.ID}, "student-1"); err != nil || stats[post.ID].LikeCount != 0 || stats[post.ID].Liked {
+		t.Fatalf("unexpected stats after unlike: %+v err=%v", stats[post.ID], err)
+	}
+	created, err = repo.LikePost(ctx, post.ID, "student-1")
+	if err != nil || !created {
+		t.Fatalf("relike created=%v err=%v", created, err)
+	}
 	comment := &model.PostComment{PostID: post.ID, UserID: "student-1", Content: "Thanks"}
 	if err := repo.CreateComment(ctx, comment); err != nil {
 		t.Fatal(err)
 	}
-	likes, comments, liked, err := repo.PostStats(ctx, post.ID, "student-1")
-	if err != nil || likes != 1 || comments != 1 || !liked {
-		t.Fatalf("unexpected stats: likes=%d comments=%d liked=%v err=%v", likes, comments, liked, err)
+	stats, err := repo.GetPostStats(ctx, []uint{post.ID}, "student-1")
+	if err != nil || stats[post.ID] == nil || stats[post.ID].LikeCount != 1 || stats[post.ID].CommentCount != 1 || !stats[post.ID].Liked {
+		t.Fatalf("unexpected stats: %+v err=%v", stats[post.ID], err)
 	}
 	events, err := repo.ClaimOutbox(ctx, time.Now().Add(time.Second), 10)
 	if err != nil || len(events) != 1 || len(events[0].Recipients) != 2 {
@@ -96,7 +106,7 @@ func TestListCommunityPostsByAuthorIncludesHiddenPosts(t *testing.T) {
 		}
 	}
 
-	result, total, err := repo.ListCommunityPostsByAuthor(ctx, "owner", httpx.PaginationQuery{Page: 1, PageSize: 20})
+	result, total, err := repo.ListCommunityPostsByAuthor(ctx, "owner", 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

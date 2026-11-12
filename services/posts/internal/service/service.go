@@ -3,9 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"math"
 	"net/http"
-	"strings"
 	"time"
 
 	identityClient "ego/api/gen/go/identity"
@@ -13,14 +11,13 @@ import (
 	notifications "ego/api/gen/go/notifications"
 	storage "ego/api/gen/go/storage"
 	"ego/platform/httpx"
-	"ego/platform/storagekey"
 	postsConfig "ego/services/posts/config"
 	"ego/services/posts/internal/dto"
 	"ego/services/posts/internal/model"
 	"ego/services/posts/internal/repository"
 
+	"google.golang.org/grpc"
 	"gorm.io/datatypes"
-	"gorm.io/gorm"
 )
 
 var (
@@ -34,193 +31,101 @@ var (
 	ErrPostEmpty         = httpx.NewError(http.StatusBadRequest, "[ERROR] Post content or attachment is required", nil)
 )
 
-type Service struct {
-	repo          *repository.Repository
-	learning      learning.LearningServiceClient
-	identity      identityClient.IdentityServiceClient
-	notifications notifications.NotificationServiceClient
-	storage       storage.StorageServiceClient
-	cfg           *postsConfig.AppConfig
+type Service interface {
+	// Upload
+	UploadLimits() *dto.UploadLimitsResponse
+	CreateUploadIntent(ctx context.Context, userID string, req dto.CreateUploadIntentRequest) (*dto.UploadIntentResponse, *httpx.HTTPError)
+	CompleteUpload(ctx context.Context, userID string, id uint) (*dto.AttachmentResponse, *httpx.HTTPError)
+	CancelUpload(ctx context.Context, userID string, id uint) *httpx.HTTPError
+
+	// Post
+	CreateCommunityPost(ctx context.Context, userID string, req dto.CreatePostRequest) (*dto.PostResponse, *httpx.HTTPError)
+	CreateClassroomPost(ctx context.Context, userID string, classroomID uint, req dto.CreatePostRequest) (*dto.PostResponse, *httpx.HTTPError)
+	ListCommunityPosts(ctx context.Context, userID string, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError)
+	ListMyCommunityPosts(ctx context.Context, userID string, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError)
+	ListClassroomPosts(ctx context.Context, userID string, classroomID uint, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError)
+	ListPinnedClassroomPosts(ctx context.Context, userID string, classroomID uint, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError)
+	GetPost(ctx context.Context, userID string, id uint) (*dto.PostResponse, *httpx.HTTPError)
+	UpdatePost(ctx context.Context, userID string, id uint, req dto.UpdatePostRequest) (*dto.PostResponse, *httpx.HTTPError)
+	DeletePost(ctx context.Context, userID string, id uint) *httpx.HTTPError
+	PinPost(ctx context.Context, userID string, classroomID, postID uint) *httpx.HTTPError
+	UnpinPost(ctx context.Context, userID string, classroomID, postID uint) *httpx.HTTPError
+
+	// Comment
+	ListPostComments(ctx context.Context, userID string, postID uint, query dto.CommentsQuery) (*dto.CommentsResponse, *httpx.HTTPError)
+	GetPostComment(ctx context.Context, userID string, id uint) (*dto.CommentResponse, *httpx.HTTPError)
+	CreatePostComment(ctx context.Context, userID string, postID uint, req dto.CreateCommentRequest) (*dto.CommentResponse, *httpx.HTTPError)
+
+	// Like
+	LikePost(ctx context.Context, userID string, postID uint) *httpx.HTTPError
+	UnlikePost(ctx context.Context, userID string, postID uint) *httpx.HTTPError
+	LikePostComment(ctx context.Context, userID string, commentID uint) *httpx.HTTPError
+	UnlikePostComment(ctx context.Context, userID string, commentID uint) *httpx.HTTPError
+
+	// Moderation (admin)
+	ListPostsForModeration(ctx context.Context, userID string, q dto.ModerationPostsQuery) (*dto.PostsResponse, *httpx.HTTPError)
+	ModeratePost(ctx context.Context, adminID string, id uint, action model.ModerationAction, reason string) *httpx.HTTPError
+	GetPostModerationAudits(ctx context.Context, id uint) ([]*dto.AuditResponse, *httpx.HTTPError)
+
+	// Stats (admin)
+	GetAdminStats(ctx context.Context, query dto.AdminStatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError)
+
+	// Worker
+	ProcessNotificationOutbox(ctx context.Context, limit int) (int, error)
+	CleanupExpiredUploads(ctx context.Context, limit int) (int, error)
+	ProcessVideos(ctx context.Context, limit int) error
+}
+
+type LearningClient interface {
+	GetClassroomPostAccess(ctx context.Context, in *learning.GetClassroomPostAccessRequest, opts ...grpc.CallOption) (*learning.GetClassroomPostAccessResponse, error)
+}
+
+type IdentityClient interface {
+	GetUsersInfo(ctx context.Context, in *identityClient.GetUsersInfoRequest, opts ...grpc.CallOption) (*identityClient.GetUsersInfoResponse, error)
+}
+
+type NotificationClient interface {
+	CreateNotifications(ctx context.Context, in *notifications.CreateNotificationsRequest, opts ...grpc.CallOption) (*notifications.CreateNotificationsResponse, error)
+}
+
+type StorageClient interface {
+	GeneratePresignedUploadURL(ctx context.Context, in *storage.GeneratePresignedUploadURLRequest, opts ...grpc.CallOption) (*storage.GeneratePresignedUploadURLResponse, error)
+	GetPublicURL(ctx context.Context, in *storage.GetPublicURLRequest, opts ...grpc.CallOption) (*storage.GetPublicURLResponse, error)
+	GetObjectMetadata(ctx context.Context, in *storage.GetObjectMetadataRequest, opts ...grpc.CallOption) (*storage.GetObjectMetadataResponse, error)
+	DeleteObject(ctx context.Context, in *storage.DeleteObjectRequest, opts ...grpc.CallOption) (*storage.DeleteObjectResponse, error)
+}
+
+type service struct {
+	repo               repository.Repository
+	learningClient     LearningClient
+	identityClient     IdentityClient
+	notificationClient NotificationClient
+	storageClient      StorageClient
+	cfg                *postsConfig.AppConfig
 }
 
 func New(
-	repo *repository.Repository,
+	repo repository.Repository,
 	appConfig *postsConfig.AppConfig,
-	learningClient learning.LearningServiceClient,
-	identityClient identityClient.IdentityServiceClient,
-	notificationsClient notifications.NotificationServiceClient,
-	storageClient storage.StorageServiceClient,
-) *Service {
-	return &Service{
-		repo:          repo,
-		learning:      learningClient,
-		identity:      identityClient,
-		notifications: notificationsClient,
-		storage:       storageClient,
-		cfg:           appConfig,
+	learningClient LearningClient,
+	identityClient IdentityClient,
+	notificationClient NotificationClient,
+	storageClient StorageClient,
+) Service {
+	return &service{
+		repo:               repo,
+		learningClient:     learningClient,
+		identityClient:     identityClient,
+		notificationClient: notificationClient,
+		storageClient:      storageClient,
+		cfg:                appConfig,
 	}
 }
 
-var imageContentTypes = map[string]bool{"image/jpeg": true, "image/png": true, "image/webp": true}
-var videoContentTypes = map[string]bool{"video/mp4": true, "video/quicktime": true}
-var fileContentTypes = map[string]bool{
-	"application/pdf":    true,
-	"text/plain":         true,
-	"application/msword": true,
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
-	"application/vnd.ms-excel": true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
-	"application/vnd.ms-powerpoint":                                             true,
-	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
-}
-
-func (s *Service) UploadLimits() *dto.UploadLimitsResponse {
-	return dto.ToUploadLimitsResponse(s.cfg, imageContentTypes, fileContentTypes, videoContentTypes)
-}
-
-func (s *Service) CreateUploadIntent(ctx context.Context, userID string, req dto.CreateUploadIntentRequest) (*dto.UploadIntentResponse, *httpx.HTTPError) {
-	contentType := strings.ToLower(strings.TrimSpace(strings.Split(req.ContentType, ";")[0]))
-	mediaType := model.AttachmentTypeFile
-	maxSize := s.cfg.FileMaxBytes
-	if imageContentTypes[contentType] {
-		mediaType = model.AttachmentTypeImage
-		maxSize = s.cfg.ImageMaxBytes
-	} else if videoContentTypes[contentType] {
-		mediaType, maxSize = model.AttachmentTypeVideo, s.cfg.VideoMaxBytes
-	} else if !fileContentTypes[contentType] {
-		return nil, ErrInvalidAttachment
-	}
-	if req.Size > maxSize {
-		return nil, ErrInvalidAttachment
-	}
-	// Bài viết trong lớp chỉ thành viên đã duyệt hoặc giáo viên của lớp mới được upload.
-	folder := "posts/community"
-	if req.ClassroomID != nil {
-		if _, err := s.classroomAccess(ctx, *req.ClassroomID, userID); err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to create upload intent")
-		}
-		folder = "posts/classrooms"
-	}
-	fileName := storagekey.FileName(req.OriginalName)
-	response, err := s.storage.GeneratePresignedUploadURL(ctx, &storage.GeneratePresignedUploadURLRequest{Folders: strings.Split(folder, "/"), FileName: fileName, ContentType: contentType})
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to create upload intent")
-	}
-	intent := &model.PostUploadIntent{UserID: userID, Folder: folder, FileName: fileName, OriginalName: req.OriginalName, ContentType: contentType, DeclaredSize: req.Size, MediaType: mediaType, Status: model.UploadStatusPending, ExpiresAt: time.Now().Add(s.cfg.UploadIntentTTL)}
-	if err := s.repo.CreateUploadIntent(ctx, intent); err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to create upload intent")
-	}
-	return &dto.UploadIntentResponse{ID: intent.ID, UploadURL: response.Url, ContentType: contentType, ExpiresAt: intent.ExpiresAt}, nil
-}
-
-func (s *Service) CompleteUpload(ctx context.Context, userID string, id uint) (*dto.AttachmentResponse, *httpx.HTTPError) {
-	var result *model.PostAttachment
-	err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		intent, err := repo.GetUploadIntentForUpdate(ctx, id)
-		if err != nil {
-			return err
-		}
-		if intent.UserID != userID {
-			return ErrForbidden
-		}
-		if intent.Status == model.UploadStatusCompleted && intent.AttachmentID != nil {
-			result, err = repo.GetAttachment(ctx, *intent.AttachmentID)
-			return err
-		}
-		if intent.Status != model.UploadStatusPending || time.Now().After(intent.ExpiresAt) {
-			return ErrUploadExpired
-		}
-		meta, err := s.storage.GetObjectMetadata(ctx, &storage.GetObjectMetadataRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName})
-		if err != nil {
-			return err
-		}
-		maxSize := s.cfg.FileMaxBytes
-		switch intent.MediaType {
-		case model.AttachmentTypeImage:
-			maxSize = s.cfg.ImageMaxBytes
-		case model.AttachmentTypeVideo:
-			maxSize = s.cfg.VideoMaxBytes
-		}
-		if meta.Size <= 0 || meta.Size > maxSize || meta.Size != intent.DeclaredSize || !strings.EqualFold(strings.Split(meta.ContentType, ";")[0], intent.ContentType) {
-			return ErrInvalidAttachment
-		}
-		publicURL, err := s.storage.GetPublicURL(ctx, &storage.GetPublicURLRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName})
-		if err != nil {
-			return err
-		}
-		status := model.ProcessingStatusReady
-		if intent.MediaType == model.AttachmentTypeVideo {
-			status = model.ProcessingStatusProcessing
-		}
-		result = &model.PostAttachment{UserID: userID, URL: publicURL.Url, ObjectKey: intent.Folder + "/" + intent.FileName, MediaType: intent.MediaType, OriginalName: intent.OriginalName, ContentType: intent.ContentType, Size: meta.Size, ProcessingStatus: status}
-		if err := repo.CreateAttachment(ctx, result); err != nil {
-			return err
-		}
-		intent.Status, intent.AttachmentID = model.UploadStatusCompleted, &result.ID
-		return repo.SaveUploadIntent(ctx, intent)
-	})
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to complete upload")
-	}
-	return dto.ToAttachmentResponse(result), nil
-}
-
-func (s *Service) CancelUpload(ctx context.Context, userID string, id uint) *httpx.HTTPError {
-	return httpx.FromError(s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		intent, err := repo.GetUploadIntentForUpdate(ctx, id)
-		if err != nil {
-			return err
-		}
-		if intent.UserID != userID {
-			return ErrForbidden
-		}
-		if intent.Status != model.UploadStatusPending {
-			return nil
-		}
-		if _, err := s.storage.DeleteObject(ctx, &storage.DeleteObjectRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName}); err != nil {
-			return err
-		}
-		intent.Status = model.UploadStatusCancelled
-		return repo.SaveUploadIntent(ctx, intent)
-	}), "[ERROR] Failed to cancel upload")
-}
-
-func (s *Service) CleanupExpiredUploads(ctx context.Context, limit int) (int, error) {
-	intents, err := s.repo.ListExpiredUploadIntents(ctx, time.Now(), limit)
-	if err != nil {
-		return 0, err
-	}
-	cleaned := 0
-	for _, intent := range intents {
-		if _, err := s.storage.DeleteObject(ctx, &storage.DeleteObjectRequest{Folders: strings.Split(intent.Folder, "/"), FileName: intent.FileName}); err != nil {
-			continue
-		}
-		intent.Status = model.UploadStatusCancelled
-		if err := s.repo.SaveUploadIntent(ctx, intent); err == nil {
-			cleaned++
-		}
-	}
-	orphans, err := s.repo.ListOrphanAttachments(ctx, time.Now().Add(-s.cfg.UploadIntentTTL), limit)
-	if err != nil {
-		return cleaned, err
-	}
-	for _, attachment := range orphans {
-		parts := strings.Split(strings.Trim(attachment.ObjectKey, "/"), "/")
-		if len(parts) < 2 {
-			continue
-		}
-		if _, err := s.storage.DeleteObject(ctx, &storage.DeleteObjectRequest{Folders: parts[:len(parts)-1], FileName: parts[len(parts)-1]}); err != nil {
-			continue
-		}
-		if err := s.repo.DeleteAttachmentPermanently(ctx, attachment); err == nil {
-			cleaned++
-		}
-	}
-	return cleaned, nil
-}
-
-func (s *Service) classroomAccess(ctx context.Context, classroomID uint, userID string) (*learning.GetClassroomPostAccessResponse, error) {
-	access, err := s.learning.GetClassroomPostAccess(ctx, &learning.GetClassroomPostAccessRequest{
+// ensureBelongsToClassroom kiểm tra người dùng thuộc lớp (giáo viên hoặc học viên đã duyệt), không thì ErrForbidden;
+// trả về thông tin quyền để nơi gọi kiểm tra thêm IsTeacher/Active khi cần.
+func (s *service) ensureBelongsToClassroom(ctx context.Context, classroomID uint, userID string) (*learning.GetClassroomPostAccessResponse, error) {
+	access, err := s.learningClient.GetClassroomPostAccess(ctx, &learning.GetClassroomPostAccessRequest{
 		ClassroomId: uint64(classroomID),
 		UserId:      userID,
 	})
@@ -233,7 +138,7 @@ func (s *Service) classroomAccess(ctx context.Context, classroomID uint, userID 
 	return access, nil
 }
 
-func createInteractionOutbox(ctx context.Context, repo *repository.Repository, eventKey, recipient, title, body, dataType string, postID uint, commentID *uint, classroomID *uint) error {
+func createInteractionOutbox(ctx context.Context, repo repository.Repository, eventKey, recipient, title, body, dataType string, postID uint, commentID *uint, classroomID *uint) error {
 	if recipient == "" {
 		return nil
 	}
@@ -254,643 +159,50 @@ func createInteractionOutbox(ctx context.Context, repo *repository.Repository, e
 	})
 }
 
-func (s *Service) CreateCommunityPost(ctx context.Context, userID string, req dto.CreatePostRequest) (*dto.PostResponse, *httpx.HTTPError) {
-	if strings.TrimSpace(req.Content) == "" && len(req.AttachmentIDs) == 0 {
-		return nil, ErrPostEmpty
-	}
-	post := &model.Post{
-		AuthorID:      userID,
-		Scope:         model.PostScopeCommunity,
-		Content:       req.Content,
-		Status:        model.PostStatusPublished,
-		AllowComments: req.CommentsAllowed(),
-	}
-	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		if err := repo.CreatePost(ctx, post); err != nil {
-			return err
-		}
-		return s.attachToPost(ctx, repo, userID, post.ID, req.AttachmentIDs)
-	}); err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to create community post")
-	}
-	return s.toPostResponse(ctx, post, userID, false), nil
-}
-
-func (s *Service) CreateClassroomPost(ctx context.Context, userID string, classroomID uint, req dto.CreatePostRequest) (*dto.PostResponse, *httpx.HTTPError) {
-	if strings.TrimSpace(req.Content) == "" && len(req.AttachmentIDs) == 0 {
-		return nil, ErrPostEmpty
-	}
-	access, err := s.classroomAccess(ctx, classroomID, userID)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to create classroom post")
-	}
-	if !access.IsTeacher {
-		return nil, ErrForbidden
-	}
-	if !access.Active {
-		return nil, ErrClassroomReadOnly
-	}
-	post := &model.Post{
-		AuthorID:      userID,
-		Scope:         model.PostScopeClassroom,
-		ClassroomID:   &classroomID,
-		Content:       req.Content,
-		Status:        model.PostStatusPublished,
-		AllowComments: req.CommentsAllowed(),
-	}
-	err = s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		if err := repo.CreatePost(ctx, post); err != nil {
-			return err
-		}
-		if err := s.attachToPost(ctx, repo, userID, post.ID, req.AttachmentIDs); err != nil {
-			return err
-		}
-		if len(access.ApprovedStudentIds) == 0 {
-			return nil
-		}
-		return repo.CreateOutbox(ctx, &model.NotificationOutbox{
-			EventKey:   fmt.Sprintf("classroom-post:%d:created", post.ID),
-			Recipients: datatypes.JSONSlice[string](access.ApprovedStudentIds),
-			Title:      access.ClassroomName,
-			Body:       "A new post was published in your classroom.",
-			Data: datatypes.JSONMap{
-				"id":          fmt.Sprint(post.ID),
-				"type":        "CLASSROOM_POST",
-				"classroomId": fmt.Sprint(classroomID),
-			},
-			NextAttemptAt: time.Now(),
-		})
-	})
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to create classroom post")
-	}
-	return s.toPostResponse(ctx, post, userID, true), nil
-}
-
-func (s *Service) attachToPost(ctx context.Context, repo *repository.Repository, userID string, postID uint, ids []uint) error {
-	if len(ids) > s.cfg.MaxAttachments {
-		return ErrInvalidAttachment
-	}
-	if err := repo.AttachToPost(ctx, ids, userID, postID); err != nil {
-		return ErrInvalidAttachment
-	}
-	attachments, err := repo.ListAttachments(ctx, postID)
-	if err != nil {
-		return err
-	}
-	var total int64
-	videoCount := 0
-	for _, attachment := range attachments {
-		total += attachment.Size
-		if attachment.MediaType == model.AttachmentTypeVideo {
-			videoCount++
-		}
-	}
-	if len(attachments) > s.cfg.MaxAttachments || total > s.cfg.PostMaxBytes || videoCount > 1 {
-		return ErrInvalidAttachment
-	}
-	return nil
-}
-
-func (s *Service) ListCommunityPosts(ctx context.Context, userID string, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError) {
-	q.Normalize()
-	items, total, err := s.repo.ListPosts(ctx, model.PostScopeCommunity, nil, model.PostStatusPublished, nil, q.PaginationQuery)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to list community posts")
-	}
-	return s.toPostsResponse(ctx, items, userID, false, total, int(q.Page), int(q.PageSize)), nil
-}
-
-func (s *Service) ListMyCommunityPosts(ctx context.Context, userID string, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError) {
-	q.Normalize()
-	posts, total, err := s.repo.ListCommunityPostsByAuthor(ctx, userID, q.PaginationQuery)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to list user posts")
-	}
-	return s.toPostsResponse(ctx, posts, userID, false, total, int(q.Page), int(q.PageSize)), nil
-}
-
-func (s *Service) ListClassroomPosts(ctx context.Context, userID string, classroomID uint, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError) {
-	return s.listClassroomPosts(ctx, userID, classroomID, q, false)
-}
-
-func (s *Service) ListPinnedClassroomPosts(ctx context.Context, userID string, classroomID uint, q dto.PostsQuery) (*dto.PostsResponse, *httpx.HTTPError) {
-	return s.listClassroomPosts(ctx, userID, classroomID, q, true)
-}
-
-func (s *Service) listClassroomPosts(ctx context.Context, userID string, classroomID uint, q dto.PostsQuery, pinnedOnly bool) (*dto.PostsResponse, *httpx.HTTPError) {
-	access, err := s.classroomAccess(ctx, classroomID, userID)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to list classroom posts")
-	}
-	q.Normalize()
-	var pinned *bool
-	if pinnedOnly {
-		pinnedValue := true
-		pinned = &pinnedValue
-	}
-	items, total, err := s.repo.ListPosts(ctx, model.PostScopeClassroom, &classroomID, model.PostStatusPublished, pinned, q.PaginationQuery)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to list classroom posts")
-	}
-	return s.toPostsResponse(ctx, items, userID, access.IsTeacher, total, int(q.Page), int(q.PageSize)), nil
-}
-
-func (s *Service) GetPost(ctx context.Context, userID string, id uint) (*dto.PostResponse, *httpx.HTTPError) {
-	post, err := s.repo.GetPost(ctx, id)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to get post")
-	}
-	teacher := false
-	if post.Scope == model.PostScopeClassroom {
-		access, err := s.classroomAccess(ctx, *post.ClassroomID, userID)
-		if err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to get post")
-		}
-		teacher = access.IsTeacher
-	}
-	if post.Status != model.PostStatusPublished && post.AuthorID != userID {
-		return nil, ErrNotFound
-	}
-	return s.toPostResponse(ctx, post, userID, teacher), nil
-}
-
-func (s *Service) UpdatePost(ctx context.Context, userID string, id uint, req dto.UpdatePostRequest) (*dto.PostResponse, *httpx.HTTPError) {
-	post, err := s.repo.GetPost(ctx, id)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to update post")
-	}
-	if post.AuthorID != userID {
-		return nil, ErrForbidden
-	}
-	teacher := false
-	if post.Scope == model.PostScopeClassroom {
-		access, err := s.classroomAccess(ctx, *post.ClassroomID, userID)
-		if err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to update post")
-		}
-		if !access.Active {
-			return nil, ErrClassroomReadOnly
-		}
-		teacher = access.IsTeacher
-	}
-	post.Content = req.Content
-	if req.AllowComments != nil {
-		post.AllowComments = *req.AllowComments
-	}
-	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		// Đưa đính kèm về đúng danh sách gửi lên: gỡ cái không còn, gắn cái mới.
-		if req.AttachmentIDs != nil {
-			current, err := repo.ListAttachments(ctx, post.ID)
-			if err != nil {
-				return err
-			}
-			wanted := make(map[uint]struct{}, len(*req.AttachmentIDs))
-			for _, id := range *req.AttachmentIDs {
-				wanted[id] = struct{}{}
-			}
-			existing := make(map[uint]struct{}, len(current))
-			var removed []uint
-			for _, attachment := range current {
-				existing[attachment.ID] = struct{}{}
-				if _, ok := wanted[attachment.ID]; !ok {
-					removed = append(removed, attachment.ID)
-				}
-			}
-			var added []uint
-			for id := range wanted {
-				if _, ok := existing[id]; !ok {
-					added = append(added, id)
-				}
-			}
-			if err := repo.DetachFromPost(ctx, post.ID, removed); err != nil {
-				return err
-			}
-			if err := s.attachToPost(ctx, repo, userID, post.ID, added); err != nil {
-				return err
-			}
-		}
-		if strings.TrimSpace(post.Content) == "" {
-			attachments, err := repo.ListAttachments(ctx, post.ID)
-			if err != nil {
-				return err
-			}
-			if len(attachments) == 0 {
-				return ErrPostEmpty
-			}
-		}
-		return repo.SavePost(ctx, post)
-	}); err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to update post")
-	}
-	return s.toPostResponse(ctx, post, userID, teacher), nil
-}
-
-func (s *Service) DeletePost(ctx context.Context, userID string, id uint) *httpx.HTTPError {
-	post, err := s.repo.GetPost(ctx, id)
-	if err != nil {
-		return httpx.FromError(err, "[ERROR] Failed to delete post")
-	}
-	if post.AuthorID != userID {
-		return ErrForbidden
-	}
-	if post.Scope == model.PostScopeClassroom {
-		access, err := s.classroomAccess(ctx, *post.ClassroomID, userID)
-		if err != nil {
-			return httpx.FromError(err, "[ERROR] Failed to delete post")
-		}
-		if !access.Active {
-			return ErrClassroomReadOnly
-		}
-	}
-	return httpx.FromError(s.repo.DeletePost(ctx, post), "[ERROR] Failed to delete post")
-}
-
-func (s *Service) PinPost(ctx context.Context, userID string, classroomID, postID uint) *httpx.HTTPError {
-	return s.setPostPinned(ctx, userID, classroomID, postID, true)
-}
-
-func (s *Service) UnpinPost(ctx context.Context, userID string, classroomID, postID uint) *httpx.HTTPError {
-	return s.setPostPinned(ctx, userID, classroomID, postID, false)
-}
-
-func (s *Service) setPostPinned(ctx context.Context, userID string, classroomID, postID uint, pinned bool) *httpx.HTTPError {
-	access, err := s.classroomAccess(ctx, classroomID, userID)
-	if err != nil {
-		return httpx.FromError(err, "[ERROR] Failed to update post pin")
-	}
-	if !access.IsTeacher {
-		return ErrForbidden
-	}
-	if !access.Active {
-		return ErrClassroomReadOnly
-	}
-	return httpx.FromError(s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		post, err := repo.GetPostForUpdate(ctx, postID)
-		if err != nil {
-			return err
-		}
-		if post.ClassroomID == nil || *post.ClassroomID != classroomID {
-			return gorm.ErrRecordNotFound
-		}
-		if post.Pinned == pinned {
-			return nil
-		}
-		post.Pinned = pinned
-		if err := repo.SavePost(ctx, post); err != nil {
-			return err
-		}
-		if !pinned || len(access.ApprovedStudentIds) == 0 {
-			return nil
-		}
-		return repo.CreateOutbox(ctx, &model.NotificationOutbox{
-			EventKey:      fmt.Sprintf("classroom-post:%d:pinned:%d", post.ID, post.UpdatedAt.UnixNano()),
-			Recipients:    datatypes.JSONSlice[string](access.ApprovedStudentIds),
-			Title:         access.ClassroomName,
-			Body:          "A post was pinned in your classroom.",
-			Data:          datatypes.JSONMap{"id": fmt.Sprint(post.ID), "type": "CLASSROOM_POST_PINNED", "classroomId": fmt.Sprint(classroomID)},
-			NextAttemptAt: time.Now(),
-		})
-	}), "[ERROR] Failed to update post pin")
-}
-func (s *Service) LikePost(ctx context.Context, userID string, postID uint) *httpx.HTTPError {
-	return s.setPostLiked(ctx, userID, postID, true)
-}
-
-func (s *Service) UnlikePost(ctx context.Context, userID string, postID uint) *httpx.HTTPError {
-	return s.setPostLiked(ctx, userID, postID, false)
-}
-
-func (s *Service) setPostLiked(ctx context.Context, userID string, postID uint, liked bool) *httpx.HTTPError {
-	p, err := s.repo.GetPost(ctx, postID)
-	if err != nil {
-		return httpx.FromError(err, "[ERROR] Failed to update post like")
-	}
-	if p.Status != model.PostStatusPublished && p.AuthorID != userID {
-		return ErrNotFound
-	}
-	if p.Scope == model.PostScopeClassroom {
-		a, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
-		if err != nil {
-			return httpx.FromError(err, "[ERROR] Failed to update post like")
-		}
-		if !a.Active {
-			return ErrClassroomReadOnly
-		}
-	}
-	if liked {
-		return httpx.FromError(s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-			created, err := repo.LikePost(ctx, postID, userID)
-			if err != nil || !created || p.AuthorID == userID {
-				return err
-			}
-			return createInteractionOutbox(ctx, repo,
-				fmt.Sprintf("post:%d:liked-by:%s", p.ID, userID), p.AuthorID,
-				"New like", "Someone liked your post.", "POST_LIKED", p.ID, nil, p.ClassroomID)
-		}), "[ERROR] Failed to update post like")
-	}
-	return httpx.FromError(s.repo.UnlikePost(ctx, postID, userID), "[ERROR] Failed to update post like")
-}
-func (s *Service) ListPostComments(ctx context.Context, userID string, postID uint, query dto.CommentsQuery) (*dto.CommentsResponse, *httpx.HTTPError) {
-	p, err := s.repo.GetPost(ctx, postID)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to list post comments")
-	}
-	if p.Status != model.PostStatusPublished && p.AuthorID != userID {
-		return nil, ErrNotFound
-	}
-	teacher := false
-	if p.Scope == model.PostScopeClassroom {
-		access, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
-		if err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to list post comments")
-		}
-		teacher = access.IsTeacher
-	}
-	query.Normalize()
-	items, total, err := s.repo.ListComments(ctx, postID, query.ParentID, query.Limit(), query.Offset())
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to list post comments")
-	}
-	replyCounts := map[uint]int64{}
-	if query.ParentID == nil {
-		ids := make([]uint, len(items))
-		for i, c := range items {
-			ids[i] = c.ID
-		}
-		if replyCounts, err = s.repo.CountReplies(ctx, ids); err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to list post comments")
-		}
-	}
-	out := make([]*dto.CommentResponse, 0, len(items))
-	for _, c := range items {
-		likes, liked, _ := s.repo.CommentStats(ctx, c.ID, userID)
-		item := dto.ToCommentResponse(c, userID, teacher, likes, liked)
-		item.ReplyCount = replyCounts[c.ID]
-		out = append(out, item)
-	}
-	s.enrichComments(ctx, out)
-	return &dto.CommentsResponse{
-		Comments: out, Page: int(query.Page), PageCount: httpx.ToPageCounts(total, query.PageSize), Total: total,
-	}, nil
-}
-
-// GetPostComment trả một comment (kèm số reply nếu là comment gốc) để client
-// mở thẳng tới comment được thông báo.
-func (s *Service) GetPostComment(ctx context.Context, userID string, id uint) (*dto.CommentResponse, *httpx.HTTPError) {
-	c, err := s.repo.GetComment(ctx, id)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
-	}
-	p, err := s.repo.GetPost(ctx, c.PostID)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
-	}
-	if p.Status != model.PostStatusPublished && p.AuthorID != userID {
-		return nil, ErrNotFound
-	}
-	teacher := false
-	if p.Scope == model.PostScopeClassroom {
-		access, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
-		if err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
-		}
-		teacher = access.IsTeacher
-	}
-	likes, liked, _ := s.repo.CommentStats(ctx, c.ID, userID)
-	out := dto.ToCommentResponse(c, userID, teacher, likes, liked)
-	if c.ParentID == nil {
-		counts, err := s.repo.CountReplies(ctx, []uint{c.ID})
-		if err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to get post comment")
-		}
-		out.ReplyCount = counts[c.ID]
-	}
-	s.enrichComments(ctx, []*dto.CommentResponse{out})
-	return out, nil
-}
-func (s *Service) CreatePostComment(ctx context.Context, userID string, postID uint, req dto.CreateCommentRequest) (*dto.CommentResponse, *httpx.HTTPError) {
-	p, err := s.repo.GetPost(ctx, postID)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to create post comment")
-	}
-	if p.Status != model.PostStatusPublished && p.AuthorID != userID {
-		return nil, ErrNotFound
-	}
-	if !p.AllowComments {
-		return nil, ErrCommentsDisabled
-	}
-	if p.Scope == model.PostScopeClassroom {
-		a, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
-		if err != nil {
-			return nil, httpx.FromError(err, "[ERROR] Failed to create post comment")
-		}
-		if !a.Active {
-			return nil, ErrClassroomReadOnly
-		}
-	}
-	if req.ParentID != nil {
-		return nil, ErrInvalidReply
-	}
-	c := &model.PostComment{PostID: postID, UserID: userID, Content: req.Content}
-	if err := s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-		recipient := p.AuthorID
-		dataType := "POST_COMMENTED"
-		body := "Someone commented on your post."
-		if req.ReplyToCommentID != nil {
-			target, err := repo.GetComment(ctx, *req.ReplyToCommentID)
-			if err != nil || target.PostID != postID {
-				return ErrInvalidReply
-			}
-			if target.ParentID == nil {
-				c.ParentID = &target.ID
-			} else {
-				c.ParentID = target.ParentID
-			}
-			c.ReplyToUserID = &target.UserID
-			recipient = target.UserID
-			dataType = "COMMENT_REPLIED"
-			body = "Someone replied to your comment."
-		}
-		if err := repo.CreateComment(ctx, c); err != nil {
-			return err
-		}
-		if recipient == userID {
-			return nil
-		}
-		return createInteractionOutbox(ctx, repo,
-			fmt.Sprintf("comment:%d:created", c.ID), recipient,
-			"New comment", body, dataType, p.ID, &c.ID, p.ClassroomID)
-	}); err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to create post comment")
-	}
-	out := dto.ToCommentResponse(c, userID, false, 0, false)
-	s.enrichComments(ctx, []*dto.CommentResponse{out})
-	return out, nil
-}
-func (s *Service) LikePostComment(ctx context.Context, userID string, commentID uint) *httpx.HTTPError {
-	return s.setCommentLiked(ctx, userID, commentID, true)
-}
-
-func (s *Service) UnlikePostComment(ctx context.Context, userID string, commentID uint) *httpx.HTTPError {
-	return s.setCommentLiked(ctx, userID, commentID, false)
-}
-
-func (s *Service) setCommentLiked(ctx context.Context, userID string, commentID uint, liked bool) *httpx.HTTPError {
-	c, err := s.repo.GetComment(ctx, commentID)
-	if err != nil {
-		return httpx.FromError(err, "[ERROR] Failed to update comment like")
-	}
-	p, err := s.repo.GetPost(ctx, c.PostID)
-	if err != nil {
-		return httpx.FromError(err, "[ERROR] Failed to update comment like")
-	}
-	if p.Scope == model.PostScopeClassroom {
-		a, err := s.classroomAccess(ctx, *p.ClassroomID, userID)
-		if err != nil {
-			return httpx.FromError(err, "[ERROR] Failed to update comment like")
-		}
-		if !a.Active {
-			return ErrClassroomReadOnly
-		}
-	}
-	if liked {
-		return httpx.FromError(s.repo.Transaction(ctx, func(repo *repository.Repository) error {
-			created, err := repo.LikeComment(ctx, commentID, userID)
-			if err != nil || !created || c.UserID == userID {
-				return err
-			}
-			return createInteractionOutbox(ctx, repo,
-				fmt.Sprintf("comment:%d:liked-by:%s", c.ID, userID), c.UserID,
-				"New like", "Someone liked your comment.", "COMMENT_LIKED", p.ID, &c.ID, p.ClassroomID)
-		}), "[ERROR] Failed to update comment like")
-	}
-	return httpx.FromError(s.repo.UnlikeComment(ctx, commentID, userID), "[ERROR] Failed to update comment like")
-}
-
-func (s *Service) ListPostsForModeration(ctx context.Context, userID string, q dto.ModerationPostsQuery) (*dto.PostsResponse, *httpx.HTTPError) {
-	q.Normalize()
-	items, total, err := s.repo.ListPosts(ctx, model.PostScopeCommunity, nil, q.Status, nil, q.PaginationQuery)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to list posts for moderation")
-	}
-	return s.toPostsResponse(ctx, items, userID, false, total, int(q.Page), int(q.PageSize)), nil
-}
-func (s *Service) ModeratePost(ctx context.Context, admin string, id uint, action model.ModerationAction, reason string) *httpx.HTTPError {
-	return httpx.FromError(s.repo.Transaction(ctx, func(r *repository.Repository) error {
-		p, err := r.GetPostForUpdate(ctx, id)
-		if err != nil {
-			return err
-		}
-		switch action {
-		case model.ModerationHide:
-			p.Status = model.PostStatusHidden
-		case model.ModerationUnhide:
-			p.Status = model.PostStatusPublished
-		case model.ModerationDelete:
-			if err := r.CreateAudit(ctx, &model.PostModerationAudit{PostID: id, AdminUserID: admin, Action: action, Reason: reason}); err != nil {
-				return err
-			}
-			return r.DeletePost(ctx, p)
-		}
-		if err := r.SavePost(ctx, p); err != nil {
-			return err
-		}
-		return r.CreateAudit(ctx, &model.PostModerationAudit{PostID: id, AdminUserID: admin, Action: action, Reason: reason})
-	}), "[ERROR] Failed to moderate post")
-}
-func (s *Service) GetPostModerationAudits(ctx context.Context, id uint) ([]*dto.AuditResponse, *httpx.HTTPError) {
-	items, err := s.repo.ListAudits(ctx, id)
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to get post moderation audits")
-	}
-	return dto.ToAuditResponses(items), nil
-}
-func (s *Service) toPostResponse(ctx context.Context, p *model.Post, user string, teacher bool) *dto.PostResponse {
-	likes, comments, liked, _ := s.repo.PostStats(ctx, p.ID, user)
-	r := dto.ToPostResponse(p, user, teacher, likes, comments, liked, s.postAttachments(ctx, p.ID))
-	s.enrichPosts(ctx, []*dto.PostResponse{r})
-	return r
-}
-func (s *Service) toPostsResponse(ctx context.Context, items []*model.Post, user string, teacher bool, total int64, page, size int) *dto.PostsResponse {
-	out := make([]*dto.PostResponse, len(items))
+// hydratePosts lấy số liệu, đính kèm và tác giả của cả trang bằng vài truy vấn gộp, rồi để dto ghép response.
+func (s *service) hydratePosts(ctx context.Context, items []*model.Post, userID string, teacher bool) ([]*dto.PostResponse, error) {
+	ids := make([]uint, len(items))
+	authorIDs := make([]string, len(items))
 	for i, p := range items {
-		likes, comments, liked, _ := s.repo.PostStats(ctx, p.ID, user)
-		out[i] = dto.ToPostResponse(p, user, teacher, likes, comments, liked, s.postAttachments(ctx, p.ID))
+		ids[i], authorIDs[i] = p.ID, p.AuthorID
 	}
-	s.enrichPosts(ctx, out)
-	return dto.ToPostsResponse(out, total, page, size)
-}
-func (s *Service) postAttachments(ctx context.Context, postID uint) []*dto.AttachmentResponse {
-	items, err := s.repo.ListAttachments(ctx, postID)
+	stats, err := s.repo.GetPostStats(ctx, ids, userID)
 	if err != nil {
-		return []*dto.AttachmentResponse{}
+		return nil, err
 	}
-	return dto.ToAttachmentResponses(items)
+	attachments, err := s.repo.ListAttachments(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return dto.ToPostResponses(items, userID, teacher, stats, attachments, s.getUsers(ctx, authorIDs)), nil
 }
-func (s *Service) enrichPosts(ctx context.Context, items []*dto.PostResponse) {
-	ids := make([]string, 0, len(items))
-	for _, v := range items {
-		ids = append(ids, v.AuthorID)
-	}
-	m := s.getUsersByID(ctx, ids)
-	for _, v := range items {
-		v.Author = m[v.AuthorID]
-	}
-}
-func (s *Service) enrichComments(ctx context.Context, items []*dto.CommentResponse) {
-	ids := []string{}
-	for _, v := range items {
-		ids = append(ids, v.UserID)
-		if v.ReplyToUserID != nil {
-			ids = append(ids, *v.ReplyToUserID)
+
+// hydrateComments lấy số like/reply và người dùng của cả trang bằng truy vấn gộp, rồi để dto ghép response.
+func (s *service) hydrateComments(ctx context.Context, items []*model.PostComment, userID string, teacher bool) ([]*dto.CommentResponse, error) {
+	ids := make([]uint, len(items))
+	userIDs := make([]string, 0, len(items))
+	for i, c := range items {
+		ids[i] = c.ID
+		userIDs = append(userIDs, c.UserID)
+		if c.ReplyToUserID != nil {
+			userIDs = append(userIDs, *c.ReplyToUserID)
 		}
 	}
-	m := s.getUsersByID(ctx, ids)
-	for _, v := range items {
-		v.User = m[v.UserID]
-		if v.ReplyToUserID != nil {
-			v.ReplyToUser = m[*v.ReplyToUserID]
-		}
+	stats, err := s.repo.GetCommentStats(ctx, ids, userID)
+	if err != nil {
+		return nil, err
 	}
+	return dto.ToCommentResponses(items, userID, teacher, stats, s.getUsers(ctx, userIDs)), nil
 }
-func (s *Service) getUsersByID(ctx context.Context, ids []string) map[string]*dto.UserInfo {
+
+// getUsers lấy thông tin người dùng để hiển thị; identity lỗi thì trả rỗng, client vẫn có userId.
+func (s *service) getUsers(ctx context.Context, ids []string) []*identityClient.UserInfo {
 	if len(ids) == 0 {
-		return map[string]*dto.UserInfo{}
+		return nil
 	}
-	usersResp, err := s.identity.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
+	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
 	if err != nil {
-		return map[string]*dto.UserInfo{}
+		return nil
 	}
-	return dto.ToUserInfoMap(usersResp.Users)
-}
-func (s *Service) ProcessNotificationOutbox(ctx context.Context, limit int) (int, error) {
-	if s.notifications == nil {
-		return 0, nil
-	}
-	items, err := s.repo.ClaimOutbox(ctx, time.Now(), limit)
-	if err != nil {
-		return 0, err
-	}
-	done := 0
-	for _, v := range items {
-		data := map[string]string{}
-		for k, x := range v.Data {
-			data[k] = fmt.Sprint(x)
-		}
-		_, e := s.notifications.CreateNotifications(ctx, &notifications.CreateNotificationsRequest{Recipients: []string(v.Recipients), Title: v.Title, Body: v.Body, SourceService: "POSTS", Data: data, IdempotencyKey: v.EventKey})
-		if e != nil {
-			attempts := v.Attempts + 1
-			delay := time.Duration(math.Min(math.Pow(2, float64(attempts)), 300)) * time.Second
-			if x := s.repo.MarkOutboxFailed(ctx, v.ID, attempts, time.Now().Add(delay), e.Error()); x != nil {
-				return done, x
-			}
-			continue
-		}
-		if e = s.repo.MarkOutboxProcessed(ctx, v.ID, time.Now()); e != nil {
-			return done, e
-		}
-		done++
-	}
-	return done, nil
+	return usersResp.Users
 }

@@ -2,8 +2,8 @@ package database
 
 import (
 	"errors"
-	"log"
 
+	"ego/platform/logger"
 	"ego/services/posts/config"
 	"ego/services/posts/internal/model"
 
@@ -16,7 +16,7 @@ func Connect(config *config.AppConfig) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Println("Database connection established")
+	logger.Log.Info().Msg("[STARTUP] Database connection established")
 	return db, nil
 }
 
@@ -25,7 +25,7 @@ func Migrate(db *gorm.DB) error {
 		return errors.New("[DATABASE] Database connection is nil")
 	}
 
-	log.Println("Running database migrations...")
+	logger.Log.Info().Msg("[STARTUP] Running database migrations")
 	if err := db.AutoMigrate(
 		&model.Post{},
 		&model.PostComment{},
@@ -39,6 +39,6 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
-	log.Println("Database migrations completed")
+	logger.Log.Info().Msg("[STARTUP] Database migrations completed")
 	return nil
 }
