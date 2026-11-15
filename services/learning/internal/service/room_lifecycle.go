@@ -13,6 +13,9 @@ import (
 	learningSocket "ego/services/learning/internal/socket"
 )
 
+// finishRoom chuyển phòng sang ENDED, đóng mọi phiên điểm danh còn mở và xóa state tương tác
+// (giơ tay, chia sẻ màn hình, quyền mic/camera) trong một transaction, rồi báo cho cả lớp.
+// Phòng đã ENDED thì không làm gì, để giáo viên và worker cùng kết thúc không xung đột.
 func (s *service) finishRoom(ctx context.Context, room *model.Room) error {
 	now := time.Now()
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
@@ -43,6 +46,13 @@ func (s *service) finishRoom(ctx context.Context, room *model.Room) error {
 	return nil
 }
 
+// ProcessRoomLifecycle chạy định kỳ từ worker cho các phòng cần xử lý:
+//   - Phòng LIVE: đối chiếu người đang kết nối trên LiveKit với DB để tự sửa khi webhook bị
+//     mất (mở/đóng phiên điểm danh, đá người không còn được ở lại, cập nhật host vắng mặt).
+//   - Tự kết thúc phòng chưa mở mà đã quá giờ kết thúc; phòng LIVE quá 4 giờ kể từ giờ bắt
+//     đầu, hoặc đã quá giờ kết thúc mà host vắng liên tục 10 phút.
+//
+// Trả số phòng đã xử lý.
 func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 	rooms, err := s.repo.GetRoomsForLifecycle(ctx, time.Now())
 	if err != nil {
@@ -54,22 +64,24 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 		if room.Status == model.RoomStatusLive && s.mediaClient != nil {
 			var identities []string
 			var mediaErr error
+			var listedAt time.Time // lúc lấy danh sách người đang kết nối
 			for attempt := 1; attempt <= 3; attempt++ {
+				listedAt = time.Now()
 				identities, mediaErr = s.mediaClient.ListParticipants(ctx, media.RoomName(room.ID))
 				if errors.Is(mediaErr, media.ErrRoomNotFound) {
 					// LiveKit dọn phòng trống sau departure_timeout: không ai đang kết nối,
 					// vẫn đối chiếu để đóng các phiên còn mở thay vì bỏ qua như lỗi.
-					logger.Log.Debug().Uint("room_id", room.ID).Msg("[ROOM] Media room is closed, reconciling as empty")
+					logger.Log.Debug().Uint("room_id", room.ID).Msg("[WORKER] Media room is closed, reconciling as empty")
 					identities, mediaErr = nil, nil
 					break
 				}
 				if mediaErr == nil {
 					if attempt > 1 {
-						logger.Log.Info().Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Participant reconcile recovered")
+						logger.Log.Info().Uint("room_id", room.ID).Int("attempt", attempt).Msg("[WORKER] Participant reconcile recovered")
 					}
 					break
 				}
-				logger.Log.Warn().Err(mediaErr).Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Participant reconcile failed")
+				logger.Log.Warn().Err(mediaErr).Uint("room_id", room.ID).Int("attempt", attempt).Msg("[WORKER] Participant reconcile failed")
 				if attempt < 3 {
 					select {
 					case <-ctx.Done():
@@ -79,14 +91,38 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 				}
 			}
 			if mediaErr == nil {
+				// Như webhook join (studentMayStayInRoom): học sinh bị mời ra/xóa khỏi lớp mà vẫn
+				// kết nối (webhook đá ra lỗi hoặc bị mất) thì đá ra, không mở phiên điểm danh.
+				// Nạp thành viên và state một lần cho cả phòng thay vì 2 query mỗi học sinh.
+				members, err := s.repo.GetApprovedMembersByClassroom(ctx, room.Schedule.ClassroomID)
+				if err != nil {
+					return processed, err
+				}
+				states, err := s.repo.GetRoomParticipantStates(ctx, room.ID)
+				if err != nil {
+					return processed, err
+				}
+				mayStay := make(map[string]bool, len(members))
+				for _, member := range members {
+					mayStay[member.UserID] = true
+				}
+				for _, state := range states {
+					if state.RemovedAt != nil {
+						mayStay[state.UserID] = false
+					}
+				}
 				connected := make(map[string]struct{}, len(identities))
 				for _, identity := range identities {
-					connected[identity] = struct{}{}
 					role := model.RoomParticipantRoleParticipant
 					if identity == room.Schedule.Classroom.TeacherID {
 						role = model.RoomParticipantRoleHost
-						room.HostAbsentSince = nil
+					} else if !mayStay[identity] {
+						if err := ignoreNotConnected(s.mediaClient.RemoveParticipant(ctx, media.RoomName(room.ID), identity)); err != nil {
+							logger.Log.Warn().Err(err).Uint("room_id", room.ID).Str("user_id", identity).Msg("[WORKER] Failed to remove disallowed participant")
+						}
+						continue
 					}
+					connected[identity] = struct{}{}
 					if err := s.repo.OpenParticipantSession(ctx, room.ID, identity, role, now); err != nil {
 						return processed, err
 					}
@@ -100,13 +136,22 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 						if err := s.repo.CloseParticipantSession(ctx, room.ID, session.UserID, now); err != nil {
 							return processed, err
 						}
-						if session.Role == model.RoomParticipantRoleHost && room.HostAbsentSince == nil {
-							room.HostAbsentSince = &now
-						}
 					}
 				}
-				if err := s.repo.UpdateRoom(ctx, room); err != nil {
-					return processed, err
+				// Vắng mặt tính từ danh sách LiveKit và chỉ ghi có điều kiện (khi còn LIVE), không
+				// Save cả room đã nạp từ đầu vòng lặp (EndRoom song song sẽ bị ghi đè ENDED thành
+				// LIVE), cũng không ghi giá trị đã nạp: webhook left vừa ghi thời điểm vắng mặt
+				// trong lượt này sẽ bị xóa mất và phòng không còn tự kết thúc.
+				if _, ok := connected[room.Schedule.Classroom.TeacherID]; ok {
+					room.HostAbsentSince = nil
+					if err := s.repo.ClearRoomHostAbsent(ctx, room.ID, listedAt); err != nil {
+						return processed, err
+					}
+				} else {
+					// Lấy lại giá trị đang lưu: webhook left có thể đã ghi thời điểm sớm hơn now.
+					if room.HostAbsentSince, err = s.repo.MarkRoomHostAbsent(ctx, room.ID, now); err != nil {
+						return processed, err
+					}
 				}
 			}
 		}
@@ -124,7 +169,7 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 				if deleteErr == nil {
 					break
 				}
-				logger.Log.Warn().Err(deleteErr).Uint("room_id", room.ID).Int("attempt", attempt).Msg("[ROOM] Automatic media room deletion failed")
+				logger.Log.Warn().Err(deleteErr).Uint("room_id", room.ID).Int("attempt", attempt).Msg("[WORKER] Automatic media room deletion failed")
 				if attempt < 3 {
 					select {
 					case <-ctx.Done():
@@ -145,6 +190,8 @@ func (s *service) ProcessRoomLifecycle(ctx context.Context) (int, error) {
 	return processed, nil
 }
 
+// publishRoomState báo trạng thái phòng (bắt đầu, kết thúc) cho giáo viên và mọi học sinh của
+// lớp qua WebSocket, để màn lịch và màn phòng cập nhật mà không phải tải lại.
 func (s *service) publishRoomState(ctx context.Context, room *model.Room, eventType string) {
 	if s.roomPublisher == nil {
 		return

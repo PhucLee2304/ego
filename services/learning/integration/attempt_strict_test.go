@@ -74,19 +74,19 @@ func TestStrictAttemptEnforcement(t *testing.T) {
 	part5Correct, _ := optionIDs(t, db, part5)
 
 	// Trang 0 đang mở: chọn được; câu trang sau và trang đọc bị khóa.
-	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", created.ID, part2, &part2Correct); err != nil {
+	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", created.ID, part2, &part2Correct); err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.UpdateAttemptAnswer(ctx, "student-1", created.ID, part3, &part3Correct)
+	_, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", created.ID, part3, &part3Correct)
 	requireSocketCode(t, err, socket.ErrorCodeQuestionLocked)
-	_, err = svc.UpdateAttemptAnswer(ctx, "student-1", created.ID, part5, &part5Correct)
+	_, err = svc.UpdateAttemptAnswer(ctx, "student-1", "", created.ID, part5, &part5Correct)
 	requireSocketCode(t, err, socket.ErrorCodeQuestionLocked)
 
 	// Advance lệch trang bị từ chối; đúng trang (audio 0) được nhận, startedAt = now.
-	_, err = svc.AdvanceListening(ctx, "student-1", created.ID, 1)
+	_, err = svc.AdvanceListening(ctx, "student-1", "", created.ID, 1)
 	requireSocketCode(t, err, socket.ErrorCodeListeningPageMismatch)
 	now = startedAt.Add(4 * time.Second)
-	state, err := svc.AdvanceListening(ctx, "student-1", created.ID, 0)
+	state, err := svc.AdvanceListening(ctx, "student-1", "", created.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestStrictAttemptEnforcement(t *testing.T) {
 
 	// Trang 1 có audio 10s: advance trước 8s là quá sớm.
 	now = pageOneStart.Add(7 * time.Second)
-	_, err = svc.AdvanceListening(ctx, "student-1", created.ID, 1)
+	_, err = svc.AdvanceListening(ctx, "student-1", "", created.ID, 1)
 	requireSocketCode(t, err, socket.ErrorCodeListeningAdvanceTooEarly)
 
 	// F5 giữa trang 1: elapsedMs tính từ lúc server nhận advance.
@@ -110,7 +110,7 @@ func TestStrictAttemptEnforcement(t *testing.T) {
 	}
 
 	// Câu trang 0 giờ đã khóa.
-	_, err = svc.UpdateAttemptAnswer(ctx, "student-1", created.ID, part2, &part2Wrong)
+	_, err = svc.UpdateAttemptAnswer(ctx, "student-1", "", created.ID, part2, &part2Wrong)
 	requireSocketCode(t, err, socket.ErrorCodeQuestionLocked)
 
 	// Nộp khi đang nghe trang 1: body đổi câu đã khóa và trả lời trang đọc đều bị bỏ qua.
@@ -183,12 +183,12 @@ func TestListeningOnlyAttemptAutoSubmit(t *testing.T) {
 		id, startedAt := start("listen-advance")
 		now := startedAt
 		service.SetClock(svc, func() time.Time { return now })
-		if _, err := svc.AdvanceListening(ctx, "listen-advance", id, 0); err != nil {
+		if _, err := svc.AdvanceListening(ctx, "listen-advance", "", id, 0); err != nil {
 			t.Fatal(err)
 		}
 		requireStatus(id, model.AttemptStatusInProgress)
 		now = now.Add(10 * time.Second)
-		state, err := svc.AdvanceListening(ctx, "listen-advance", id, 1)
+		state, err := svc.AdvanceListening(ctx, "listen-advance", "", id, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -18,6 +18,8 @@ import (
 // route HTTP), được phía assignment gọi trực tiếp, trong transaction của nó
 // qua withRepo khi cần. Lỗi validate là *httpx.HTTPError 400 (httpx.FromError giữ nguyên).
 
+// createPrivateExam tạo đề riêng cho bài tập giáo viên tự soạn: mỗi câu đúng 4 đáp án A–D và một
+// đáp án đúng, khớp với ràng buộc trigger trong DB.
 func (s *service) createPrivateExam(ctx context.Context, req dto.CreatePrivateExamRequest) (*model.Exam, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	if req.Title == "" {
@@ -79,10 +81,14 @@ func (s *service) createPrivateExam(ctx context.Context, req dto.CreatePrivateEx
 	return exam, nil
 }
 
+// getPrivateExam tải đề riêng của bài tập kèm câu hỏi và đáp án.
 func (s *service) getPrivateExam(ctx context.Context, id uint) (*model.Exam, error) {
 	return s.repo.GetPrivateAssignmentExam(ctx, id)
 }
 
+// updatePrivateExam sửa đề riêng và ghi audit trong một transaction. Đề đã có bài làm thì chỉ
+// được đính chính đáp án (CorrectionOnly, chấm lại bài đã nộp); chưa có bài làm thì thay toàn
+// bộ câu hỏi.
 func (s *service) updatePrivateExam(ctx context.Context, id uint, req dto.UpdatePrivateExamRequest) (*model.Exam, error) {
 	var updated *model.Exam
 	var gradebookEvents []*gradebookEvent

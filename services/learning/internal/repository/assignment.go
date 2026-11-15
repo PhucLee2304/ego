@@ -123,10 +123,12 @@ func (r *repository) GetAssignmentForAttemptValidation(ctx context.Context, id u
 	return &assignment, nil
 }
 
-func (r *repository) GetAssignmentForAttemptValidationForUpdate(ctx context.Context, id uint) (*model.Assignment, error) {
+// GetAssignmentForAttemptValidationForShare khóa FOR SHARE: nhiều học sinh tạo attempt
+// song song, còn giáo viên sửa assignment (FOR UPDATE) phải chờ các tx này xong.
+func (r *repository) GetAssignmentForAttemptValidationForShare(ctx context.Context, id uint) (*model.Assignment, error) {
 	var assignment model.Assignment
 	if err := r.db.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Clauses(clause.Locking{Strength: "SHARE"}).
 		Preload("Classroom").Where("id = ?", id).First(&assignment).Error; err != nil {
 		return nil, err
 	}

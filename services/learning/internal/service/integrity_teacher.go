@@ -17,8 +17,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// Thao tác giám sát của giáo viên (PLAN_ATTEMPT_INTEGRITY.md mục 1.1, 1.2, 1.4, 1.5).
-// Mọi thao tác ghi khóa attempt FOR UPDATE trước (mục 1.6).
+// Thao tác giám sát của giáo viên: xem sự kiện, xem xét vi phạm, đình chỉ, giải phóng phiên,
+// khôi phục kết quả. Mọi thao tác ghi khóa attempt FOR UPDATE trước, để không xung đột với
+// lúc bài đang được nộp hay đình chỉ tự động.
 
 // teacherAssignment kiểm caller là giáo viên của lớp và assignment thuộc lớp.
 func (s *service) teacherAssignment(ctx context.Context, teacherID string, classroomID, assignmentID uint) (*model.Assignment, error) {
@@ -32,6 +33,8 @@ func (s *service) teacherAssignment(ctx context.Context, teacherID string, class
 	return s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
 }
 
+// GetIntegrityEvents liệt kê sự kiện giám sát của một bài tập cho giáo viên, lọc theo học sinh,
+// mức độ, hoặc chỉ các vi phạm chưa xem xét.
 func (s *service) GetIntegrityEvents(ctx context.Context, teacherID string, classroomID, assignmentID uint, query dto.IntegrityEventsQuery) ([]*dto.AttemptIntegrityEventResponse, int64, *httpx.HTTPError) {
 	level := strings.ToUpper(strings.TrimSpace(query.Level))
 	switch model.IntegrityLevel(level) {
@@ -217,7 +220,6 @@ func (s *service) ReleaseAttemptSession(ctx context.Context, teacherID string, c
 	}
 	var response *dto.AttemptIntegrityResponse
 	var events []pendingEvent
-	var attemptID uint
 	err = s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		attempt, err := lockStudentAttempt(ctx, repo, assignment.ID, studentID)
 		if err != nil {
@@ -226,7 +228,6 @@ func (s *service) ReleaseAttemptSession(ctx context.Context, teacherID string, c
 		if attempt.Status != model.AttemptStatusInProgress {
 			return ErrAttemptNotActive
 		}
-		attemptID = attempt.ID
 		attempt.SessionTokenHash = nil
 		attempt.SessionLastSeenAt = nil
 		if err := repo.UpdateAttemptSession(ctx, attempt); err != nil {
@@ -235,7 +236,7 @@ func (s *service) ReleaseAttemptSession(ctx context.Context, teacherID string, c
 		if err := s.recordServerEvent(ctx, repo, attempt, model.IntegrityEventSessionReleased, model.IntegrityLevelLog, nil, nil, &events); err != nil {
 			return err
 		}
-		events = append(events, pendingEvent{userID: attempt.UserID, payload: socket.AttemptEvent{
+		events = append(events, pendingEvent{clearAttemptID: attempt.ID}, pendingEvent{userID: attempt.UserID, payload: socket.AttemptEvent{
 			Type:    socket.EventAttemptSessionRevoked,
 			Payload: socket.AttemptSessionRevokedPayload{AttemptID: attempt.ID, SessionEpoch: attempt.SessionEpoch + 1},
 		}})
@@ -245,7 +246,6 @@ func (s *service) ReleaseAttemptSession(ctx context.Context, teacherID string, c
 	if err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	s.integrity.clearAttempt(attemptID)
 	s.publishPendingEvents(events)
 	return response, nil
 }
@@ -317,6 +317,7 @@ func (s *service) ReinstateAttempt(ctx context.Context, teacherID string, classr
 	return response, nil
 }
 
+// trimmedNote bỏ khoảng trắng của ghi chú; ghi chú rỗng coi như không có.
 func trimmedNote(note *string) *string {
 	if note == nil {
 		return nil

@@ -76,7 +76,7 @@ func TestSubmitAttemptGradesAndStoresHistory(t *testing.T) {
 
 	group := attempt.Sections[0].Groups[0]
 	saved := group.Questions[1].Options[0].ID
-	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", attempt.ID, group.Questions[1].ID, &saved); err != nil {
+	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", attempt.ID, group.Questions[1].ID, &saved); err != nil {
 		t.Fatal(err)
 	}
 	correct := group.Questions[0].Options[0].ID
@@ -143,7 +143,7 @@ func TestSubmitAttemptRejections(t *testing.T) {
 }
 
 // Worker auto-submit: chấm đáp án đã lưu của attempt hết hạn, push
-// ATTEMPT_SUBMITTING rồi ATTEMPT_SUBMITTED; attempt chưa hết hạn không bị đụng.
+// ATTEMPT_SUBMITTED; attempt chưa hết hạn không bị đụng.
 func TestAutoSubmitExpiredAttempts(t *testing.T) {
 	db := learningTestDB(t)
 	ctx := context.Background()
@@ -154,7 +154,7 @@ func TestAutoSubmitExpiredAttempts(t *testing.T) {
 	running := startTOEICTest(t, svc, exam.ID, "student-2")
 
 	reading := expired.Sections[1].Questions[0]
-	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", expired.ID, reading.ID, &reading.Options[0].ID); err != nil {
+	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", expired.ID, reading.ID, &reading.Options[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	expireAttempt(t, db, expired.ID)
@@ -173,7 +173,7 @@ func TestAutoSubmitExpiredAttempts(t *testing.T) {
 	if stillRunning.Status != model.AttemptStatusInProgress {
 		t.Fatalf("running attempt must stay ACTIVE, got %s", stillRunning.Status)
 	}
-	if got := events.types(); len(got) != 2 || got[0] != "ATTEMPT_SUBMITTING" || got[1] != "ATTEMPT_SUBMITTED" {
+	if got := events.types(); len(got) != 1 || got[0] != "ATTEMPT_SUBMITTED" {
 		t.Fatalf("events = %v", got)
 	}
 	if submitted, err := svc.AutoSubmitExpiredAttempts(ctx, 100); err != nil || submitted != 0 {

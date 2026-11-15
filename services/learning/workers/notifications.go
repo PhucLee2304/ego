@@ -18,7 +18,7 @@ func StartNotificationOutbox(ctx context.Context, svc service.Service, interval 
 				return
 			case <-ticker.C:
 				if _, err := svc.ProcessNotificationOutbox(ctx, batchSize); err != nil {
-					logger.Log.Error().Err(err).Msg("[NOTIFICATION_OUTBOX] Processing failed")
+					logger.Log.Error().Err(err).Msg("[WORKER] Processing failed")
 				}
 			}
 		}

@@ -11,7 +11,6 @@ import (
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/webhook"
-	"gorm.io/gorm"
 )
 
 // LiveKitWebhook nhận webhook LiveKit (xác thực chữ ký bằng API key/secret).
@@ -44,11 +43,11 @@ func LiveKitWebhook(svc service.Service, apiKey, apiSecret string) http.HandlerF
 			}
 		}
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if errors.Is(err, service.ErrRoomNotFound) {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			httpx.Error(w, httpx.NewError(http.StatusInternalServerError, err.Error(), err))
+			httpx.Error(w, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to process webhook", err))
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

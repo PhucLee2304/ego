@@ -12,6 +12,7 @@ import (
 	storageClient "ego/api/gen/go/storage"
 	platformdb "ego/platform/db"
 	"ego/platform/httpx"
+	"ego/platform/logger"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
@@ -19,6 +20,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// CreateClassroom tạo lớp mới cho giáo viên với mã lớp ngẫu nhiên 8 ký tự để học sinh nhập
+// khi xin vào lớp. Mã trùng thì sinh lại, tối đa vài lần.
 func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, *httpx.HTTPError) {
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	const codeLength = 8
@@ -42,7 +45,6 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 		}
 
 		var response *dto.CreatedClassroomResponse
-		// Chỉ ghi nhận lớp khi cả dữ liệu lớp và thông tin giáo viên dùng cho response đều lấy thành công.
 		err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 			classroom := &model.Classroom{
 				Code:        string(codeBytes),
@@ -57,16 +59,11 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 			}
 
 			response = dto.ToCreatedClassroomResponse(classroom)
-			// Lấy thông tin hiển thị của giáo viên từ Users thay vì sao chép dữ liệu người dùng sang Classrooms.
-			usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{teacherID}})
-			if err != nil {
-				return err
-			}
-			usersByID := dto.ToUserInfoMap(usersResp.Users)
-			response.Teacher = usersByID[teacherID]
 			return nil
 		})
 		if err == nil {
+			// Lấy thông tin hiển thị của giáo viên từ Users sau khi commit (không gọi gRPC trong tx).
+			response.Teacher = s.usersInfo(ctx, teacherID)[teacherID]
 			return response, nil
 		}
 		// Chỉ sinh mã mới khi vi phạm unique; các lỗi khác phải được trả về ngay.
@@ -77,6 +74,8 @@ func (s *service) CreateClassroom(ctx context.Context, teacherID string, req dto
 	return nil, httpx.NewError(http.StatusInternalServerError, errClassroomServiceFailed, errors.New("[ERROR] Could not generate a unique classroom code"))
 }
 
+// GetClassrooms (admin) liệt kê mọi lớp có phân trang. Tìm theo tên giáo viên được đổi sang
+// tìm theo danh sách teacher ID qua identity, vì tên người dùng không lưu ở learning.
 func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError) {
 	var teacherIDs []string
 	if query.Query != "" {
@@ -117,6 +116,8 @@ func (s *service) GetClassrooms(ctx context.Context, query dto.ClassroomsQuery) 
 	return responses, total, nil
 }
 
+// GetMyClassrooms liệt kê các lớp người dùng dạy hoặc đã được duyệt vào học, kèm thông tin
+// giáo viên và thành viên lấy từ identity.
 func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.ClassroomsQuery) ([]*dto.ClassroomResponse, int64, *httpx.HTTPError) {
 	var teacherIDs []string
 	if query.Query != "" {
@@ -157,6 +158,8 @@ func (s *service) GetMyClassrooms(ctx context.Context, userID string, query dto.
 	return responses, total, nil
 }
 
+// GetClassroom trả chi tiết lớp cho giáo viên hoặc học sinh đã được duyệt; người ngoài lớp
+// bị từ chối để không lộ danh sách thành viên.
 func (s *service) GetClassroom(ctx context.Context, userID string, id uint) (*dto.ClassroomResponse, *httpx.HTTPError) {
 	classroom, err := s.repo.GetClassroomByID(ctx, id)
 	if err != nil {
@@ -176,11 +179,7 @@ func (s *service) GetClassroom(ctx context.Context, userID string, id uint) (*dt
 	for _, member := range classroom.Members {
 		userIDs = append(userIDs, member.UserID)
 	}
-	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
-	if err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
-	}
-	usersByID := dto.ToUserInfoMap(usersResp.Users)
+	usersByID := s.usersInfo(ctx, userIDs...)
 	response.Teacher = usersByID[classroom.TeacherID]
 	for i := range classroom.Members {
 		response.Members[i].User = usersByID[classroom.Members[i].UserID]
@@ -188,6 +187,8 @@ func (s *service) GetClassroom(ctx context.Context, userID string, id uint) (*dt
 	return response, nil
 }
 
+// GetClassroomByCode tra lớp theo mã để học sinh xem trước lớp sẽ xin vào (tên, giáo viên,
+// sĩ số). Lớp đã lưu trữ không nhận học sinh mới nên báo lỗi.
 func (s *service) GetClassroomByCode(ctx context.Context, code string) (*dto.ClassroomByCodeResponse, *httpx.HTTPError) {
 	classroom, err := s.repo.GetClassroomByCode(ctx, strings.ToUpper(strings.TrimSpace(code)))
 	if err != nil {
@@ -201,15 +202,12 @@ func (s *service) GetClassroomByCode(ctx context.Context, code string) (*dto.Cla
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
 	response := dto.ToClassroomByCodeResponse(classroom, countApprovedMembers)
-	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
-	if err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
-	}
-	usersByID := dto.ToUserInfoMap(usersResp.Users)
-	response.Teacher = usersByID[classroom.TeacherID]
+	response.Teacher = s.usersInfo(ctx, classroom.TeacherID)[classroom.TeacherID]
 	return response, nil
 }
 
+// UpdateClassroom cho giáo viên sửa tên, mô tả, ảnh đại diện của lớp; chỉ sửa field được gửi.
+// Lớp đã lưu trữ thì không sửa được.
 func (s *service) UpdateClassroom(ctx context.Context, teacherID string, id uint, req dto.UpdateClassroomRequest) (*dto.ClassroomResponse, *httpx.HTTPError) {
 	avatar, httpErr := s.resolveClassroomAvatar(ctx, req.Avatar)
 	if httpErr != nil {
@@ -240,19 +238,16 @@ func (s *service) UpdateClassroom(ctx context.Context, teacherID string, id uint
 			return err
 		}
 		response = dto.ToClassroomResponse(classroom)
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
-		if err != nil {
-			return err
-		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		response.Teacher = usersByID[classroom.TeacherID]
 		return nil
 	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
+	response.Teacher = s.usersInfo(ctx, teacherID)[teacherID]
 	return response, nil
 }
 
+// ArchiveClassroom lưu trữ lớp (Active = false) thay vì xóa, để giữ lịch sử bài tập và điểm.
+// Không lưu trữ được khi đang có buổi học trực tuyến diễn ra.
 func (s *service) ArchiveClassroom(ctx context.Context, teacherID string, id uint) (*dto.ClassroomResponse, *httpx.HTTPError) {
 	var response *dto.ClassroomResponse
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
@@ -275,16 +270,11 @@ func (s *service) ArchiveClassroom(ctx context.Context, teacherID string, id uin
 			return err
 		}
 		response = dto.ToClassroomResponse(classroom)
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{classroom.TeacherID}})
-		if err != nil {
-			return err
-		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		response.Teacher = usersByID[classroom.TeacherID]
 		return nil
 	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
+	response.Teacher = s.usersInfo(ctx, teacherID)[teacherID]
 	return response, nil
 }
 
@@ -324,4 +314,34 @@ func (s *service) resolveClassroomAvatar(ctx context.Context, fileName *string) 
 		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get avatar URL", err)
 	}
 	return &resp.Url, nil
+}
+
+// usersInfo lấy thông tin hiển thị của các user từ identity (gọi ngoài transaction).
+// Mọi id đều có mặt trong map: user identity không trả về hoặc identity lỗi thì chỉ có ID,
+// để client không gặp teacher/user null. Lỗi identity chỉ ghi log, response thiếu tên/ảnh.
+func (s *service) usersInfo(ctx context.Context, ids ...string) map[string]*dto.UserInfo {
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok || id == "" {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	usersByID := map[string]*dto.UserInfo{}
+	if len(unique) > 0 && s.identityClient != nil {
+		resp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: unique})
+		if err != nil {
+			logger.Log.Error().Err(err).Strs("user_ids", unique).Msg("[ERROR] Failed to load users info")
+		} else {
+			usersByID = dto.ToUserInfoMap(resp.Users)
+		}
+	}
+	for _, id := range unique {
+		if usersByID[id] == nil {
+			usersByID[id] = &dto.UserInfo{ID: id}
+		}
+	}
+	return usersByID
 }

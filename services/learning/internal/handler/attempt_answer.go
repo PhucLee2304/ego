@@ -12,10 +12,10 @@ import (
 func (h *handler) RegisterSocketHandlers(examsHub *platformsocket.Server) {
 	examsHub.Handle(socket.EventAttemptAnswerUpdated, platformsocket.JSONHandler(func(ctx context.Context, client *platformsocket.Client, payload socket.AttemptAnswerUpdatedPayload) (any, error) {
 		// Service đã trả lỗi kèm mã WS (ATTEMPT_NOT_FOUND, ATTEMPT_EXPIRED…).
-		return h.service.UpdateAttemptAnswer(ctx, client.UserID(), payload.AttemptID, payload.QuestionID, payload.OptionID)
+		return h.service.UpdateAttemptAnswer(ctx, client.UserID(), client.ID(), payload.AttemptID, payload.QuestionID, payload.OptionID)
 	}))
 	examsHub.Handle(socket.EventAttemptListeningAdvance, platformsocket.JSONHandler(func(ctx context.Context, client *platformsocket.Client, payload socket.AttemptListeningAdvancePayload) (any, error) {
-		return h.service.AdvanceListening(ctx, client.UserID(), payload.AttemptID, payload.Page)
+		return h.service.AdvanceListening(ctx, client.UserID(), client.ID(), payload.AttemptID, payload.Page)
 	}))
 	// Giám sát: kết nối (client.ID) quyết định ai là chủ phiên làm bài.
 	examsHub.Handle(socket.EventAttemptSessionClaim, platformsocket.JSONHandler(func(ctx context.Context, client *platformsocket.Client, payload socket.AttemptSessionClaimPayload) (any, error) {

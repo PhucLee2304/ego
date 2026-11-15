@@ -13,6 +13,9 @@ import (
 	"ego/services/learning/internal/repository"
 )
 
+// CreateAssignments giao một bài tập cho nhiều lớp cùng lúc: tạo một đề riêng (private) dùng
+// chung, rồi mỗi lớp một assignment với lịch riêng (giờ mở, hạn nộp, thời lượng, giám sát).
+// Mọi lớp được kiểm trước khi mở transaction, để không giao dở dang cho một nửa số lớp.
 func (s *service) CreateAssignments(ctx context.Context, teacherID string, req dto.CreateAssignmentsRequest) (*dto.CreatedAssignmentsResponse, *httpx.HTTPError) {
 	// Kiểm tra toàn bộ lịch, lớp trùng và quyền sở hữu trước khi mở transaction.
 	seenClassroomIDs := make(map[uint]struct{}, len(req.Schedules))
@@ -39,7 +42,7 @@ func (s *service) CreateAssignments(ctx context.Context, teacherID string, req d
 		}
 	}
 
-	// Chuẩn hóa chuỗi nhập vào giống request gRPC CreatePrivateExam cũ.
+	// Chuẩn hóa chuỗi nhập trước khi tạo đề, để tiêu đề và nội dung không dính khoảng trắng thừa.
 	examReq := dto.CreatePrivateExamRequest{
 		Title:       strings.TrimSpace(req.Title),
 		Description: req.Description,
@@ -61,7 +64,7 @@ func (s *service) CreateAssignments(ctx context.Context, teacherID string, req d
 
 	var assignments []*model.Assignment
 	// Đề private, mọi assignment và thông báo nằm trong một transaction: lỗi ở bất
-	// kỳ bước nào thì không còn đề mồ côi (thay DeletePrivateExamRollback cũ).
+	// kỳ bước nào thì không còn đề mồ côi, không cần xóa bù.
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		exam, err := s.withRepo(repo).createPrivateExam(ctx, examReq)
 		if err != nil {
@@ -194,6 +197,8 @@ func assignExistingExamTx(ctx context.Context, repo repository.Repository, teach
 	return assignments, nil
 }
 
+// GetAssignments liệt kê bài tập của lớp có phân trang. Giáo viên thấy kèm bài nộp của từng
+// học sinh; học sinh chỉ thấy bài nộp của mình.
 func (s *service) GetAssignments(ctx context.Context, userID string, classroomID uint, query dto.AssignmentsQuery) ([]*dto.AssignmentResponse, int64, *httpx.HTTPError) {
 	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
 	if err != nil {
@@ -211,8 +216,8 @@ func (s *service) GetAssignments(ctx context.Context, userID string, classroomID
 		}
 	}
 
-	// Inactive assignments intentionally remain visible so students can review
-	// previous results; the response state prevents starting a new attempt.
+	// Bài tập đã tạm dừng vẫn được liệt kê để học sinh xem lại kết quả cũ; trạng thái trong
+	// response chặn việc bắt đầu lượt làm mới.
 	assignments, total, err := s.repo.GetAssignmentsByClassroom(ctx, classroomID, query.PaginationQuery)
 	if err != nil {
 		return nil, 0, httpx.FromError(err, errClassroomServiceFailed)
@@ -250,6 +255,8 @@ func (s *service) GetAssignments(ctx context.Context, userID string, classroomID
 	return responses, total, nil
 }
 
+// GetAssignment trả chi tiết một bài tập của lớp; giáo viên thấy bài nộp của cả lớp, học sinh
+// chỉ thấy của mình.
 func (s *service) GetAssignment(ctx context.Context, userID string, classroomID uint, assignmentID uint) (*dto.AssignmentResponse, *httpx.HTTPError) {
 	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
 	if err != nil {
@@ -301,9 +308,12 @@ func (s *service) GetAssignment(ctx context.Context, userID string, classroomID 
 	return dto.ToAssignmentResponse(assignment, time.Now(), currentUserID, isTeacher, users), nil
 }
 
-// defaultMaxViolations là số lần vi phạm được phép mặc định (PLAN_ATTEMPT_INTEGRITY.md Q1).
+// defaultMaxViolations là số lần vi phạm được phép mặc định: tha hai lần rời màn (có thể vô tình),
+// lần thứ ba mới đình chỉ.
 const defaultMaxViolations = 2
 
+// maxViolationsOrDefault: không gửi hoặc gửi giá trị < 1 thì dùng mặc định, vì cho phép 0 lần
+// vi phạm thì lần rời màn đầu tiên đã bị đình chỉ.
 func maxViolationsOrDefault(value *int) int {
 	if value == nil || *value < 1 {
 		return defaultMaxViolations

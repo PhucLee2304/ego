@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"ego/platform/logger"
 	platformsocket "ego/platform/socket"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
@@ -15,7 +16,7 @@ import (
 
 // UpdateAttemptAnswer phục vụ WS ATTEMPT_ANSWER_UPDATED: lỗi trả về luôn là
 // *platformsocket.HandlerError mang mã lỗi WS, handler gửi thẳng cho client.
-func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error) {
+func (s *service) UpdateAttemptAnswer(ctx context.Context, userID, connectionID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error) {
 	var response *dto.UpdateAttemptAnswerResponse
 	finished := false
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
@@ -27,81 +28,40 @@ func (s *service) UpdateAttemptAnswer(ctx context.Context, userID string, attemp
 		if attempt.Status != model.AttemptStatusInProgress {
 			return platformsocket.NewHandlerError(socket.ErrorCodeAttemptNotActive, ErrAttemptNotActive.Message)
 		}
-
 		now := s.clock()
 		if attempt.ExpiresAt != nil && !now.Before(*attempt.ExpiresAt) {
 			return platformsocket.NewHandlerError(socket.ErrorCodeAttemptExpired, ErrAttemptExpired.Message)
 		}
 
-		// Flow strict: chỉ chọn được đáp án ở trang đang mở (mục 1.4). Câu không thuộc
-		// attempt để kiểm tra bên dưới trả QUESTION_NOT_IN_ATTEMPT như cũ.
+		// Flow strict: chỉ chọn được đáp án ở trang đang mở, để không sửa đáp án của trang nghe
+		// đã qua. Câu không thuộc attempt để kiểm tra bên dưới trả QUESTION_NOT_IN_ATTEMPT.
+		advanced := false
 		if isStrict(attempt) {
-			if advanceListening(attempt, now, s.listeningGrace()) {
-				if err := repo.UpdateAttemptListening(ctx, attempt); err != nil {
-					return err
-				}
-			}
+			advanced = advanceListening(attempt, now, s.listeningGrace())
 			finished = listeningOnlyFinished(attempt)
-			if pageOfQuestion(attempt, questionID) >= 0 && !questionAccess(attempt, questionID) {
-				return platformsocket.NewHandlerError(socket.ErrorCodeQuestionLocked, "[SOCKET] Question is locked")
+		}
+		// Sau kiểm tra hết giờ và lazy advance (tính trong bộ nhớ): kết nối không giữ phiên
+		// vẫn nhận ATTEMPT_EXPIRED và vẫn kích hoạt nộp bài chỉ có phần nghe đã nghe hết,
+		// nhưng không ghi gì vào DB.
+		if err := s.requireSessionOwner(attempt, connectionID); err != nil {
+			return err
+		}
+		if advanced {
+			if err := repo.UpdateAttemptListening(ctx, attempt); err != nil {
+				return err
 			}
 		}
-
-		var matchedQuestion *model.Question
-		var matchedOption *model.Option
-		for sectionIdx := range attempt.Exam.Sections {
-			section := &attempt.Exam.Sections[sectionIdx]
-			if attempt.SectionCode != nil && section.Code != *attempt.SectionCode {
-				continue
-			}
-
-			for questionIdx := range section.Questions {
-				question := &section.Questions[questionIdx]
-				if question.ID != questionID {
-					continue
-				}
-				if len(attempt.PartCodes) > 0 && (question.Part == nil || !partInSlice(*question.Part, attempt.PartCodes)) {
-					continue
-				}
-				matchedQuestion = question
-				break
-			}
-			if matchedQuestion == nil {
-				for groupIdx := range section.Groups {
-					group := &section.Groups[groupIdx]
-					for questionIdx := range group.Questions {
-						question := &group.Questions[questionIdx]
-						if question.ID != questionID {
-							continue
-						}
-						if len(attempt.PartCodes) > 0 && (question.Part == nil || !partInSlice(*question.Part, attempt.PartCodes)) {
-							continue
-						}
-						matchedQuestion = question
-						break
-					}
-					if matchedQuestion != nil {
-						break
-					}
-				}
-			}
-			if matchedQuestion != nil {
-				break
-			}
+		if isStrict(attempt) && pageOfQuestion(attempt, questionID) >= 0 && !questionAccess(attempt, questionID) {
+			return platformsocket.NewHandlerError(socket.ErrorCodeQuestionLocked, "[SOCKET] Question is locked")
 		}
+
+		matchedQuestion := findAttemptQuestion(attempt, questionID)
 		if matchedQuestion == nil {
 			return platformsocket.NewHandlerError(socket.ErrorCodeQuestionNotInAttempt, ErrQuestionNotBelongToAttempt.Message)
 		}
-
+		var matchedOption *model.Option
 		if optionID != nil {
-			for optionIdx := range matchedQuestion.Options {
-				option := &matchedQuestion.Options[optionIdx]
-				if option.ID == *optionID {
-					matchedOption = option
-					break
-				}
-			}
-			if matchedOption == nil {
+			if matchedOption = findOption(matchedQuestion, *optionID); matchedOption == nil {
 				return platformsocket.NewHandlerError(socket.ErrorCodeOptionNotInQuestion, ErrOptionNotBelongToQuestion.Message)
 			}
 		}
@@ -156,9 +116,12 @@ func toAnswerSocketError(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return platformsocket.NewHandlerError(socket.ErrorCodeAttemptNotFound, "[SOCKET] Attempt not found")
 	}
-	return platformsocket.NewHandlerError(socket.ErrorCodeAttemptAnswerRejected, err.Error())
+	// Không gửi nội dung lỗi DB cho client; ghi log để tra cứu.
+	logger.Log.Error().Err(err).Msg("[ERROR] Attempt socket request failed")
+	return platformsocket.NewHandlerError(socket.ErrorCodeAttemptAnswerRejected, "[SOCKET] Answer rejected")
 }
 
+// partInSlice cho biết part có nằm trong danh sách part đã chọn của lượt làm bài không.
 func partInSlice(part model.PartCode, parts []model.PartCode) bool {
 	for _, allowedPart := range parts {
 		if allowedPart == part {

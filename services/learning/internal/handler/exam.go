@@ -8,11 +8,12 @@ import (
 )
 
 // GetList godoc
-// @Summary      Get exams list
-// @Description  Get the list of all exams
+// @Summary      Lấy danh sách đề thi
+// @Description  Trả danh sách đề công khai có phân trang, lọc theo loại đề, năm và từ khóa trong tiêu đề. Không gồm đề riêng của bài tập lớp.
 // @Tags         Exams
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        page      query     int  false  "Page number" default(1)
 // @Param        pageSize  query     int  false  "Page size"   default(10)
 // @Param        type      query     string  false  "Exam type" Enums(THPT, TOEIC) default(THPT)
@@ -40,10 +41,11 @@ func (h *handler) GetList(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetYears godoc
-// @Summary      Get exam years
-// @Description  Distinct years of public exams of a type, newest first
+// @Summary      Lấy danh sách năm của đề thi
+// @Description  Trả các năm (không trùng) có đề công khai thuộc loại đề đã chọn, năm mới nhất trước. Dùng cho bộ lọc theo năm.
 // @Tags         Exams
 // @Produce      json
+// @Security     BearerAuth
 // @Param        type  query     string  false  "Exam type" Enums(THPT, TOEIC) default(THPT)
 // @Success      200   {array}   int
 // @Failure      400   {object}  httpx.HTTPError
@@ -67,11 +69,12 @@ func (h *handler) GetYears(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetByID godoc
-// @Summary      Get exam by ID
-// @Description  Get exam detail by ID
+// @Summary      Lấy chi tiết đề thi
+// @Description  Trả thông tin tổng quan của đề công khai: thời gian làm bài, số câu, các phần thi và số câu mỗi part. Không gồm nội dung câu hỏi; câu hỏi chỉ trả khi bắt đầu làm bài.
 // @Tags         Exams
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id   path      int  true  "Exam ID"
 // @Success      200  {object}  dto.GetExamResponse
 // @Failure      400  {object}  httpx.HTTPError

@@ -11,117 +11,10 @@ import (
 
 	"ego/services/learning/config"
 	"ego/services/learning/internal/dto"
-	"ego/services/learning/internal/media"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
 	"ego/services/learning/internal/service"
 )
-
-type fakeRoomMedia struct {
-	created      map[string]bool
-	participants map[string][]string
-	removed      []string
-	createCalls  int
-	deleteCalls  int
-	tokenCalls   int
-	listFailures int
-	listCalls    int
-	// closedRooms giả lập phòng LiveKit đã bị dọn (ListParticipants trả not_found).
-	closedRooms map[string]bool
-
-	sharers               map[string][]string
-	stopped               []string
-	screenSharePermission map[string]bool
-	disconnected          map[string]bool
-	// permissions là quyền publish hiện tại của phiên đang kết nối, tokens là
-	// quyền ghi trong join token gần nhất của mỗi identity.
-	permissions map[string]media.PublishPermissions
-	tokens      map[string]media.PublishPermissions
-	muted       []string
-}
-
-func (f *fakeRoomMedia) CreateRoom(_ context.Context, room string) error {
-	f.createCalls++
-	f.created[room] = true
-	return nil
-}
-
-func (f *fakeRoomMedia) DeleteRoom(_ context.Context, room string) error {
-	f.deleteCalls++
-	delete(f.created, room)
-	return nil
-}
-
-func (f *fakeRoomMedia) RemoveParticipant(_ context.Context, room, identity string) error {
-	if f.disconnected[identity] {
-		return media.ErrParticipantNotFound
-	}
-	f.removed = append(f.removed, room+":"+identity)
-	return nil
-}
-
-func (f *fakeRoomMedia) ListParticipants(_ context.Context, room string) ([]string, error) {
-	f.listCalls++
-	if f.listFailures > 0 {
-		f.listFailures--
-		return nil, errors.New("temporary media failure")
-	}
-	if f.closedRooms[room] {
-		return nil, media.ErrRoomNotFound
-	}
-	return f.participants[room], nil
-}
-
-func (f *fakeRoomMedia) CreateJoinToken(room, identity, _ string, _ bool, permissions media.PublishPermissions) (string, error) {
-	f.tokenCalls++
-	if f.tokens == nil {
-		f.tokens = map[string]media.PublishPermissions{}
-	}
-	f.tokens[identity] = permissions
-	return room + ":" + identity, nil
-}
-
-func (f *fakeRoomMedia) ListScreenSharers(_ context.Context, room string) ([]string, error) {
-	return append([]string(nil), f.sharers[room]...), nil
-}
-
-func (f *fakeRoomMedia) MuteTracks(_ context.Context, room, identity string, sources ...media.Source) error {
-	if f.disconnected[identity] {
-		return media.ErrParticipantNotFound
-	}
-	for _, source := range sources {
-		f.muted = append(f.muted, fmt.Sprintf("%s:%d", identity, source))
-		if source != media.SourceScreenShare {
-			continue
-		}
-		f.stopped = append(f.stopped, identity)
-		remaining := f.sharers[room][:0]
-		for _, sharer := range f.sharers[room] {
-			if sharer != identity {
-				remaining = append(remaining, sharer)
-			}
-		}
-		if f.sharers != nil {
-			f.sharers[room] = remaining
-		}
-	}
-	return nil
-}
-
-func (f *fakeRoomMedia) SetPublishPermissions(_ context.Context, _ string, identity string, permissions media.PublishPermissions) error {
-	if f.disconnected[identity] {
-		return media.ErrParticipantNotFound
-	}
-	if f.screenSharePermission == nil {
-		f.screenSharePermission = map[string]bool{}
-	}
-	if f.permissions == nil {
-		f.permissions = map[string]media.PublishPermissions{}
-	}
-	f.screenSharePermission[identity] = permissions.ScreenShare
-	f.permissions[identity] = permissions
-	return nil
-}
 
 func TestRoomLifecycleAndPermissions(t *testing.T) {
 	db := learningTestDB(t)
@@ -289,7 +182,8 @@ func TestRoomActivityPermissionsAndCleanup(t *testing.T) {
 	studentState.MicrophoneAllowed = false
 	studentState.ScreenShareRequestedAt = &handRaisedAt
 	studentState.ScreenShareApprovedAt = &approvedAt
-	if err := repo.UpdateRoomParticipantState(ctx, studentState); err != nil {
+	if err := repo.UpdateRoomParticipantState(ctx, studentState, repository.ParticipantColHandRaisedAt, repository.ParticipantColMicrophone,
+		repository.ParticipantColShareRequestedAt, repository.ParticipantColShareApprovedAt); err != nil {
 		t.Fatal(err)
 	}
 	otherState, repoErr := repo.GetOrCreateRoomParticipantState(ctx, roomID, "another-student")
@@ -297,7 +191,7 @@ func TestRoomActivityPermissionsAndCleanup(t *testing.T) {
 		t.Fatal(repoErr)
 	}
 	otherState.HandRaisedAt = &handRaisedAt
-	if err := repo.UpdateRoomParticipantState(ctx, otherState); err != nil {
+	if err := repo.UpdateRoomParticipantState(ctx, otherState, repository.ParticipantColHandRaisedAt); err != nil {
 		t.Fatal(err)
 	}
 	audit := &model.RoomModerationAudit{
@@ -404,104 +298,7 @@ func TestRoomPermissionsForMembershipAndArchivedClassroom(t *testing.T) {
 	}
 }
 
-func TestRoomLifecycleWorkerAndReconcile(t *testing.T) {
-	db := learningTestDB(t)
-
-	ctx, now := context.Background(), time.Now()
-	classroom := &model.Classroom{Code: "ROOM002", Name: "Lifecycle class", TeacherID: "teacher", Active: true}
-	if err := db.Create(classroom).Error; err != nil {
-		t.Fatal(err)
-	}
-	approved, joinedAt := true, now.Add(-time.Hour)
-	if err := db.Create(&model.Member{ClassroomID: classroom.ID, UserID: "student", Approved: &approved, JoinedAt: &joinedAt}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	repo := repository.NewRepository(db)
-	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}, listFailures: 2}
-	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, mediaClient, nil, nil)
-
-	liveSchedule := &model.Schedule{ClassroomID: classroom.ID, Title: "Live", StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour)}
-	if err := db.Create(liveSchedule).Error; err != nil {
-		t.Fatal(err)
-	}
-	startedAt := now.Add(-time.Hour)
-	liveRoom := &model.Room{ScheduleID: liveSchedule.ID, Status: model.RoomStatusLive, StartedAt: &startedAt}
-	if err := db.Create(liveRoom).Error; err != nil {
-		t.Fatal(err)
-	}
-	liveName := fmt.Sprintf("classroom-room-%d", liveRoom.ID)
-	mediaClient.participants[liveName] = []string{"teacher", "student"}
-	if _, err := svc.ProcessRoomLifecycle(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if mediaClient.listCalls != 3 {
-		t.Fatalf("expected reconcile to retry twice, calls=%d", mediaClient.listCalls)
-	}
-	var openCount int64
-	if err := db.Model(&model.RoomParticipant{}).Where("room_id = ? AND left_at IS NULL", liveRoom.ID).Count(&openCount).Error; err != nil || openCount != 2 {
-		t.Fatalf("expected reconcile to open host and student sessions, count=%d err=%v", openCount, err)
-	}
-	mediaClient.participants[liveName] = []string{"teacher"}
-	if _, err := svc.ProcessRoomLifecycle(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Model(&model.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", liveRoom.ID, "student").Count(&openCount).Error; err != nil || openCount != 0 {
-		t.Fatalf("expected reconcile to close missing student session, count=%d err=%v", openCount, err)
-	}
-
-	// LiveKit đã dọn phòng trống: không retry như lỗi, coi là không ai kết nối.
-	mediaClient.closedRooms = map[string]bool{liveName: true}
-	listCallsBefore := mediaClient.listCalls
-	if _, err := svc.ProcessRoomLifecycle(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if mediaClient.listCalls != listCallsBefore+1 {
-		t.Fatalf("expected closed media room not to be retried, calls=%d", mediaClient.listCalls-listCallsBefore)
-	}
-	if err := db.Model(&model.RoomParticipant{}).Where("room_id = ? AND left_at IS NULL", liveRoom.ID).Count(&openCount).Error; err != nil || openCount != 0 {
-		t.Fatalf("expected closed media room to close all open sessions, count=%d err=%v", openCount, err)
-	}
-	if room, err := repo.GetRoomByID(ctx, liveRoom.ID); err != nil || room.Status != model.RoomStatusLive || room.HostAbsentSince == nil {
-		t.Fatalf("expected room to stay live with host marked absent: room=%#v err=%v", room, err)
-	}
-
-	expiredSchedule := &model.Schedule{ClassroomID: classroom.ID, Title: "Never started", StartsAt: now.Add(-2 * time.Hour), EndsAt: now.Add(-time.Hour)}
-	if err := db.Create(expiredSchedule).Error; err != nil {
-		t.Fatal(err)
-	}
-	expiredRoom := &model.Room{ScheduleID: expiredSchedule.ID, Status: model.RoomStatusScheduled}
-	if err := db.Create(expiredRoom).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	absentSchedule := &model.Schedule{ClassroomID: classroom.ID, Title: "Host absent", StartsAt: now.Add(-2 * time.Hour), EndsAt: now.Add(-20 * time.Minute)}
-	if err := db.Create(absentSchedule).Error; err != nil {
-		t.Fatal(err)
-	}
-	absentSince := now.Add(-11 * time.Minute)
-	absentRoom := &model.Room{ScheduleID: absentSchedule.ID, Status: model.RoomStatusLive, StartedAt: &startedAt, HostAbsentSince: &absentSince}
-	if err := db.Create(absentRoom).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	limitSchedule := &model.Schedule{ClassroomID: classroom.ID, Title: "Absolute limit", StartsAt: now.Add(-5 * time.Hour), EndsAt: now.Add(-4 * time.Hour)}
-	if err := db.Create(limitSchedule).Error; err != nil {
-		t.Fatal(err)
-	}
-	limitRoom := &model.Room{ScheduleID: limitSchedule.ID, Status: model.RoomStatusLive, StartedAt: &startedAt}
-	if err := db.Create(limitRoom).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	processed, err := svc.ProcessRoomLifecycle(ctx)
-	if err != nil || processed != 3 {
-		t.Fatalf("expected three rooms to end, processed=%d err=%v", processed, err)
-	}
-	for _, roomID := range []uint{expiredRoom.ID, absentRoom.ID, limitRoom.ID} {
-		room, err := repo.GetRoomByID(ctx, roomID)
-		if err != nil || room.Status != model.RoomStatusEnded || room.EndedAt == nil {
-			t.Fatalf("room %d was not ended: room=%#v err=%v", roomID, room, err)
-		}
-	}
-}
+// Giáo viên kết thúc phòng trong lúc worker đang đối chiếu với LiveKit: worker không được
+// ghi lại bản room đã nạp từ trước (ENDED thành LIVE).
+// Giáo viên rời phòng (webhook left ghi thời điểm vắng mặt) trong lúc worker đang đối chiếu:
+// worker không được xóa thời điểm đó, phòng vẫn tự kết thúc đúng hạn.
