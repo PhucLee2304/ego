@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
+	"ego/platform/logger"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/media"
 	"ego/services/learning/internal/model"
@@ -17,8 +17,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// RequestJoinClassroom cho học sinh xin vào lớp bằng mã lớp. Đã là thành viên hoặc đang chờ
+// duyệt thì trả trạng thái hiện tại; đã bị từ chối thì được xin lại. Lớp đủ sĩ số thì từ chối.
 func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req dto.RequestJoinClassroomRequest) (*dto.ClassroomJoinRequestResponse, *httpx.HTTPError) {
-	var response *dto.ClassroomJoinRequestResponse
+	var member *model.Member
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		classroom, err := repo.GetClassroomByCode(ctx, strings.ToUpper(strings.TrimSpace(req.Code)))
 		if err != nil {
@@ -30,6 +32,16 @@ func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req d
 		if classroom.TeacherID == userID {
 			return ErrTeacherCannotJoinClass
 		}
+		existing, err := repo.GetMember(ctx, classroom.ID, userID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		// Đã là thành viên hoặc đang chờ duyệt: trả trạng thái hiện tại, không báo lại giáo viên.
+		if err == nil && (existing.Approved == nil || *existing.Approved) {
+			existing.Classroom = *classroom
+			member = existing
+			return nil
+		}
 		count, err := repo.CountApprovedMembers(ctx, classroom.ID)
 		if err != nil {
 			return err
@@ -37,67 +49,41 @@ func (s *service) RequestJoinClassroom(ctx context.Context, userID string, req d
 		if count >= int64(s.cfg.MaxStudentsPerClass) {
 			return ErrClassroomCapacityFull
 		}
-		if existing, err := repo.GetMember(ctx, classroom.ID, userID); err == nil {
-			if existing.Approved != nil && !*existing.Approved {
-				existing.Approved = nil
-				existing.ApprovedAt = nil
-				existing.JoinedAt = nil
-				if err := repo.UpsertMember(ctx, existing); err != nil {
-					return err
-				}
-			}
-			existing.Classroom = *classroom
-			response = dto.ToClassroomJoinRequestResponse(existing)
-			usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{existing.UserID, classroom.TeacherID}})
-			if err != nil {
-				return err
-			}
-			usersByID := dto.ToUserInfoMap(usersResp.Users)
-			response.User = usersByID[existing.UserID]
-			response.Classroom.Teacher = usersByID[classroom.TeacherID]
-			if err := createNotificationOutbox(ctx, repo, model.NotificationSourceMember,
-				fmt.Sprintf("classroom:%d:join-request:%d:%d", classroom.ID, existing.ID, existing.UpdatedAt.UnixNano()),
-				[]string{classroom.TeacherID}, "New join request", "A student requested to join "+classroom.Name,
-				"CLASSROOM", classroom.ID, 0, time.Time{}); err != nil {
-				return err
-			}
-			return nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
+		// Chưa có hoặc đã bị từ chối: tạo (lại) yêu cầu chờ duyệt.
+		member = existing
+		if member == nil {
+			member = &model.Member{ClassroomID: classroom.ID, UserID: userID}
 		}
-
-		member := &model.Member{
-			ClassroomID: classroom.ID,
-			UserID:      userID,
-			Approved:    nil,
-			ApprovedAt:  nil,
-			JoinedAt:    nil,
-		}
+		member.Approved = nil
+		member.ApprovedAt = nil
+		member.JoinedAt = nil
 		if err := repo.UpsertMember(ctx, member); err != nil {
 			return err
 		}
 		member.Classroom = *classroom
-		response = dto.ToClassroomJoinRequestResponse(member)
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{member.UserID, classroom.TeacherID}})
-		if err != nil {
-			return err
-		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		response.User = usersByID[member.UserID]
-		response.Classroom.Teacher = usersByID[classroom.TeacherID]
-		if err := createNotificationOutbox(ctx, repo, model.NotificationSourceMember,
+		return createNotificationOutbox(ctx, repo, model.NotificationSourceMember,
 			fmt.Sprintf("classroom:%d:join-request:%d:%d", classroom.ID, member.ID, member.UpdatedAt.UnixNano()),
 			[]string{classroom.TeacherID}, "New join request", "A student requested to join "+classroom.Name,
-			"CLASSROOM", classroom.ID, 0, time.Time{}); err != nil {
-			return err
-		}
-		return nil
+			"CLASSROOM", classroom.ID, 0, time.Time{})
 	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	return response, nil
+	return s.toJoinRequestResponse(ctx, member), nil
 }
 
+// toJoinRequestResponse map member và điền thông tin học sinh + giáo viên; gọi sau khi commit.
+func (s *service) toJoinRequestResponse(ctx context.Context, member *model.Member) *dto.ClassroomJoinRequestResponse {
+	response := dto.ToClassroomJoinRequestResponse(member)
+	usersByID := s.usersInfo(ctx, member.UserID, member.Classroom.TeacherID)
+	response.User = usersByID[member.UserID]
+	if response.Classroom != nil {
+		response.Classroom.Teacher = usersByID[member.Classroom.TeacherID]
+	}
+	return response
+}
+
+// GetJoinRequests liệt kê các yêu cầu vào lớp đang chờ duyệt cho giáo viên, kèm thông tin
+// người xin lấy từ identity.
 func (s *service) GetJoinRequests(ctx context.Context, teacherID string, classroomID uint) ([]*dto.ClassroomJoinRequestResponse, *httpx.HTTPError) {
 	classroom, err := s.repo.GetClassroomByID(ctx, classroomID)
 	if err != nil {
@@ -127,25 +113,21 @@ func (s *service) GetJoinRequests(ctx context.Context, teacherID string, classro
 			}
 		}
 	}
-	if len(userIDs) > 0 {
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: userIDs})
-		if err != nil {
-			return nil, httpx.FromError(err, errClassroomServiceFailed)
-		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		for i, response := range responses {
-			response.User = usersByID[members[i].UserID]
-			if response.Classroom != nil {
-				response.Classroom.Teacher = usersByID[members[i].Classroom.TeacherID]
-			}
+	usersByID := s.usersInfo(ctx, userIDs...)
+	for i, response := range responses {
+		response.User = usersByID[members[i].UserID]
+		if response.Classroom != nil {
+			response.Classroom.Teacher = usersByID[members[i].Classroom.TeacherID]
 		}
 	}
 
 	return responses, nil
 }
 
+// ApproveMember cho giáo viên duyệt học sinh vào lớp và xếp thông báo cho học sinh trong cùng
+// transaction.
 func (s *service) ApproveMember(ctx context.Context, teacherID string, classroomID uint, userID string) (*dto.ClassroomJoinRequestResponse, *httpx.HTTPError) {
-	var response *dto.ClassroomJoinRequestResponse
+	var result *model.Member
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		classroom, err := repo.GetClassroomByID(ctx, classroomID)
 		if err != nil {
@@ -172,14 +154,7 @@ func (s *service) ApproveMember(ctx context.Context, teacherID string, classroom
 		if err := repo.UpsertMember(ctx, member); err != nil {
 			return err
 		}
-		response = dto.ToClassroomJoinRequestResponse(member)
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{member.UserID, member.Classroom.TeacherID}})
-		if err != nil {
-			return err
-		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		response.User = usersByID[member.UserID]
-		response.Classroom.Teacher = usersByID[member.Classroom.TeacherID]
+		result = member
 		if err := createNotificationOutbox(ctx, repo, model.NotificationSourceMember, fmt.Sprintf("classroom:%d:member:%d:approved", classroomID, member.ID),
 			[]string{userID}, "Join request approved", "You are now a member of "+classroom.Name,
 			"CLASSROOM", classroomID, 0, time.Time{}); err != nil {
@@ -189,11 +164,13 @@ func (s *service) ApproveMember(ctx context.Context, teacherID string, classroom
 	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	return response, nil
+	return s.toJoinRequestResponse(ctx, result), nil
 }
 
+// RejectMember cho giáo viên từ chối yêu cầu vào lớp. Bản ghi được giữ (Approved = false) để
+// học sinh xin lại được; key thông báo kèm thời điểm để mỗi lần từ chối đều có thông báo riêng.
 func (s *service) RejectMember(ctx context.Context, teacherID string, classroomID uint, userID string) (*dto.ClassroomJoinRequestResponse, *httpx.HTTPError) {
-	var response *dto.ClassroomJoinRequestResponse
+	var result *model.Member
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		classroom, err := repo.GetClassroomByID(ctx, classroomID)
 		if err != nil {
@@ -217,14 +194,7 @@ func (s *service) RejectMember(ctx context.Context, teacherID string, classroomI
 		if err := repo.UpsertMember(ctx, member); err != nil {
 			return err
 		}
-		response = dto.ToClassroomJoinRequestResponse(member)
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{member.UserID, member.Classroom.TeacherID}})
-		if err != nil {
-			return err
-		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		response.User = usersByID[member.UserID]
-		response.Classroom.Teacher = usersByID[member.Classroom.TeacherID]
+		result = member
 		if err := createNotificationOutbox(ctx, repo, model.NotificationSourceMember,
 			fmt.Sprintf("classroom:%d:member:%d:rejected:%d", classroomID, member.ID, member.UpdatedAt.UnixNano()),
 			[]string{userID}, "Join request declined", "Your request to join "+classroom.Name+" was declined",
@@ -235,7 +205,7 @@ func (s *service) RejectMember(ctx context.Context, teacherID string, classroomI
 	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	return response, nil
+	return s.toJoinRequestResponse(ctx, result), nil
 }
 
 // RemoveMember thu hồi member, nộp bài assignment đang làm, xóa member và ghi outbox
@@ -283,7 +253,9 @@ func (s *service) RemoveMember(ctx context.Context, teacherID string, classroomI
 	if s.mediaClient != nil {
 		rooms, err := s.repo.GetLiveRoomsByClassroom(ctx, classroomID)
 		if err != nil {
-			return httpx.FromError(err, errClassroomServiceFailed)
+			// Member đã bị xóa: chỉ ghi log, không báo lỗi cho thao tác đã thành công.
+			logger.Log.Error().Err(err).Uint("classroom_id", classroomID).Str("user_id", userID).Msg("[ERROR] Failed to load live rooms after removing member")
+			return nil
 		}
 		for _, room := range rooms {
 			_ = s.mediaClient.RemoveParticipant(ctx, media.RoomName(room.ID), userID)

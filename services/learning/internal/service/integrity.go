@@ -4,140 +4,28 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"ego/platform/logger"
 	platformsocket "ego/platform/socket"
-	"ego/services/learning/config"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
 	"ego/services/learning/internal/repository"
 	"ego/services/learning/internal/socket"
 
 	"github.com/google/uuid"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
-// Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md). Bất biến (mục 1.6):
+// Giám sát làm bài. Các bất biến mọi luồng phải giữ:
 //  1. Attempt chỉ chuyển từ ACTIVE sang đã nộp đúng một lần (finalizeAttempt).
 //  2. Chỉ một transaction chốt kết quả cuối: mọi luồng khóa dòng attempt trước.
 //  3. Một sự kiện (eventId) hay một episode (startEventId) chỉ được tính một lần.
 //  4. Bài đình chỉ chưa khôi phục luôn có Score = 0 (applyScore + CHECK ở DB).
 //  5. Push WebSocket và outbox chỉ phát sau khi commit, từ transaction đã chốt.
 
-// integrityRegistry giữ chủ phiên đang sống của từng attempt trong bộ nhớ. learning
-// chạy một instance nên map là đủ; restart thì rỗng và client claim lại.
-type integrityRegistry struct {
-	mu     sync.Mutex
-	owners map[uint]string // attemptID → connectionID
-	conns  map[string]uint // connectionID → attemptID
-}
-
-func newIntegrityRegistry() *integrityRegistry {
-	return &integrityRegistry{owners: make(map[uint]string), conns: make(map[string]uint)}
-}
-
-func (r *integrityRegistry) owner(attemptID uint) string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.owners[attemptID]
-}
-
-func (r *integrityRegistry) setOwner(attemptID uint, connectionID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if previous, ok := r.owners[attemptID]; ok {
-		delete(r.conns, previous)
-	}
-	if previousAttempt, ok := r.conns[connectionID]; ok && r.owners[previousAttempt] == connectionID {
-		delete(r.owners, previousAttempt)
-	}
-	r.owners[attemptID] = connectionID
-	r.conns[connectionID] = attemptID
-}
-
-// releaseConnection gỡ kết nối; trả attempt mà nó đang làm chủ (nếu có).
-func (r *integrityRegistry) releaseConnection(connectionID string) (uint, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	attemptID, ok := r.conns[connectionID]
-	if !ok {
-		return 0, false
-	}
-	delete(r.conns, connectionID)
-	if r.owners[attemptID] != connectionID {
-		return 0, false
-	}
-	delete(r.owners, attemptID)
-	return attemptID, true
-}
-
-func (r *integrityRegistry) clearAttempt(attemptID uint) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if connectionID, ok := r.owners[attemptID]; ok {
-		delete(r.conns, connectionID)
-		delete(r.owners, attemptID)
-	}
-}
-
-func (s *service) integrityCfg() integrityConfig {
-	cfg := defaultIntegrityConfig
-	if s.cfg == nil {
-		return cfg
-	}
-	if s.cfg.IntegrityTakeoverDelayMs > 0 {
-		cfg.TakeoverDelay = time.Duration(s.cfg.IntegrityTakeoverDelayMs) * time.Millisecond
-	}
-	return cfg
-}
-
-func (s *service) integrityConsentVersion() string {
-	if s.cfg == nil || s.cfg.IntegrityConsentVersion == "" {
-		return config.DefaultIntegrityConsentVersion
-	}
-	return s.cfg.IntegrityConsentVersion
-}
-
-// checkIntegrityConsent kiểm consent khi tạo attempt của assignment có giám sát (mục 1.7).
-func (s *service) checkIntegrityConsent(assignment *model.Assignment, consent *dto.IntegrityConsentRequest) error {
-	if assignment == nil || !assignment.Proctored {
-		return nil
-	}
-	if consent == nil || strings.TrimSpace(consent.Version) == "" {
-		return ErrIntegrityConsentRequired
-	}
-	if strings.TrimSpace(consent.Version) != s.integrityConsentVersion() {
-		return ErrIntegrityConsentOutdated
-	}
-	return nil
-}
-
-// applyIntegrityPolicy chụp cấu hình giám sát vào attempt mới (snapshot, Q4).
-func (s *service) applyIntegrityPolicy(attempt *model.Attempt, assignment *model.Assignment, now time.Time) {
-	if assignment == nil || !assignment.Proctored {
-		return
-	}
-	cfg := s.integrityCfg()
-	maxViolations := assignment.MaxViolations
-	if maxViolations < 1 {
-		maxViolations = 1
-	}
-	version := s.integrityConsentVersion()
-	policy := model.IntegrityPolicySnapshot{
-		MaxViolations:   maxViolations,
-		TakeoverDelayMs: int(cfg.TakeoverDelay / time.Millisecond),
-		ConsentVersion:  version,
-	}
-	snapshot := datatypes.NewJSONType(policy)
-	attempt.Proctored = true
-	attempt.IntegrityPolicy = &snapshot
-	attempt.IntegrityConsentAt = &now
-	attempt.IntegrityConsentVersion = &version
-}
-
+// integrityNotFound là lỗi socket chung khi attempt không tồn tại hoặc không thuộc người gọi,
+// để không lộ attempt của người khác.
 func integrityNotFound() error {
 	return platformsocket.NewHandlerError(socket.ErrorCodeAttemptNotFound, "[SOCKET] Attempt not found")
 }
@@ -157,12 +45,15 @@ func lockOwnAttempt(ctx context.Context, repo repository.Repository, attemptID u
 	return attempt, nil
 }
 
-// ClaimAttemptSession phục vụ WS ATTEMPT_SESSION_CLAIM (mục 1.4).
+// ClaimAttemptSession phục vụ WS ATTEMPT_SESSION_CLAIM: kết nối xin quyền làm bài có giám
+// sát, để mỗi lúc chỉ một thiết bị/tab làm bài (xem claimResult).
 func (s *service) ClaimAttemptSession(ctx context.Context, userID, connectionID string, payload socket.AttemptSessionClaimPayload) (*dto.AttemptSessionClaimResponse, error) {
 	cfg := s.integrityCfg()
 	var response *dto.AttemptSessionClaimResponse
 	var rejected *claimDecision
 	var events []pendingEvent
+	var change ownerChange
+	claimed := false
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		attempt, err := lockOwnAttempt(ctx, repo, payload.AttemptID, userID)
 		if err != nil {
@@ -207,7 +98,10 @@ func (s *service) ClaimAttemptSession(ctx context.Context, userID, connectionID 
 				Payload: socket.AttemptSessionRevokedPayload{AttemptID: attempt.ID, SessionEpoch: decision.Epoch},
 			}})
 		}
-		s.integrity.setOwner(attempt.ID, connectionID)
+		// Gắn chủ phiên khi còn giữ khóa dòng attempt để các claim đồng thời áp theo đúng
+		// thứ tự commit; tx lỗi thì restoreOwner trả lại chủ cũ.
+		change = s.integrity.setOwner(attempt.ID, connectionID)
+		claimed = true
 		response = &dto.AttemptSessionClaimResponse{
 			SessionToken: token,
 			SessionEpoch: attempt.SessionEpoch,
@@ -216,8 +110,8 @@ func (s *service) ClaimAttemptSession(ctx context.Context, userID, connectionID 
 		return nil
 	})
 	if err != nil {
-		if response != nil {
-			s.integrity.clearAttempt(payload.AttemptID)
+		if claimed {
+			s.integrity.restoreOwner(payload.AttemptID, connectionID, change)
 		}
 		return nil, err
 	}
@@ -228,6 +122,8 @@ func (s *service) ClaimAttemptSession(ctx context.Context, userID, connectionID 
 	return response, nil
 }
 
+// claimError đổi quyết định từ chối claim sang lỗi socket; SESSION_RECOVERING kèm thời gian
+// cần chờ để client tự thử lại đúng lúc.
 func claimError(decision claimDecision) error {
 	switch decision.Result {
 	case claimRejectRecovering:
@@ -251,7 +147,8 @@ var clientIntegrityEventTypes = map[model.IntegrityEventType]bool{
 	model.IntegrityEventPaste:             true,
 }
 
-// RecordIntegrityEvent phục vụ WS ATTEMPT_INTEGRITY_EVENT (mục 1.3, 1.5).
+// RecordIntegrityEvent phục vụ WS ATTEMPT_INTEGRITY_EVENT: ghi sự kiện giám sát client gửi,
+// phân loại mức độ, tăng số vi phạm và đình chỉ khi vượt ngưỡng.
 func (s *service) RecordIntegrityEvent(ctx context.Context, userID, connectionID string, payload socket.AttemptIntegrityEventPayload) (*dto.IntegrityEventAckResponse, error) {
 	eventType := model.IntegrityEventType(strings.ToUpper(strings.TrimSpace(payload.Type)))
 	eventID := strings.TrimSpace(payload.EventID)
@@ -376,6 +273,8 @@ func recordAwayDuration(ctx context.Context, repo repository.Repository, attempt
 	return nil
 }
 
+// integrityAck dựng phản hồi khi nhận một sự kiện giám sát: mức độ đã phân loại, số thứ tự vi
+// phạm, có phải gửi trùng không, cùng trạng thái giám sát mới để client cập nhật cảnh báo.
 func integrityAck(event *model.AttemptIntegrityEvent, attempt *model.Attempt, duplicate bool) *dto.IntegrityEventAckResponse {
 	return &dto.IntegrityEventAckResponse{
 		EventID:     event.EventID,
@@ -454,6 +353,15 @@ func (s *service) ReleaseAttemptConnection(ctx context.Context, connectionID str
 		return
 	}
 	if err := s.repo.TouchAttemptSession(ctx, attemptID, s.clock()); err != nil {
-		logger.Log.Error().Err(err).Uint("attempt_id", attemptID).Msg("[INTEGRITY] Failed to record session disconnect")
+		logger.Log.Error().Err(err).Uint("attempt_id", attemptID).Msg("[ERROR] Failed to record session disconnect")
 	}
+}
+
+// requireSessionOwner: bài có giám sát chỉ nhận thao tác (đáp án, tiến trang nghe) từ kết
+// nối đang giữ phiên; client claim phiên trước khi gửi đáp án.
+func (s *service) requireSessionOwner(attempt *model.Attempt, connectionID string) error {
+	if !attempt.Proctored || s.integrity.owner(attempt.ID) == connectionID {
+		return nil
+	}
+	return platformsocket.NewHandlerError(socket.ErrorCodeSessionInUse, "[SOCKET] Attempt is open in another session")
 }

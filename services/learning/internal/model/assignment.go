@@ -16,8 +16,12 @@ type Assignment struct {
 	DueAt       time.Time `gorm:"not null;index"`
 	Active      bool      `gorm:"not null;default:true;index"`
 
-	// Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md mục 1.1): MaxViolations là số lần
-	// vi phạm được phép (≥ 1), vượt quá thì đình chỉ.
+	// Giám sát làm bài:
+	//   - Proctored: bật thì học viên phải đồng ý điều khoản giám sát trước khi làm, và các lần
+	//     rời màn hình/chuyển tab bị ghi nhận là vi phạm.
+	//   - MaxViolations: số lần vi phạm được phép (≥ 1, mặc định 2); vượt quá thì bài bị đình
+	//     chỉ và 0 điểm. Giá trị được chụp vào attempt lúc bắt đầu, sửa sau không ảnh hưởng
+	//     bài đang làm.
 	Proctored     bool `gorm:"not null;default:false"`
 	MaxViolations int  `gorm:"not null;default:2"`
 

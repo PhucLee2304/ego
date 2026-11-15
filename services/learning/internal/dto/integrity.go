@@ -7,8 +7,6 @@ import (
 	"ego/services/learning/internal/model"
 )
 
-// Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md mục 1.7–1.9).
-
 // IntegrityConsentRequest là xác nhận đồng ý quy chế, gửi kèm khi tạo attempt có giám sát.
 type IntegrityConsentRequest struct {
 	Version string `json:"version" validate:"required,notblank"`

@@ -14,6 +14,8 @@ const (
 	AttemptDuration120 AttemptDuration = 120
 )
 
+// GetTestDurationByExamType trả thời gian chuẩn (phút) của chế độ thi theo loại đề, giống
+// thời gian thi thật: THPT 60 phút, TOEIC 120 phút. Loại khác trả false.
 func GetTestDurationByExamType(examType ExamType) (int, bool) {
 	switch examType {
 	case ExamTypeTHPT:

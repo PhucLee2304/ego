@@ -33,15 +33,21 @@ type AppConfig struct {
 
 	MaxStudentsPerClass int
 
-	// Luồng TOEIC strict (PLAN_TOEIC_ATTEMPT.md T2). Tắt thì attempt TOEIC tạo ra với Flow = FREE.
+	// Bật thì attempt TOEIC (TEST lẫn PRACTICE) chạy luồng thi thật: phần nghe tự chuyển
+	// trang theo thời gian, không quay lại được. Tắt thì mọi attempt làm tự do (Flow = FREE).
 	TOEICStrictFlowEnabled bool
-	// Thời gian trả lời mục tiêu sau audio của mỗi trang nghe, theo part 1..4 (ms).
-	TOEICListeningGapMs   [4]int
+	// Thời gian cho thí sinh trả lời sau khi audio của trang nghe phát xong, theo part 1..4 (ms).
+	TOEICListeningGapMs [4]int
+	// Thời gian dư cộng thêm vào hạn của mỗi trang nghe (bù trễ mạng, tải audio) trước khi
+	// server tự chuyển trang (ms). <= 0 thì dùng mặc định 20s.
 	TOEICListeningGraceMs int
 
-	// Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md mục 1.3–1.7).
+	// Bài có giám sát: phiên làm bài cũ phải mất kết nối quá thời gian này thì thiết bị/tab
+	// khác mới được chiếm quyền làm tiếp (ms). <= 0 thì dùng mặc định 30s.
 	IntegrityTakeoverDelayMs int
-	IntegrityConsentVersion  string
+	// Phiên bản điều khoản giám sát học viên phải đồng ý trước khi vào bài có giám sát.
+	// Phải khớp với bản FE gửi lên, lệch thì bị từ chối và học viên phải đồng ý lại.
+	IntegrityConsentVersion string
 
 	SeedDir           string
 	SeedUploadWorkers int

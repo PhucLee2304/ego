@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	platformdb "ego/platform/db"
 	"time"
 
 	"ego/services/learning/internal/model"
@@ -16,7 +17,7 @@ func (r *repository) CreateNotificationOutbox(ctx context.Context, event *model.
 
 func (r *repository) ClaimNotificationOutbox(ctx context.Context, now time.Time, limit int) ([]*model.NotificationOutbox, error) {
 	var events []*model.NotificationOutbox
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := platformdb.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("processed_at IS NULL AND next_attempt_at <= ?", now).
 			Order("id ASC").Limit(limit).Find(&events).Error; err != nil {

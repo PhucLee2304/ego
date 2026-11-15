@@ -4,181 +4,24 @@ package integration_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
-	"ego/platform/httpx"
-	platformsocket "ego/platform/socket"
 	"ego/services/learning/config"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
-	"ego/services/learning/internal/repository"
-	"ego/services/learning/internal/service"
 	"ego/services/learning/internal/socket"
 )
 
 // Giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md mục 3): luồng tuần tự và đồng thời.
 
 // pushType đọc type của một push WebSocket (map {type, payload} hoặc struct).
-func pushType(payload any) string {
-	switch event := payload.(type) {
-	case map[string]any:
-		value, _ := event["type"].(string)
-		return value
-	case socket.AttemptEvent:
-		return event.Type
-	case socket.AttemptIntegrityUpdatedEvent:
-		return event.Type
-	case socket.GradebookUpdatedEvent:
-		return event.Type
-	}
-	return ""
-}
-
 // pushRecorder ghi mọi push của một hub.
-type pushRecorder struct {
-	mu       sync.Mutex
-	payloads []any
-}
-
-func (r *pushRecorder) publish(_ string, payload any) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.payloads = append(r.payloads, payload)
-}
-
-func (r *pushRecorder) count(eventType string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for _, payload := range r.payloads {
-		if pushType(payload) == eventType {
-			n++
-		}
-	}
-	return n
-}
-
 // testClock là đồng hồ của service trong test, tiến bằng tay.
-type testClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *testClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *testClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = c.now.Add(d)
-}
-
-type integrityFixture struct {
-	*assignmentFixture
-	clock        *testClock
-	student      *pushRecorder
-	teacher      *pushRecorder
-	assignmentID uint
-	examID       uint
-}
-
-func newIntegrityFixture(t *testing.T, maxViolations int) *integrityFixture {
-	t.Helper()
-	f := newAssignmentFixture(t)
-	clock := &testClock{now: time.Now()}
-	student, teacher := &pushRecorder{}, &pushRecorder{}
-	f.svc = service.New(repository.NewRepository(f.db), &config.AppConfig{}, nil, testIdentityClient{}, nil, nil, teacher.publish, student.publish)
-	service.SetClock(f.svc, clock.Now)
-	schedule := f.schedule(f.classroom.ID)
-	schedule.Proctored, schedule.MaxViolations = true, &maxViolations
-	created, httpErr := f.svc.CreateAssignments(context.Background(), "teacher-1", dto.CreateAssignmentsRequest{
-		Title: "Proctored quiz", Questions: []dto.CreateAssignmentQuestionRequest{assignmentQuestion("1 + 1"), assignmentQuestion("2 + 2")},
-		Schedules: []dto.AssignmentScheduleRequest{schedule},
-	})
-	if httpErr != nil {
-		t.Fatal(httpErr)
-	}
-	assignment := created.Assignments[0]
-	if !assignment.Proctored || assignment.MaxViolations != maxViolations {
-		t.Fatalf("assignment = %#v", assignment)
-	}
-	return &integrityFixture{assignmentFixture: f, clock: clock, student: student, teacher: teacher, assignmentID: assignment.ID, examID: assignment.ExamID}
-}
-
-func (f *integrityFixture) start(t *testing.T) *dto.AttemptResponse {
-	t.Helper()
-	req := assignmentAttemptRequest(f.assignmentID)
-	req.IntegrityConsent = &dto.IntegrityConsentRequest{Version: config.DefaultIntegrityConsentVersion}
-	attempt, httpErr := f.svc.CreateAttempt(context.Background(), "student-1", f.examID, req)
-	if httpErr != nil {
-		t.Fatal(httpErr)
-	}
-	return attempt
-}
-
-func (f *integrityFixture) claim(attemptID uint, conn, token string, takeover bool) (*dto.AttemptSessionClaimResponse, error) {
-	return f.svc.ClaimAttemptSession(context.Background(), "student-1", conn, socket.AttemptSessionClaimPayload{AttemptID: attemptID, SessionToken: token, Takeover: takeover})
-}
-
-func (f *integrityFixture) mustClaim(t *testing.T, attemptID uint, conn, token string, takeover bool) *dto.AttemptSessionClaimResponse {
-	t.Helper()
-	claim, err := f.claim(attemptID, conn, token, takeover)
-	if err != nil {
-		t.Fatalf("claim %s: %v", conn, err)
-	}
-	return claim
-}
-
-func (f *integrityFixture) send(attemptID uint, conn string, epoch int, eventType, eventID string, startEventID *string, replayed bool) (*dto.IntegrityEventAckResponse, error) {
-	return f.svc.RecordIntegrityEvent(context.Background(), "student-1", conn, socket.AttemptIntegrityEventPayload{
-		AttemptID: attemptID, EventID: eventID, SessionEpoch: epoch, Type: eventType, StartEventID: startEventID, Replayed: replayed,
-	})
-}
-
 // awayEpisode gửi một lần rời màn dài d; trả ACK của AWAY_START (vi phạm được tính
 // lúc đó). AWAY_END chỉ gửi khi bài còn đang làm.
-func (f *integrityFixture) awayEpisode(t *testing.T, attemptID uint, conn string, epoch int, id string, d time.Duration) *dto.IntegrityEventAckResponse {
-	t.Helper()
-	start := id + "-start"
-	ack, err := f.send(attemptID, conn, epoch, "AWAY_START", start, nil, false)
-	if err != nil {
-		t.Fatalf("AWAY_START %s: %v", id, err)
-	}
-	f.clock.advance(d)
-	if ack.State.Status == "ACTIVE" {
-		if _, err := f.send(attemptID, conn, epoch, "AWAY_END", id+"-end", &start, false); err != nil {
-			t.Fatalf("AWAY_END %s: %v", id, err)
-		}
-	}
-	return ack
-}
-
-func (f *integrityFixture) attempt(t *testing.T, id uint) model.Attempt {
-	t.Helper()
-	var attempt model.Attempt
-	if err := f.db.First(&attempt, id).Error; err != nil {
-		t.Fatal(err)
-	}
-	return attempt
-}
-
-func requireCode(t *testing.T, err error, code platformsocket.ErrorCode) *platformsocket.HandlerError {
-	t.Helper()
-	var handlerErr *platformsocket.HandlerError
-	if !errors.As(err, &handlerErr) || handlerErr.Code != code {
-		t.Fatalf("error = %v, want %s", err, code)
-	}
-	return handlerErr
-}
-
 func TestIntegrityConsent(t *testing.T) {
 	f := newIntegrityFixture(t, 2)
 	ctx := context.Background()
@@ -463,10 +306,6 @@ func TestIntegrityUnproctoredAndReset(t *testing.T) {
 	requireCode(t, err, socket.ErrorCodeAttemptNotFound)
 }
 
-func pagination() httpx.PaginationQuery {
-	return httpx.PaginationQuery{Page: 1, PageSize: 50}
-}
-
 // Chấm lại sau khi đình chỉ: RawScore đổi, Score vẫn 0.
 func TestIntegrityRegradeKeepsTerminatedScore(t *testing.T) {
 	f := newIntegrityFixture(t, 1)
@@ -527,158 +366,10 @@ func TestIntegrityBanAfterSubmit(t *testing.T) {
 }
 
 // runConcurrently chạy các hàm cùng lúc sau một barrier.
-func runConcurrently(fns ...func()) {
-	var ready, done sync.WaitGroup
-	gate := make(chan struct{})
-	ready.Add(len(fns))
-	done.Add(len(fns))
-	for _, fn := range fns {
-		go func(fn func()) {
-			defer done.Done()
-			ready.Done()
-			<-gate
-			fn()
-		}(fn)
-	}
-	ready.Wait()
-	close(gate)
-	done.Wait()
-}
-
 const concurrencyRounds = 20
 
 // resetAndStart đưa học sinh về attempt mới đã claim, qua ân hạn.
-func (f *integrityFixture) resetAndStart(t *testing.T, round int) (*dto.AttemptResponse, *dto.AttemptSessionClaimResponse, string) {
-	t.Helper()
-	if round > 0 {
-		if httpErr := f.svc.ResetAssignmentAttempt(context.Background(), "teacher-1", f.classroom.ID, f.assignmentID, "student-1"); httpErr != nil {
-			t.Fatal(httpErr)
-		}
-	}
-	attempt := f.start(t)
-	conn := fmt.Sprintf("conn-%d", round)
-	claim := f.mustClaim(t, attempt.ID, conn, "", false)
-	f.clock.advance(11 * time.Second)
-	return attempt, claim, conn
-}
-
-func TestIntegrityConcurrentDuplicateAndDistinctEvents(t *testing.T) {
-	f := newIntegrityFixture(t, 10)
-	for round := 0; round < concurrencyRounds; round++ {
-		attempt, claim, conn := f.resetAndStart(t, round)
-		// Cùng eventId gửi song song: chỉ một lần không phải duplicate. Đồng thời một
-		// lần rời màn khác: count tăng đúng 2.
-		var mu sync.Mutex
-		fresh := 0
-		var fns []func()
-		for i := 0; i < 8; i++ {
-			fns = append(fns, func() {
-				ack, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", "a-start", nil, false)
-				if err != nil {
-					t.Errorf("round %d: %v", round, err)
-					return
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				if !ack.Duplicate {
-					fresh++
-				}
-			})
-		}
-		fns = append(fns, func() {
-			if _, err := f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", "b-start", nil, false); err != nil {
-				t.Errorf("round %d: %v", round, err)
-			}
-		})
-		runConcurrently(fns...)
-		stored := f.attempt(t, attempt.ID)
-		if fresh != 1 || stored.ViolationCount != 2 {
-			t.Fatalf("round %d: fresh=%d violationCount=%d", round, fresh, stored.ViolationCount)
-		}
-	}
-}
-
 // requireConsistentFinish kiểm bất biến sau khi hai luồng chốt bài đua nhau.
-func (f *integrityFixture) requireConsistentFinish(t *testing.T, round int, attemptID uint) {
-	t.Helper()
-	stored := f.attempt(t, attemptID)
-	if stored.Status != model.AttemptStatusSubmitted || stored.Score == nil {
-		t.Fatalf("round %d: attempt = %#v", round, stored)
-	}
-	if stored.IntegrityOutcome == model.IntegrityOutcomeTerminated && *stored.Score != 0 {
-		t.Fatalf("round %d: terminated attempt with score %v", round, *stored.Score)
-	}
-	var submission model.AssignmentSubmission
-	f.db.Where("assignment_id = ? AND student_id = ?", f.assignmentID, "student-1").First(&submission)
-	if submission.Score == nil || *submission.Score != *stored.Score {
-		t.Fatalf("round %d: submission %v vs attempt %v", round, submission.Score, *stored.Score)
-	}
-	var outbox int64
-	f.db.Model(&model.NotificationOutbox{}).Where("event_key = ?", fmt.Sprintf("attempt:%d:submitted", attemptID)).Count(&outbox)
-	if outbox != 1 {
-		t.Fatalf("round %d: outbox rows = %d", round, outbox)
-	}
-}
-
-func TestIntegrityConcurrentSubmitAndBan(t *testing.T) {
-	f := newIntegrityFixture(t, 1)
-	ctx := context.Background()
-	for round := 0; round < concurrencyRounds; round++ {
-		attempt, _, _ := f.resetAndStart(t, round)
-		var banErr, submitErr error
-		runConcurrently(
-			func() {
-				if _, httpErr := f.svc.BanAttempt(ctx, "teacher-1", f.classroom.ID, f.assignmentID, "student-1", dto.BanAttemptRequest{}); httpErr != nil {
-					banErr = httpErr
-				}
-			},
-			func() {
-				if _, httpErr := f.svc.SubmitAttempt(ctx, "student-1", attempt.ID, dto.SubmitAttemptRequest{}); httpErr != nil {
-					submitErr = httpErr
-				}
-			},
-		)
-		if submitErr != nil {
-			t.Fatalf("round %d: submit must return the stored result: %v", round, submitErr)
-		}
-		// Bên thắng quyết định kết quả: Cấm thắng → đình chỉ; Cấm thua → 409, bài nộp thường.
-		want := model.IntegrityOutcomeTerminated
-		if banErr != nil {
-			want = model.IntegrityOutcomeNone
-		}
-		if stored := f.attempt(t, attempt.ID); stored.IntegrityOutcome != want {
-			t.Fatalf("round %d: outcome %s, want %s (ban err %v)", round, stored.IntegrityOutcome, want, banErr)
-		}
-		f.requireConsistentFinish(t, round, attempt.ID)
-	}
-}
-
-func TestIntegrityConcurrentThresholdAndSubmit(t *testing.T) {
-	f := newIntegrityFixture(t, 1)
-	ctx := context.Background()
-	for round := 0; round < concurrencyRounds; round++ {
-		attempt, claim, conn := f.resetAndStart(t, round)
-		f.awayEpisode(t, attempt.ID, conn, claim.SessionEpoch, "first", 5*time.Second)
-		runConcurrently(
-			func() { _, _ = f.send(attempt.ID, conn, claim.SessionEpoch, "AWAY_START", "second-start", nil, false) },
-			func() { _, _ = f.svc.SubmitAttempt(ctx, "student-1", attempt.ID, dto.SubmitAttemptRequest{}) },
-		)
-		f.requireConsistentFinish(t, round, attempt.ID)
-	}
-}
-
-func TestIntegrityConcurrentAutoSubmit(t *testing.T) {
-	f := newIntegrityFixture(t, 2)
-	ctx := context.Background()
-	for round := 0; round < concurrencyRounds; round++ {
-		attempt, _, _ := f.resetAndStart(t, round)
-		if err := f.db.Model(&model.Attempt{}).Where("id = ?", attempt.ID).Update("expires_at", time.Now().Add(-time.Second)).Error; err != nil {
-			t.Fatal(err)
-		}
-		runConcurrently(
-			func() { _, _ = f.svc.AutoSubmitExpiredAttempts(ctx, 10) },
-			func() { _, _ = f.svc.AutoSubmitExpiredAttempts(ctx, 10) },
-		)
-		f.requireConsistentFinish(t, round, attempt.ID)
-	}
-}
+// Bài giám sát đã claim: nộp qua HTTP phải kèm token của phiên đang giữ.
+// Bài giám sát: chỉ kết nối giữ phiên ghi được đáp án; hết giờ thì mọi kết nối nhận
+// ATTEMPT_EXPIRED trước (không phải SESSION_IN_USE).

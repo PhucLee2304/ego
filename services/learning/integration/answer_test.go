@@ -33,10 +33,10 @@ func TestUpdateAttemptAnswer(t *testing.T) {
 	var part2 model.Question
 	db.Where("part = ?", model.Part2).First(&part2)
 
-	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", attempt.ID, part3.ID, &part3Wrong); err != nil {
+	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", attempt.ID, part3.ID, &part3Wrong); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := svc.UpdateAttemptAnswer(ctx, "student-1", attempt.ID, part3.ID, &part3Correct)
+	resp, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", attempt.ID, part3.ID, &part3Correct)
 	if err != nil || *resp.SelectedOptionID != part3Correct {
 		t.Fatalf("resp=%#v err=%v", resp, err)
 	}
@@ -45,7 +45,7 @@ func TestUpdateAttemptAnswer(t *testing.T) {
 	if len(answers) != 1 || *answers[0].SelectedOptionID != part3Correct || !*answers[0].IsCorrect {
 		t.Fatalf("answers after upsert = %#v", answers)
 	}
-	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", attempt.ID, part3.ID, nil); err != nil {
+	if _, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", attempt.ID, part3.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	var count int64
@@ -68,19 +68,19 @@ func TestUpdateAttemptAnswer(t *testing.T) {
 	}
 	for _, tt := range rejections {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.UpdateAttemptAnswer(ctx, tt.userID, attempt.ID, tt.questionID, tt.optionID)
+			_, err := svc.UpdateAttemptAnswer(ctx, tt.userID, "", attempt.ID, tt.questionID, tt.optionID)
 			assertSocketCode(t, err, tt.want)
 		})
 	}
 
 	t.Run("expired attempt", func(t *testing.T) {
 		db.Model(&model.Attempt{}).Where("id = ?", attempt.ID).Update("expires_at", time.Now().Add(-time.Minute))
-		_, err := svc.UpdateAttemptAnswer(ctx, "student-1", attempt.ID, part3.ID, &part3Correct)
+		_, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", attempt.ID, part3.ID, &part3Correct)
 		assertSocketCode(t, err, socket.ErrorCodeAttemptExpired)
 	})
 	t.Run("attempt not active", func(t *testing.T) {
 		db.Model(&model.Attempt{}).Where("id = ?", attempt.ID).Updates(map[string]any{"status": model.AttemptStatusCancelled, "expires_at": nil})
-		_, err := svc.UpdateAttemptAnswer(ctx, "student-1", attempt.ID, part3.ID, &part3Correct)
+		_, err := svc.UpdateAttemptAnswer(ctx, "student-1", "", attempt.ID, part3.ID, &part3Correct)
 		assertSocketCode(t, err, socket.ErrorCodeAttemptNotActive)
 	})
 }

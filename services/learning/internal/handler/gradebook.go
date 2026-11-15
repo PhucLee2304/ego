@@ -87,9 +87,9 @@ func (h *handler) GetClassGradebook(w http.ResponseWriter, r *http.Request) {
 // @Tags Gradebook
 // @Security BearerAuth
 // @Param id path int true "Classroom ID"
-// @Param userId path string true "Student ID"
+// @Param studentId path string true "Student ID"
 // @Success 200 {object} dto.StudentProgressResponse
-// @Router /classrooms/{id}/students/{userId}/progress [get]
+// @Router /classrooms/{id}/students/{studentId}/progress [get]
 func (h *handler) GetStudentProgress(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
@@ -101,9 +101,9 @@ func (h *handler) GetStudentProgress(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid classroom ID", err))
 		return
 	}
-	studentID := r.PathValue("userId")
+	studentID := r.PathValue("studentId")
 	if studentID == "" {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid user ID", nil))
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid student ID", nil))
 		return
 	}
 	response, httpErr := h.service.GetStudentProgress(r.Context(), userID, classroomID, studentID)

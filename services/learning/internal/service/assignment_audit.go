@@ -15,6 +15,8 @@ import (
 // auditTimezone: giờ trong dòng lịch sử hiển thị theo giờ Việt Nam (người dùng của Ego).
 var auditTimezone = time.FixedZone("ICT", 7*60*60)
 
+// auditChanges đổi danh sách dòng mô tả sang JSON để lưu ExamAudit.Changes. Luôn trả mảng
+// hợp lệ (kể cả khi rỗng hoặc lỗi), vì cột not null và client luôn đọc như mảng.
 func auditChanges(changes []string) datatypes.JSON {
 	if len(changes) == 0 {
 		return datatypes.JSON("[]")
@@ -116,10 +118,13 @@ func describeScheduleChanges(className string, assignment *model.Assignment, sch
 	return lines
 }
 
+// describeAssigned mô tả việc giao bài cho một lớp kèm lịch, dùng trong Change history.
 func describeAssigned(className string, schedule dto.AssignmentScheduleRequest) string {
 	return fmt.Sprintf("Assigned to %s (opens %s, due %s, %d min)", className, auditTime(schedule.OpensAt), auditTime(schedule.DueAt), schedule.Duration)
 }
 
+// optionsChanged so nội dung các đáp án (bỏ khoảng trắng hai đầu), để sửa khoảng trắng không
+// bị ghi là thay đổi.
 func optionsChanged(next, old []string) bool {
 	if len(next) != len(old) {
 		return true
@@ -132,6 +137,7 @@ func optionsChanged(next, old []string) bool {
 	return false
 }
 
+// optionLetter đổi chỉ số đáp án (0, 1, 2…) sang chữ cái (A, B, C…) để hiển thị.
 func optionLetter(index int) string {
 	if index < 0 || index > 25 {
 		return "?"
@@ -139,10 +145,13 @@ func optionLetter(index int) string {
 	return string(rune('A' + index))
 }
 
+// auditTime định dạng thời gian theo múi giờ hiển thị cho dòng mô tả audit.
 func auditTime(value time.Time) string {
 	return value.In(auditTimezone).Format("Jan 2, 15:04")
 }
 
+// shorten cắt chuỗi dài (theo ký tự, không theo byte, để không cắt giữa ký tự tiếng Việt)
+// để dòng mô tả audit gọn.
 func shorten(value string, limit int) string {
 	runes := []rune(strings.TrimSpace(value))
 	if len(runes) <= limit {

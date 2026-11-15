@@ -42,10 +42,37 @@ func (r *repository) GetRoomByName(ctx context.Context, name string) (*model.Roo
 // SetRoomHostAbsentSince chỉ ghi cột host_absent_since khi room còn LIVE.
 // Webhook join/leave chạy song song với EndRoom nên không được Save cả dòng:
 // bản ghi nạp trước khi room kết thúc sẽ ghi đè status ENDED thành LIVE.
+// Xóa (absentSince nil) chỉ ghi khi đang có giá trị, để worker gọi mỗi lượt không ghi thừa.
 func (r *repository) SetRoomHostAbsentSince(ctx context.Context, roomID uint, absentSince *time.Time) error {
+	query := r.db.WithContext(ctx).Model(&model.Room{}).Where("id = ? AND status = ?", roomID, model.RoomStatusLive)
+	if absentSince == nil {
+		query = query.Where("host_absent_since IS NOT NULL")
+	}
+	return query.Update("host_absent_since", absentSince).Error
+}
+
+// MarkRoomHostAbsent đặt host_absent_since chỉ khi chưa có (giữ thời điểm vắng mặt sớm hơn
+// do webhook left ghi), rồi trả giá trị đang lưu.
+func (r *repository) MarkRoomHostAbsent(ctx context.Context, roomID uint, at time.Time) (*time.Time, error) {
+	if err := r.db.WithContext(ctx).Model(&model.Room{}).
+		Where("id = ? AND status = ? AND host_absent_since IS NULL", roomID, model.RoomStatusLive).
+		Update("host_absent_since", at).Error; err != nil {
+		return nil, err
+	}
+	var room model.Room
+	if err := r.db.WithContext(ctx).Select("id", "host_absent_since").Where("id = ?", roomID).Limit(1).Find(&room).Error; err != nil {
+		return nil, err
+	}
+	return room.HostAbsentSince, nil
+}
+
+// ClearRoomHostAbsent xóa thời điểm vắng mặt ghi trước [before] (lúc lấy danh sách người
+// đang kết nối): giáo viên có trong danh sách đó nhưng rời phòng ngay sau thì thời điểm
+// webhook left ghi (sau [before]) được giữ.
+func (r *repository) ClearRoomHostAbsent(ctx context.Context, roomID uint, before time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.Room{}).
-		Where("id = ? AND status = ?", roomID, model.RoomStatusLive).
-		Update("host_absent_since", absentSince).Error
+		Where("id = ? AND status = ? AND host_absent_since < ?", roomID, model.RoomStatusLive, before).
+		Update("host_absent_since", nil).Error
 }
 
 func (r *repository) UpdateRoom(ctx context.Context, room *model.Room) error {

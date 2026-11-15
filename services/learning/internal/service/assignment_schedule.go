@@ -11,12 +11,14 @@ import (
 	"ego/services/learning/internal/repository"
 )
 
+// SetAssignmentActive bật hoặc tạm dừng bài tập. Tạm dừng thì nộp luôn các bài đang làm, để
+// không ai tiếp tục làm khi bài đã đóng. Không bật lại được bài đã quá hạn nộp.
 func (s *service) SetAssignmentActive(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, active bool) (*dto.AssignmentResponse, *httpx.HTTPError) {
 	var response *dto.AssignmentResponse
 	var events []pendingEvent
 
-	// Tắt assignment và nộp các bài đang làm trong cùng một transaction (thay RPC
-	// SubmitAssignmentAttempts + bật lại assignment khi RPC lỗi).
+	// Tắt assignment và nộp các bài đang làm trong cùng một transaction, để không có lúc bài
+	// đã tạm dừng mà vẫn còn người đang làm.
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		classroom, err := repo.GetClassroomByID(ctx, classroomID)
 		if err != nil {
@@ -109,7 +111,7 @@ func updateAssignmentScheduleTx(ctx context.Context, repo repository.Repository,
 	assignment.Duration = req.Duration
 	assignment.OpensAt = req.OpensAt
 	assignment.DueAt = req.DueAt
-	// Giám sát chỉ áp cho attempt tạo sau (snapshot, Q4).
+	// Giám sát chỉ áp cho attempt tạo sau: attempt đang làm giữ cấu hình đã chụp lúc bắt đầu.
 	if req.Proctored != nil {
 		assignment.Proctored = *req.Proctored
 	}

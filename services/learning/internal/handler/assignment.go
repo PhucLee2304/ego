@@ -175,6 +175,21 @@ func (h *handler) SetAssignmentActive(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, resp)
 }
 
+// GetEditableAssignment godoc
+// @Summary      Get assignment for editing
+// @Description  Return the assignment content with questions and how many attempts would be affected by an edit. Only the classroom teacher can perform this action.
+// @Tags         Classrooms
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        assignmentId path int true "Assignment ID"
+// @Success      200 {object} dto.EditableAssignmentResponse
+// @Failure      400 {object} httpx.HTTPError
+// @Failure      401 {object} httpx.HTTPError
+// @Failure      403 {object} httpx.HTTPError
+// @Failure      404 {object} httpx.HTTPError
+// @Failure      500 {object} httpx.HTTPError
+// @Router       /classrooms/{id}/assignments/{assignmentId}/edit [get]
 func (h *handler) GetEditableAssignment(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
@@ -199,6 +214,24 @@ func (h *handler) GetEditableAssignment(w http.ResponseWriter, r *http.Request) 
 	httpx.JSON(w, http.StatusOK, response)
 }
 
+// UpdateAssignment godoc
+// @Summary      Update an assignment
+// @Description  Update the assignment content or schedule. Returns 409 CONFIRMATION_REQUIRED when the change affects existing attempts and has not been confirmed. Only the classroom teacher can perform this action.
+// @Tags         Classrooms
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        assignmentId path int true "Assignment ID"
+// @Param        request body dto.UpdateAssignmentRequest true "Assignment update"
+// @Success      200 {object} dto.AssignmentResponse
+// @Failure      400 {object} httpx.HTTPError
+// @Failure      401 {object} httpx.HTTPError
+// @Failure      403 {object} httpx.HTTPError
+// @Failure      404 {object} httpx.HTTPError
+// @Failure      409 {object} httpx.HTTPError
+// @Failure      500 {object} httpx.HTTPError
+// @Router       /classrooms/{id}/assignments/{assignmentId} [put]
 func (h *handler) UpdateAssignment(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
@@ -228,6 +261,22 @@ func (h *handler) UpdateAssignment(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, response)
 }
 
+// ResetAssignmentAttempt godoc
+// @Summary      Reset a student's assignment attempt
+// @Description  Delete the student's attempt so they can take the assignment again. Only the classroom teacher can perform this action.
+// @Tags         Classrooms
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        assignmentId path int true "Assignment ID"
+// @Param        studentId path string true "Student ID"
+// @Success      204
+// @Failure      400 {object} httpx.HTTPError
+// @Failure      401 {object} httpx.HTTPError
+// @Failure      403 {object} httpx.HTTPError
+// @Failure      404 {object} httpx.HTTPError
+// @Failure      500 {object} httpx.HTTPError
+// @Router       /classrooms/{id}/assignments/{assignmentId}/students/{studentId}/attempt [delete]
 func (h *handler) ResetAssignmentAttempt(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {
@@ -256,6 +305,21 @@ func (h *handler) ResetAssignmentAttempt(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetAssignmentAudits godoc
+// @Summary      Get assignment change history
+// @Description  List edits and answer corrections of the assignment, newest first. Only the classroom teacher can perform this action.
+// @Tags         Classrooms
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path int true "Classroom ID"
+// @Param        assignmentId path int true "Assignment ID"
+// @Success      200 {array} dto.ExamAuditResponse
+// @Failure      400 {object} httpx.HTTPError
+// @Failure      401 {object} httpx.HTTPError
+// @Failure      403 {object} httpx.HTTPError
+// @Failure      404 {object} httpx.HTTPError
+// @Failure      500 {object} httpx.HTTPError
+// @Router       /classrooms/{id}/assignments/{assignmentId}/audits [get]
 func (h *handler) GetAssignmentAudits(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwt.GetUserID(r.Context())
 	if !ok {

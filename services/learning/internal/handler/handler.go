@@ -76,7 +76,7 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	// Gradebook
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/gradebook", mw.Handle(h.GetGradebook))
 	mux.HandleFunc("GET /classrooms/{id}/gradebook", mw.Handle(h.GetClassGradebook))
-	mux.HandleFunc("GET /classrooms/{id}/students/{userId}/progress", mw.Handle(h.GetStudentProgress))
+	mux.HandleFunc("GET /classrooms/{id}/students/{studentId}/progress", mw.Handle(h.GetStudentProgress))
 	mux.HandleFunc("GET /classrooms/{id}/assignments/{assignmentId}/analytics", mw.Handle(h.GetAssignmentAnalytics))
 	mux.HandleFunc("POST /classrooms/{id}/assignments/{assignmentId}/gradebook/reconcile", mw.Handle(h.ReconcileAssignmentSubmissions))
 
@@ -115,7 +115,6 @@ func (h *handler) RegisterRoutes(mux *http.ServeMux, mw *jwt.AuthMiddleware, rm 
 	mux.HandleFunc("POST /classrooms/{id}/rooms/{roomId}/participants/{userId}/remove", mw.Handle(h.RemoveParticipant))
 }
 
-// RegisterSockets mount 2 hub WebSocket riêng, giữ nguyên đường dẫn của exams và classrooms.
 func RegisterSockets(mux *http.ServeMux, examsHub, classroomsHub http.Handler) {
 	mux.Handle("/ws/exams", examsHub)
 	mux.Handle("/ws/classrooms", classroomsHub)
