@@ -10,6 +10,7 @@ import (
 	"ego/services/learning/internal/repository"
 )
 
+// GetList liệt kê đề công khai có phân trang, lọc theo loại đề, năm, tên đề.
 func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.GetExamsResponse, int64, *httpx.HTTPError) {
 	exams, total, err := s.repo.GetListExam(ctx, repository.ExamFilter{Type: query.Type, Search: query.Search, Year: query.Year}, query.Limit(), query.Offset())
 	if err != nil {
@@ -24,6 +25,7 @@ func (s *service) GetList(ctx context.Context, query dto.GetExamsQuery) ([]*dto.
 	return examDTOs, total, nil
 }
 
+// GetExamYears trả các năm có đề công khai của một loại đề, cho bộ lọc theo năm.
 func (s *service) GetExamYears(ctx context.Context, examType model.ExamType) ([]int, *httpx.HTTPError) {
 	years, err := s.repo.GetExamYears(ctx, examType)
 	if err != nil {
@@ -32,6 +34,8 @@ func (s *service) GetExamYears(ctx context.Context, examType model.ExamType) ([]
 	return years, nil
 }
 
+// GetByID trả thông tin tổng quan của một đề công khai (không kèm câu hỏi); đề riêng của bài
+// tập lớp trả không tìm thấy.
 func (s *service) GetByID(ctx context.Context, id uint) (*dto.GetExamResponse, *httpx.HTTPError) {
 	exam, err := s.repo.GetExamByID(ctx, id)
 	if err != nil {

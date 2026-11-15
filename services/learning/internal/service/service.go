@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	identityClient "ego/api/gen/go/identity"
@@ -20,15 +21,22 @@ import (
 	"google.golang.org/grpc"
 )
 
-// ErrClassroomNotFound là lỗi nội bộ (rpc) khi không có lớp.
+// ErrClassroomNotFound là lỗi nội bộ trả cho rpc khi không có lớp; rpc đổi nó sang mã gRPC
+// NotFound cho service khác.
 var ErrClassroomNotFound = errors.New("classroom not found")
 
-// ErrInvalidUserID: rpc gọi thiếu user id.
-var ErrInvalidUserID = errors.New("[LEARNING] User id is required")
+// ErrInvalidUserID: service khác gọi rpc mà thiếu user id.
+var ErrInvalidUserID = errors.New("[ERROR] User id is required")
 
-// errClassroomServiceFailed là message lỗi 500 mặc định của các method HTTP phía classrooms (giữ nguyên từ HTTPService cũ).
+// ErrRoomNotFound: webhook LiveKit nhắc tới phòng không có trong DB (vd phòng đã bị xóa cùng
+// lịch học). Webhook bỏ qua lỗi này thay vì báo LiveKit gửi lại.
+var ErrRoomNotFound = errors.New("room not found")
+
+// errClassroomServiceFailed là message lỗi 500 mặc định của các method HTTP phía lớp học, phòng
+// học, bài tập, dùng với httpx.FromError khi lỗi không thuộc lỗi nghiệp vụ nào.
 const errClassroomServiceFailed = "[ERROR] Classroom service failed"
 
+// Lỗi nghiệp vụ phía lớp học, lịch học, phòng học và bài tập, trả thẳng cho HTTP.
 var (
 	ErrClassroomNotActive     = httpx.NewError(http.StatusBadRequest, "[ERROR] Classroom is not active", nil)
 	ErrClassroomForbidden     = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Classroom access denied", nil)
@@ -51,7 +59,7 @@ var (
 	ErrAssignmentContentConfirmation  = httpx.NewError(http.StatusConflict, "[CONFIRMATION_REQUIRED] This exam already has attempts; confirm to submit active attempts and pause all related assignments", nil)
 )
 
-// Lỗi phía exams/attempt (giữ nguyên status + message của exams cũ).
+// Lỗi phía đề thi và lượt làm bài. Status và message giữ ổn định vì client dựa vào chúng.
 var (
 	ErrAttemptNotActive            = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt is not active", nil)
 	ErrAttemptExpired              = httpx.NewError(http.StatusBadRequest, "[ERROR] Attempt has expired", nil)
@@ -69,7 +77,7 @@ var (
 	ErrUnsupportedExamType         = httpx.NewError(http.StatusBadRequest, "[ERROR] Unsupported exam type", nil)
 )
 
-// Lỗi giám sát làm bài (PLAN_ATTEMPT_INTEGRITY.md).
+// Lỗi giám sát làm bài.
 var (
 	ErrIntegrityConsentRequired   = httpx.NewError(http.StatusBadRequest, "[ERROR] Integrity consent is required for a proctored assignment", nil)
 	ErrIntegrityConsentOutdated   = httpx.NewError(http.StatusConflict, "[CONFLICT] Consent version outdated", nil)
@@ -82,9 +90,8 @@ var (
 	ErrIntegrityLevelInvalid      = httpx.NewError(http.StatusBadRequest, "[ERROR] Level must be LOG, WARNING or VIOLATION", nil)
 )
 
-// Lỗi kiểm tra attempt của assignment (thay ValidateAssignmentAttempt /
-// CreateAssignmentSubmission / UpdateAssignmentSubmissionResult): giữ đúng status
-// + message mà exams cũ trả sau toStatusError + httpx.FromError.
+// Lỗi kiểm tra khi học sinh bắt đầu hoặc nộp bài tập lớp (bài chưa mở, đã hết hạn, không
+// thuộc lớp…). Status và message giữ ổn định vì client dựa vào chúng.
 var (
 	ErrAssignmentNotFound     = httpx.NewError(http.StatusNotFound, "[ERROR] Assignment not found", nil)
 	ErrAssignmentExamMismatch = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment does not belong to exam", nil)
@@ -93,6 +100,7 @@ var (
 	ErrAssignmentNotActive    = httpx.NewError(http.StatusBadRequest, "[ERROR] Assignment is not active", nil)
 	ErrStudentNotApproved     = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Student is not approved in classroom", nil)
 	ErrInvalidSubmissionScore = httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid submission score", nil)
+	ErrAttemptSessionInUse    = httpx.NewError(http.StatusForbidden, "[FORBIDDEN] Attempt is open in another session", nil)
 )
 
 type Service interface {
@@ -113,10 +121,10 @@ type Service interface {
 	// Attempt page (luồng theo trang)
 	GetAttemptNavigator(ctx context.Context, userID string, attemptID uint) (*dto.AttemptNavigatorResponse, *httpx.HTTPError)
 	GetAttemptPage(ctx context.Context, userID string, attemptID uint, index int) (*dto.AttemptPageResponse, *httpx.HTTPError)
-	AdvanceListening(ctx context.Context, userID string, attemptID uint, page int) (*dto.ListeningStateResponse, error)
+	AdvanceListening(ctx context.Context, userID, connectionID string, attemptID uint, page int) (*dto.ListeningStateResponse, error)
 
 	// Answer
-	UpdateAttemptAnswer(ctx context.Context, userID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error)
+	UpdateAttemptAnswer(ctx context.Context, userID, connectionID string, attemptID uint, questionID uint, optionID *uint) (*dto.UpdateAttemptAnswerResponse, error)
 
 	// Classroom
 	CreateClassroom(ctx context.Context, teacherID string, req dto.CreateClassroomRequest) (*dto.CreatedClassroomResponse, *httpx.HTTPError)
@@ -212,23 +220,19 @@ type Service interface {
 	GetAdminStats(ctx context.Context, query httpx.StatsQuery) (*dto.AdminStatsResponse, *httpx.HTTPError)
 }
 
-// NotificationClient là interface hẹp tới notifications service, để test bằng fake.
 type NotificationClient interface {
 	CreateNotifications(ctx context.Context, in *notificationsClient.CreateNotificationsRequest, opts ...grpc.CallOption) (*notificationsClient.CreateNotificationsResponse, error)
 }
 
-// IdentityClient là interface hẹp tới identity service: chỉ các method classrooms dùng.
 type IdentityClient interface {
 	GetUsersInfo(ctx context.Context, in *identityClient.GetUsersInfoRequest, opts ...grpc.CallOption) (*identityClient.GetUsersInfoResponse, error)
 	SearchUserIDsByName(ctx context.Context, in *identityClient.SearchUserIDsByNameRequest, opts ...grpc.CallOption) (*identityClient.SearchUserIDsByNameResponse, error)
 }
 
-// StorageClient là interface hẹp tới storage service: chỉ dùng để đổi tên file ảnh lớp thành URL công khai.
 type StorageClient interface {
 	GetPublicURL(ctx context.Context, in *storageClient.GetPublicURLRequest, opts ...grpc.CallOption) (*storageClient.GetPublicURLResponse, error)
 }
 
-// EventPublisher đẩy payload realtime tới mọi kết nối WebSocket của một user.
 type EventPublisher func(userID string, payload any)
 
 type service struct {
@@ -238,12 +242,22 @@ type service struct {
 	identityClient     IdentityClient
 	storageClient      StorageClient
 	mediaClient        media.Client
-	roomPublisher      EventPublisher // hub /ws/classrooms
-	attemptPublisher   EventPublisher // hub /ws/exams
-	integrity          *integrityRegistry
-	now                func() time.Time
+	// roomPublisher gửi qua hub /ws/classrooms: sự kiện phòng học và bảng điểm.
+	roomPublisher EventPublisher
+	// attemptPublisher gửi qua hub /ws/exams: sự kiện của lượt làm bài (đã nộp, bị đình chỉ…).
+	attemptPublisher EventPublisher
+	// integrity ghi kết nối WebSocket nào đang giữ attempt có giám sát, trong bộ nhớ tiến trình.
+	integrity *integrityRegistry
+	// now là đồng hồ của service, đọc qua clock(); test thay bằng SetClock.
+	now func() time.Time
+	// deferredEvents khác nil ở bản sao withRepoDeferringEvents: side effect chờ tx ngoài commit.
+	deferredEvents *[]pendingEvent
+	// permissionLocks tuần tự hóa syncParticipantPermissions theo học sinh (con trỏ để
+	// các bản sao withRepo dùng chung).
+	permissionLocks *[64]sync.Mutex
 }
 
+// New tạo service với các phụ thuộc đã dựng ở main.go; phụ thuộc nào không dùng có thể nil.
 func New(
 	repo repository.Repository,
 	cfg *learningConfig.AppConfig,
@@ -264,17 +278,22 @@ func New(
 		roomPublisher:      roomPublisher,
 		attemptPublisher:   attemptPublisher,
 		integrity:          newIntegrityRegistry(),
+		permissionLocks:    new([64]sync.Mutex),
 		now:                time.Now,
 	}
 }
 
-// SetClock thay đồng hồ của service; chỉ dùng trong test (luồng nghe phụ thuộc thời gian).
+// SetClock thay đồng hồ của service, chỉ dùng trong test: các luồng phụ thuộc thời gian (tiến
+// trang nghe, hết giờ, chờ chiếm phiên) được test bằng cách tua đồng hồ thay vì chờ thật.
+// Export vì integration test nằm ở package khác.
 func SetClock(svc Service, now func() time.Time) {
 	if s, ok := svc.(*service); ok {
 		s.now = now
 	}
 }
 
+// clock là giờ hiện tại của service; test thay bằng SetClock để tua thời gian thay vì phải chờ
+// thật. Struct dựng tay không gán now thì dùng time.Now.
 func (s *service) clock() time.Time {
 	if s.now == nil {
 		return time.Now()
@@ -282,27 +301,32 @@ func (s *service) clock() time.Time {
 	return s.now()
 }
 
-// withRepo trả bản sao service dùng repo của transaction đang mở, để gọi logic
-// của domain khác trong cùng một transaction (CONVENTIONS.md mục 6).
+// withRepo trả bản sao service dùng repo của transaction đang mở. Dùng khi cần gọi logic của
+// domain khác ngay trong transaction hiện tại, để mọi thay đổi commit hoặc rollback cùng nhau.
+// Transaction lồng bên trong bản sao trở thành SAVEPOINT.
 func (s *service) withRepo(repo repository.Repository) *service {
 	copy := *s
 	copy.repo = repo
 	return &copy
 }
 
-// pendingEvent là một push WebSocket đang chờ transaction ngoài commit.
+// pendingEvent là một side effect đang chờ transaction ngoài commit: hoặc một sự kiện WebSocket
+// cần đẩy, hoặc việc gỡ chủ phiên giám sát của một attempt.
 type pendingEvent struct {
 	room    bool // true: hub /ws/classrooms (GRADEBOOK_UPDATED), false: hub /ws/exams
 	userID  string
 	payload any
+	// clearAttemptID khác 0: gỡ chủ phiên giám sát của attempt (không push gì).
+	clearAttemptID uint
 }
 
-// withRepoDeferringEvents như withRepo, nhưng gom push ATTEMPT_SUBMITTING/SUBMITTED
+// withRepoDeferringEvents như withRepo, nhưng gom push ATTEMPT_SUBMITTED
 // và GRADEBOOK_UPDATED vào events thay vì gửi ngay: chỉ gửi bằng publishPendingEvents
 // sau khi transaction ngoài commit, để client không nhận "đã nộp" hay điểm của một
 // transaction bị rollback.
 func (s *service) withRepoDeferringEvents(repo repository.Repository, events *[]pendingEvent) *service {
 	copy := s.withRepo(repo)
+	copy.deferredEvents = events
 	copy.attemptPublisher = func(userID string, payload any) {
 		*events = append(*events, pendingEvent{userID: userID, payload: payload})
 	}
@@ -312,8 +336,29 @@ func (s *service) withRepoDeferringEvents(repo repository.Repository, events *[]
 	return copy
 }
 
+// clearAttemptOwner gỡ chủ phiên giám sát của attempt đã chốt. Gọi sau khi tx của caller
+// commit; trong bản withRepoDeferringEvents thì hoãn tới publishPendingEvents của tx ngoài.
+func (s *service) clearAttemptOwner(attemptID uint) {
+	if s.deferredEvents != nil {
+		*s.deferredEvents = append(*s.deferredEvents, pendingEvent{clearAttemptID: attemptID})
+		return
+	}
+	if s.integrity != nil {
+		s.integrity.clearAttempt(attemptID)
+	}
+}
+
+// publishPendingEvents gửi các side effect đã gom trong transaction, gọi sau khi commit: đẩy sự
+// kiện WebSocket tới đúng hub và gỡ chủ phiên giám sát của attempt đã chốt.
 func (s *service) publishPendingEvents(events []pendingEvent) {
 	for _, event := range events {
+		if event.clearAttemptID != 0 {
+			// Tx đã commit: gỡ thẳng, không hoãn tiếp qua clearAttemptOwner.
+			if s.integrity != nil {
+				s.integrity.clearAttempt(event.clearAttemptID)
+			}
+			continue
+		}
 		publisher := s.attemptPublisher
 		if event.room {
 			publisher = s.roomPublisher

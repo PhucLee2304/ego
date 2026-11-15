@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/media"
@@ -14,6 +13,8 @@ import (
 	"ego/services/learning/internal/repository"
 )
 
+// GetRoom trả thông tin buổi học trực tuyến cho giáo viên hoặc học sinh đã được duyệt của lớp;
+// isHost quyết định response có kèm phần chỉ giáo viên thấy.
 func (s *service) GetRoom(ctx context.Context, userID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError) {
 	room, err := s.repo.GetRoomByID(ctx, roomID)
 	if err != nil {
@@ -32,6 +33,8 @@ func (s *service) GetRoom(ctx context.Context, userID string, roomID uint) (*dto
 	return dto.ToRoomResponse(room, isHost), nil
 }
 
+// GetRoomActivity trả trạng thái tương tác hiện tại của phòng (giơ tay, chia sẻ màn hình, quyền
+// mic/camera) để client vẽ lại sau khi tải lại trang. Phòng đã kết thúc thì không còn trạng thái.
 func (s *service) GetRoomActivity(ctx context.Context, userID string, classroomID uint, roomID uint) (*dto.RoomActivityResponse, *httpx.HTTPError) {
 	room, err := s.repo.GetRoomByID(ctx, roomID)
 	if err != nil {
@@ -60,6 +63,9 @@ func (s *service) GetRoomActivity(ctx context.Context, userID string, classroomI
 	return dto.ToRoomActivityResponse(room, states, userID, isHost), nil
 }
 
+// StartRoom cho giáo viên mở buổi học: được mở sớm tối đa 30 phút trước giờ bắt đầu và trước giờ
+// kết thúc. Tạo phòng LiveKit trước, rồi chuyển phòng sang LIVE và xếp thông báo cho học sinh
+// trong một transaction; transaction lỗi thì xóa phòng LiveKit vừa tạo. Mở lặp trả phòng đang LIVE.
 func (s *service) StartRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError) {
 	if s.mediaClient == nil {
 		return nil, ErrMediaUnavailable
@@ -90,10 +96,18 @@ func (s *service) StartRoom(ctx context.Context, teacherID string, roomID uint) 
 		return nil, httpx.FromError(errors.Join(ErrMediaUnavailable, err), errClassroomServiceFailed)
 	}
 	now := time.Now()
+	alreadyLive := false
 	err = s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		locked, err := repo.GetRoomByIDForUpdate(ctx, roomID)
 		if err != nil {
 			return err
+		}
+		// Request start khác (bấm hai lần, hai tab) đã mở phòng: trả phòng LIVE, không xóa
+		// phòng LiveKit mà lớp đang dùng.
+		if locked.Status == model.RoomStatusLive {
+			room = locked
+			alreadyLive = true
+			return nil
 		}
 		if locked.Status != model.RoomStatusScheduled {
 			return ErrRoomEnded
@@ -121,10 +135,14 @@ func (s *service) StartRoom(ctx context.Context, teacherID string, roomID uint) 
 		_ = s.mediaClient.DeleteRoom(context.WithoutCancel(ctx), media.RoomName(roomID))
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	s.publishRoomState(ctx, room, "ROOM_STARTED")
+	if !alreadyLive {
+		s.publishRoomState(ctx, room, "ROOM_STARTED")
+	}
 	return dto.ToRoomResponse(room, true), nil
 }
 
+// JoinRoom cấp token LiveKit để vào phòng đang LIVE. Quyền trong token lấy theo state hiện tại
+// (mic/camera đã bị tắt vẫn bị tắt), để học sinh không lấy lại quyền bằng cách vào lại phòng.
 func (s *service) JoinRoom(ctx context.Context, userID string, roomID uint) (*dto.JoinRoomResponse, *httpx.HTTPError) {
 	if s.mediaClient == nil {
 		return nil, ErrMediaUnavailable
@@ -166,9 +184,8 @@ func (s *service) JoinRoom(ctx context.Context, userID string, roomID uint) (*dt
 		permissions = participantPermissions(state, false)
 	}
 	name := userID
-	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: []string{userID}})
-	if err == nil && len(usersResp.Users) > 0 {
-		name = usersResp.Users[0].Name
+	if info := s.usersInfo(ctx, userID)[userID]; info.Name != "" {
+		name = info.Name
 	}
 	token, err := s.mediaClient.CreateJoinToken(media.RoomName(room.ID), userID, name, isHost, permissions)
 	if err != nil {
@@ -177,6 +194,7 @@ func (s *service) JoinRoom(ctx context.Context, userID string, roomID uint) (*dt
 	return &dto.JoinRoomResponse{Room: dto.ToRoomResponse(room, isHost), URL: s.cfg.LiveKitPublicURL, Token: token}, nil
 }
 
+// EndRoom cho giáo viên kết thúc buổi học. Kết thúc lặp trả phòng đã ENDED thay vì lỗi.
 func (s *service) EndRoom(ctx context.Context, teacherID string, roomID uint) (*dto.RoomResponse, *httpx.HTTPError) {
 	room, err := s.repo.GetRoomByID(ctx, roomID)
 	if err != nil {
@@ -205,6 +223,7 @@ func (s *service) EndRoom(ctx context.Context, teacherID string, roomID uint) (*
 	return dto.ToRoomResponse(room, true), nil
 }
 
+// GetRoomAttendance trả các phiên vào/ra phòng: giáo viên xem của cả lớp, học sinh chỉ xem của mình.
 func (s *service) GetRoomAttendance(ctx context.Context, userID string, roomID uint) ([]*dto.AttendanceSessionResponse, *httpx.HTTPError) {
 	room, err := s.repo.GetRoomByID(ctx, roomID)
 	if err != nil {
@@ -232,15 +251,7 @@ func (s *service) GetRoomAttendance(ctx context.Context, userID string, roomID u
 	for _, session := range sessions {
 		ids = append(ids, session.UserID)
 	}
-	var userInfos []*identityClient.UserInfo
-	if len(ids) > 0 {
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: ids})
-		if err != nil {
-			return nil, httpx.FromError(err, errClassroomServiceFailed)
-		}
-		userInfos = usersResp.Users
-	}
-	usersByID := dto.ToUserInfoMap(userInfos)
+	usersByID := s.usersInfo(ctx, ids...)
 	responses := make([]*dto.AttendanceSessionResponse, len(sessions))
 	for i, session := range sessions {
 		responses[i] = &dto.AttendanceSessionResponse{ID: session.ID, User: usersByID[session.UserID], Role: session.Role, JoinedAt: session.JoinedAt, LeftAt: session.LeftAt}

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
@@ -19,6 +18,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetEditableAssignment trả nội dung đề của bài tập để giáo viên sửa, kèm số lượt đang làm và
+// đã nộp của mọi assignment dùng chung đề. Client dùng các con số này để cảnh báo trước khi sửa,
+// vì sửa đề ảnh hưởng tới mọi lớp được giao chung.
 func (s *service) GetEditableAssignment(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) (*dto.EditableAssignmentResponse, *httpx.HTTPError) {
 	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
 	if err != nil {
@@ -182,6 +184,8 @@ func assignmentContentChanged(exam *model.Exam, req dto.UpdateAssignmentRequest)
 	return false
 }
 
+// assignmentScheduleChanged cho biết lịch hoặc cấu hình giám sát có đổi không, để chỉ hỏi
+// xác nhận và ghi audit khi thật sự có thay đổi.
 func assignmentScheduleChanged(assignment *model.Assignment, schedule dto.AssignmentScheduleRequest) bool {
 	return assignment.Duration != schedule.Duration || !assignment.OpensAt.Equal(schedule.OpensAt) ||
 		!assignment.DueAt.Equal(schedule.DueAt) || assignment.Proctored != schedule.Proctored ||
@@ -248,6 +252,8 @@ func (s *service) updateAssignmentContentTx(ctx context.Context, repo repository
 	return exam, nil
 }
 
+// ResetAssignmentAttempt cho giáo viên xóa lượt làm và bài nộp của một học sinh để học sinh
+// làm lại từ đầu (vd làm lỗi, mất kết nối). Mọi thứ xóa trong một transaction.
 func (s *service) ResetAssignmentAttempt(ctx context.Context, teacherID string, classroomID uint, assignmentID uint, studentID string) *httpx.HTTPError {
 	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
 	if err != nil {
@@ -261,7 +267,7 @@ func (s *service) ResetAssignmentAttempt(ctx context.Context, teacherID string, 
 		return ErrClassroomForbidden
 	}
 	// Xóa attempt (kèm đáp án, history) và submission trong một transaction. Khóa
-	// attempt trước như mọi luồng sửa attempt (PLAN_ATTEMPT_INTEGRITY.md mục 1.6).
+	// attempt trước như mọi luồng sửa attempt, để không xóa đúng lúc bài đang được chốt.
 	var resetAttemptID uint
 	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
 		if attempt, err := repo.GetAssignmentAttemptForIntegrity(ctx, assignment.ID, studentID); err == nil {
@@ -289,6 +295,8 @@ func (s *service) ResetAssignmentAttempt(ctx context.Context, teacherID string, 
 	return nil
 }
 
+// GetAssignmentAudits trả lịch sử sửa đề và đổi lịch của bài tập, mới nhất trước, kèm tên
+// giáo viên thực hiện lấy từ identity.
 func (s *service) GetAssignmentAudits(ctx context.Context, teacherID string, classroomID uint, assignmentID uint) ([]*dto.ExamAuditResponse, *httpx.HTTPError) {
 	assignment, err := s.repo.GetAssignmentByClassroom(ctx, classroomID, assignmentID)
 	if err != nil {
@@ -319,15 +327,9 @@ func (s *service) GetAssignmentAudits(ctx context.Context, teacherID string, cla
 			actorIDs = append(actorIDs, audit.ActorID)
 		}
 	}
-	if len(actorIDs) > 0 {
-		usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: actorIDs})
-		if err != nil {
-			return nil, httpx.FromError(err, errClassroomServiceFailed)
-		}
-		usersByID := dto.ToUserInfoMap(usersResp.Users)
-		for _, response := range responses {
-			response.Actor = usersByID[response.ActorID]
-		}
+	usersByID := s.usersInfo(ctx, actorIDs...)
+	for _, response := range responses {
+		response.Actor = usersByID[response.ActorID]
 	}
 	return responses, nil
 }

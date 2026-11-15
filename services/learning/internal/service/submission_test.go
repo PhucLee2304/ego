@@ -41,7 +41,7 @@ type fakeAssignmentRepository struct {
 	approved   bool
 }
 
-func (f *fakeAssignmentRepository) GetAssignmentForAttemptValidation(context.Context, uint) (*model.Assignment, error) {
+func (f *fakeAssignmentRepository) GetAssignmentForAttemptValidationForShare(context.Context, uint) (*model.Assignment, error) {
 	return f.assignment, f.err
 }
 
@@ -73,7 +73,7 @@ func TestValidateAssignmentAttemptErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := (&service{}).validateAssignmentAttempt(context.Background(), tt.repo, "student", 1, 7)
+			_, err := validateAssignmentAttempt(context.Background(), tt.repo, "student", 1, 7, time.Now())
 			httpErr := httpx.FromError(err, "[ERROR] Failed to create attempt")
 			if httpErr == nil || httpErr.StatusCode != tt.status || httpErr.Message != tt.message {
 				t.Fatalf("got %v, want %d %q", httpErr, tt.status, tt.message)
@@ -81,7 +81,7 @@ func TestValidateAssignmentAttemptErrors(t *testing.T) {
 		})
 	}
 
-	if assignment, err := (&service{}).validateAssignmentAttempt(context.Background(), &fakeAssignmentRepository{assignment: open(), approved: true}, "student", 1, 7); err != nil || assignment == nil {
+	if assignment, err := validateAssignmentAttempt(context.Background(), &fakeAssignmentRepository{assignment: open(), approved: true}, "student", 1, 7, time.Now()); err != nil || assignment == nil {
 		t.Fatalf("open assignment must pass: %v", err)
 	}
 }

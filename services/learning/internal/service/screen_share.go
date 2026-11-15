@@ -12,9 +12,11 @@ import (
 	"ego/services/learning/internal/media"
 
 	"ego/services/learning/internal/model"
+	"ego/services/learning/internal/repository"
 	learningSocket "ego/services/learning/internal/socket"
 )
 
+// Lỗi nghiệp vụ của luồng chia sẻ màn hình, trả thẳng cho HTTP.
 var (
 	ErrScreenShareTeacherDirect = httpx.NewError(http.StatusBadRequest, "[ERROR] The teacher can share the screen directly without a request", nil)
 	ErrScreenShareNotRequested  = httpx.NewError(http.StatusConflict, "[CONFLICT] This participant has no screen share request", nil)
@@ -23,6 +25,8 @@ var (
 	ErrParticipantNotConnected  = httpx.NewError(http.StatusConflict, "[CONFLICT] The participant is not connected to the room", nil)
 )
 
+// clearScreenShareState xóa yêu cầu và phê duyệt chia sẻ màn hình của userID, để lần chia sẻ
+// sau phải xin lại. Trả true nếu thật sự có gì để xóa, để caller chỉ báo sự kiện khi state đổi.
 func (s *service) clearScreenShareState(ctx context.Context, roomID uint, userID string) (bool, error) {
 	state, err := s.repo.FindRoomParticipantState(ctx, roomID, userID)
 	if err != nil || state == nil {
@@ -32,7 +36,7 @@ func (s *service) clearScreenShareState(ctx context.Context, roomID uint, userID
 		return false, nil
 	}
 	state.ScreenShareRequestedAt, state.ScreenShareApprovedAt = nil, nil
-	return true, s.repo.UpdateRoomParticipantState(ctx, state)
+	return true, s.repo.UpdateRoomParticipantState(ctx, state, repository.ParticipantColShareRequestedAt, repository.ParticipantColShareApprovedAt)
 }
 
 // publishRoomActivity chỉ gửi cho giáo viên và người liên quan vì học sinh chỉ
@@ -49,6 +53,8 @@ func (s *service) publishRoomActivity(room *model.Room, eventType, userID string
 	}
 }
 
+// RequestScreenShare cho học sinh xin chia sẻ màn hình; giáo viên được chia sẻ thẳng nên
+// không cần xin. Gửi lại khi đang chờ hoặc đã được duyệt thì trả state hiện tại, không tạo yêu cầu mới.
 func (s *service) RequestScreenShare(ctx context.Context, userID string, classroomID, roomID uint) (*dto.RoomParticipantStateResponse, *httpx.HTTPError) {
 	room, isHost, err := s.liveRoomForUser(ctx, userID, classroomID, roomID)
 	if err != nil {
@@ -64,18 +70,29 @@ func (s *service) RequestScreenShare(ctx context.Context, userID string, classro
 	if state.RemovedAt != nil {
 		return nil, ErrParticipantRemoved
 	}
-	// Gửi lại khi đang chờ hoặc đã được duyệt không tạo yêu cầu mới.
+	// Gửi lại khi đang chờ hoặc đã được duyệt không tạo yêu cầu mới. UPDATE có điều kiện:
+	// bấm hai lần cùng lúc chỉ một request tạo yêu cầu và push.
 	if state.ScreenShareRequestedAt == nil {
-		now := time.Now()
-		state.ScreenShareRequestedAt, state.ScreenShareApprovedAt = &now, nil
-		if err := s.repo.UpdateRoomParticipantState(ctx, state); err != nil {
+		created, err := s.repo.RequestRoomScreenShare(ctx, room.ID, userID, time.Now())
+		if err != nil {
 			return nil, httpx.FromError(err, errClassroomServiceFailed)
 		}
-		s.publishRoomActivity(room, learningSocket.EventScreenShareRequested, userID)
+		if created {
+			s.publishRoomActivity(room, learningSocket.EventScreenShareRequested, userID)
+		}
+		if state, err = s.repo.FindRoomParticipantState(ctx, room.ID, userID); err != nil {
+			return nil, httpx.FromError(err, errClassroomServiceFailed)
+		}
+		if state.RemovedAt != nil {
+			return nil, ErrParticipantRemoved
+		}
 	}
 	return dto.ToRoomParticipantStateResponse(state), nil
 }
 
+// ApproveScreenShare cho giáo viên duyệt yêu cầu chia sẻ màn hình của học sinh. Phê duyệt
+// lưu DB trước, rồi cấp quyền trên LiveKit; chỉ báo đã duyệt khi LiveKit cấp xong, để học sinh
+// không thấy được duyệt mà vẫn không publish được.
 func (s *service) ApproveScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError) {
 	room, isHost, err := s.liveRoomForUser(ctx, teacherID, classroomID, roomID)
 	if err != nil {
@@ -87,33 +104,61 @@ func (s *service) ApproveScreenShare(ctx context.Context, teacherID string, clas
 	if err := s.ensureRoomStudent(ctx, room, userID); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	state, err := s.repo.FindRoomParticipantState(ctx, room.ID, userID)
-	if err != nil {
+	// Khóa dòng để kiểm lại yêu cầu trên state mới nhất (học sinh vừa rời phòng/bị mời ra
+	// thì không duyệt nữa). Quyền LiveKit cấp sau commit: học sinh chỉ publish được screen
+	// share khi LiveKit đã cho phép, không dựa vào việc client tự kiểm tra; APPROVED chỉ
+	// được push khi LiveKit đã cấp xong.
+	var state *model.RoomParticipantState
+	var approvedAt *time.Time // khác nil khi lượt này vừa duyệt
+	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
+		locked, err := repo.LockRoomParticipantState(ctx, room.ID, userID)
+		if err != nil {
+			return err
+		}
+		if locked == nil || locked.ScreenShareRequestedAt == nil || locked.RemovedAt != nil {
+			return ErrScreenShareNotRequested
+		}
+		state = locked
+		if state.ScreenShareApprovedAt != nil {
+			return nil
+		}
+		if s.mediaClient == nil {
+			return ErrMediaUnavailable
+		}
+		// Postgres lưu tới micro giây: cắt trước để RevertRoomScreenShareApproval so khớp được.
+		now := time.Now().Truncate(time.Microsecond)
+		state.ScreenShareApprovedAt, approvedAt = &now, &now
+		return repo.UpdateRoomParticipantState(ctx, state, repository.ParticipantColShareApprovedAt)
+	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	if state == nil || state.ScreenShareRequestedAt == nil {
-		return nil, ErrScreenShareNotRequested
-	}
-	if state.ScreenShareApprovedAt != nil {
+	// Đã duyệt từ trước mà không có LiveKit: trả state như cũ. Có LiveKit thì đồng bộ (cả lần
+	// duyệt lặp, để sửa được lần cấp quyền lỗi trước đó) rồi mới báo đã duyệt.
+	if s.mediaClient == nil {
 		return dto.ToRoomParticipantStateResponse(state), nil
 	}
-	if s.mediaClient == nil {
-		return nil, ErrMediaUnavailable
-	}
-	// Cấp quyền ở LiveKit trước khi lưu: học sinh chỉ publish được screen
-	// share khi server cho phép, không dựa vào việc client tự kiểm tra.
-	if err := s.mediaClient.SetPublishPermissions(ctx, media.RoomName(room.ID), userID, participantPermissions(state, true)); err != nil {
-		return nil, httpx.FromError(mediaError(err), errClassroomServiceFailed)
-	}
-	now := time.Now()
-	state.ScreenShareApprovedAt = &now
-	if err := s.repo.UpdateRoomParticipantState(ctx, state); err != nil {
+	if err := s.syncParticipantPermissions(ctx, room, userID, true); err != nil {
+		// LiveKit không cấp được (học sinh vừa rớt kết nối…): hủy đúng lượt duyệt này để yêu
+		// cầu về chờ duyệt (StartScreenShare chỉ xem DB), rồi đồng bộ lại vì lượt đồng bộ khác
+		// (webhook join…) có thể đã cấp quyền theo lượt duyệt vừa hủy.
+		if approvedAt != nil {
+			if revertErr := s.repo.RevertRoomScreenShareApproval(ctx, room.ID, userID, *approvedAt); revertErr != nil {
+				err = errors.Join(err, revertErr)
+			} else if syncErr := s.syncParticipantPermissions(ctx, room, userID, false); syncErr != nil {
+				err = errors.Join(err, syncErr)
+			}
+		}
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	s.publishRoomActivity(room, learningSocket.EventScreenShareApproved, userID)
+	// Chỉ báo khi lượt này vừa duyệt: duyệt lặp không push lại.
+	if approvedAt != nil {
+		s.publishRoomActivity(room, learningSocket.EventScreenShareApproved, userID)
+	}
 	return dto.ToRoomParticipantStateResponse(state), nil
 }
 
+// RejectScreenShare cho giáo viên từ chối hoặc thu hồi yêu cầu chia sẻ màn hình; nếu đã
+// duyệt thì dừng luôn phần đang chia sẻ.
 func (s *service) RejectScreenShare(ctx context.Context, teacherID string, classroomID, roomID uint, userID string) (*dto.RoomParticipantStateResponse, *httpx.HTTPError) {
 	room, isHost, err := s.liveRoomForUser(ctx, teacherID, classroomID, roomID)
 	if err != nil {
@@ -125,22 +170,32 @@ func (s *service) RejectScreenShare(ctx context.Context, teacherID string, class
 	if err := s.ensureRoomStudent(ctx, room, userID); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	state, err := s.repo.FindRoomParticipantState(ctx, room.ID, userID)
-	if err != nil {
+	// Khóa dòng như ApproveScreenShare: duyệt và từ chối cùng lúc thì từ chối thấy đúng việc
+	// đã duyệt hay chưa, không để LiveKit còn cấp quyền khi DB đã xóa yêu cầu.
+	var state *model.RoomParticipantState
+	wasApproved := false
+	if err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
+		locked, err := repo.LockRoomParticipantState(ctx, room.ID, userID)
+		if err != nil {
+			return err
+		}
+		if locked == nil || locked.ScreenShareRequestedAt == nil {
+			return ErrScreenShareNotRequested
+		}
+		state, wasApproved = locked, locked.ScreenShareApprovedAt != nil
+		if wasApproved && s.mediaClient == nil {
+			return ErrMediaUnavailable
+		}
+		state.ScreenShareRequestedAt, state.ScreenShareApprovedAt = nil, nil
+		return repo.UpdateRoomParticipantState(ctx, state, repository.ParticipantColShareRequestedAt, repository.ParticipantColShareApprovedAt)
+	}); err != nil {
 		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
-	if state == nil || state.ScreenShareRequestedAt == nil {
-		return nil, ErrScreenShareNotRequested
-	}
 	// Từ chối sau khi đã duyệt cũng thu hồi quyền và dừng phần đang chia sẻ.
-	if state.ScreenShareApprovedAt != nil {
+	if wasApproved {
 		if err := s.stopScreenShareMedia(ctx, room, userID); err != nil {
 			return nil, httpx.FromError(err, errClassroomServiceFailed)
 		}
-	}
-	state.ScreenShareRequestedAt, state.ScreenShareApprovedAt = nil, nil
-	if err := s.repo.UpdateRoomParticipantState(ctx, state); err != nil {
-		return nil, httpx.FromError(err, errClassroomServiceFailed)
 	}
 	s.publishRoomActivity(room, learningSocket.EventScreenShareRejected, userID)
 	return dto.ToRoomParticipantStateResponse(state), nil
@@ -165,6 +220,8 @@ func (s *service) StartScreenShare(ctx context.Context, userID string, classroom
 	return httpx.FromError(s.stopOtherScreenShares(ctx, room, userID), errClassroomServiceFailed)
 }
 
+// StopScreenShare dừng chia sẻ màn hình: người đang chia sẻ tự dừng, hoặc giáo viên dừng
+// của học sinh. Học sinh không dừng được của người khác.
 func (s *service) StopScreenShare(ctx context.Context, actorID string, classroomID, roomID uint, userID string) *httpx.HTTPError {
 	room, isHost, err := s.liveRoomForUser(ctx, actorID, classroomID, roomID)
 	if err != nil {
@@ -211,6 +268,8 @@ func (s *service) liveRoomForUser(ctx context.Context, userID string, classroomI
 	}
 }
 
+// ensureRoomStudent bảo đảm userID là học sinh đã được duyệt của lớp (không phải giáo viên),
+// để giáo viên không thao tác nhầm lên chính mình hoặc lên người ngoài lớp.
 func (s *service) ensureRoomStudent(ctx context.Context, room *model.Room, userID string) error {
 	if userID == room.Schedule.Classroom.TeacherID {
 		return ErrRoomParticipantInvalid
@@ -225,6 +284,8 @@ func (s *service) ensureRoomStudent(ctx context.Context, room *model.Room, userI
 	return nil
 }
 
+// mediaError đổi lỗi LiveKit sang lỗi nghiệp vụ: người không còn kết nối thành
+// ErrParticipantNotConnected (409), còn lại là ErrMediaUnavailable; giữ lỗi gốc để log.
 func mediaError(err error) error {
 	if errors.Is(err, media.ErrParticipantNotFound) {
 		return errors.Join(ErrParticipantNotConnected, err)
@@ -235,7 +296,7 @@ func mediaError(err error) error {
 // HandleScreenSharePublished là lớp bảo vệ cuối khi client publish mà không
 // qua StartScreenShare: học sinh chưa được duyệt bị dừng, lượt cũ bị thay thế.
 func (s *service) HandleScreenSharePublished(ctx context.Context, roomName, userID string) error {
-	room, err := s.repo.GetRoomByName(ctx, roomName)
+	room, err := s.roomByName(ctx, roomName)
 	if err != nil {
 		return err
 	}
@@ -254,26 +315,25 @@ func (s *service) HandleScreenSharePublished(ctx context.Context, roomName, user
 	return s.stopOtherScreenShares(ctx, room, userID)
 }
 
+// HandleScreenShareUnpublished (webhook) dọn state khi track chia sẻ màn hình bị gỡ, kể cả khi
+// client tự tắt mà không gọi API, để lần chia sẻ sau phải xin lại và quyền LiveKit được thu hồi.
 func (s *service) HandleScreenShareUnpublished(ctx context.Context, roomName, userID string) error {
-	room, err := s.repo.GetRoomByName(ctx, roomName)
+	room, err := s.roomByName(ctx, roomName)
 	if err != nil {
 		return err
 	}
 	if room.Status != model.RoomStatusLive {
 		return nil
 	}
-	if userID != room.Schedule.Classroom.TeacherID && s.mediaClient != nil {
-		state, err := s.repo.FindRoomParticipantState(ctx, room.ID, userID)
-		if err != nil {
-			return err
-		}
-		if err := s.mediaClient.SetPublishPermissions(ctx, media.RoomName(room.ID), userID, participantPermissions(state, false)); err != nil && !errors.Is(err, media.ErrParticipantNotFound) {
-			logger.Log.Warn().Err(err).Uint("room_id", room.ID).Str("user_id", userID).Msg("[ROOM] Failed to revoke screen share permission")
-		}
-	}
 	changed, err := s.clearScreenShareState(ctx, room.ID, userID)
 	if err != nil {
 		return err
+	}
+	// Thu hồi sau khi đã xóa phê duyệt trong DB: quyền đồng bộ từ state mới nhất.
+	if userID != room.Schedule.Classroom.TeacherID && s.mediaClient != nil {
+		if err := s.syncParticipantPermissions(ctx, room, userID, false); err != nil {
+			logger.Log.Warn().Err(err).Uint("room_id", room.ID).Str("user_id", userID).Msg("[ERROR] Failed to revoke screen share permission")
+		}
 	}
 	if changed {
 		s.publishRoomActivity(room, learningSocket.EventScreenShareStopped, userID)
@@ -281,6 +341,8 @@ func (s *service) HandleScreenShareUnpublished(ctx context.Context, roomName, us
 	return nil
 }
 
+// stopOtherScreenShares dừng mọi người đang chia sẻ màn hình trừ userID, vì mỗi phòng chỉ
+// cho một người chia sẻ tại một thời điểm.
 func (s *service) stopOtherScreenShares(ctx context.Context, room *model.Room, userID string) error {
 	if s.mediaClient == nil {
 		return ErrMediaUnavailable
@@ -300,26 +362,31 @@ func (s *service) stopOtherScreenShares(ctx context.Context, room *model.Room, u
 	return nil
 }
 
-// stopScreenShare dừng media, thu hồi quyền, xóa yêu cầu/phê duyệt và báo cho
-// người chia sẻ để client gỡ track; lần chia sẻ sau phải xin lại.
+// stopScreenShare xóa yêu cầu/phê duyệt, dừng media, thu hồi quyền và báo cho người
+// chia sẻ để client gỡ track; lần chia sẻ sau phải xin lại. DB đổi trước để quyền đồng bộ
+// sang LiveKit tính từ state đã xóa phê duyệt.
 func (s *service) stopScreenShare(ctx context.Context, room *model.Room, userID string) error {
-	if err := s.stopScreenShareMedia(ctx, room, userID); err != nil {
-		return err
+	if s.mediaClient == nil {
+		return ErrMediaUnavailable
 	}
 	if _, err := s.clearScreenShareState(ctx, room.ID, userID); err != nil {
+		return err
+	}
+	if err := s.stopScreenShareMedia(ctx, room, userID); err != nil {
 		return err
 	}
 	s.publishRoomActivity(room, learningSocket.EventScreenShareStopped, userID)
 	return nil
 }
 
+// stopScreenShareMedia dừng track chia sẻ màn hình và đồng bộ quyền (giữ nguyên mic/camera
+// hiện tại). Gọi sau khi DB đã xóa phê duyệt.
 func (s *service) stopScreenShareMedia(ctx context.Context, room *model.Room, userID string) error {
 	if s.mediaClient == nil {
 		return ErrMediaUnavailable
 	}
-	roomName := media.RoomName(room.ID)
 	// Participant đã rời phòng thì không còn track hay quyền để thu hồi.
-	if err := s.mediaClient.MuteTracks(ctx, roomName, userID, media.SourceScreenShare); err != nil {
+	if err := s.mediaClient.MuteTracks(ctx, media.RoomName(room.ID), userID, media.SourceScreenShare); err != nil {
 		if errors.Is(err, media.ErrParticipantNotFound) {
 			return nil
 		}
@@ -328,13 +395,5 @@ func (s *service) stopScreenShareMedia(ctx context.Context, room *model.Room, us
 	if userID == room.Schedule.Classroom.TeacherID {
 		return nil
 	}
-	// Thu hồi screen share nhưng giữ nguyên quyền mic/camera hiện tại.
-	state, err := s.repo.FindRoomParticipantState(ctx, room.ID, userID)
-	if err != nil {
-		return err
-	}
-	if err := s.mediaClient.SetPublishPermissions(ctx, roomName, userID, participantPermissions(state, false)); err != nil && !errors.Is(err, media.ErrParticipantNotFound) {
-		return mediaError(err)
-	}
-	return nil
+	return s.syncParticipantPermissions(ctx, room, userID, false)
 }

@@ -64,12 +64,12 @@ func TestUpdateAttemptAnswerSocketErrorCodes(t *testing.T) {
 		{"attempt expired", &fakeAnswerRepository{attempt: expired}, 11, 101, socket.ErrorCodeAttemptExpired, ErrAttemptExpired.Message},
 		{"question not in attempt", &fakeAnswerRepository{attempt: answerTestAttempt()}, 12, 101, socket.ErrorCodeQuestionNotInAttempt, ErrQuestionNotBelongToAttempt.Message},
 		{"option not in question", &fakeAnswerRepository{attempt: answerTestAttempt()}, 11, 102, socket.ErrorCodeOptionNotInQuestion, ErrOptionNotBelongToQuestion.Message},
-		{"storage failure", &fakeAnswerRepository{attempt: answerTestAttempt(), upsertErr: errors.New("db down")}, 11, 101, socket.ErrorCodeAttemptAnswerRejected, "db down"},
+		{"storage failure", &fakeAnswerRepository{attempt: answerTestAttempt(), upsertErr: errors.New("db down")}, 11, 101, socket.ErrorCodeAttemptAnswerRejected, "[SOCKET] Answer rejected"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			optionID := tt.optionID
-			_, err := (&service{repo: tt.repo}).UpdateAttemptAnswer(context.Background(), "student-1", 1, tt.questionID, &optionID)
+			_, err := (&service{repo: tt.repo}).UpdateAttemptAnswer(context.Background(), "student-1", "", 1, tt.questionID, &optionID)
 			var handlerErr *platformsocket.HandlerError
 			if !errors.As(err, &handlerErr) || handlerErr.Code != tt.code || handlerErr.Message != tt.message {
 				t.Fatalf("err = %v, want %s %q", err, tt.code, tt.message)
@@ -81,7 +81,7 @@ func TestUpdateAttemptAnswerSocketErrorCodes(t *testing.T) {
 func TestUpdateAttemptAnswerStoresCorrectness(t *testing.T) {
 	repo := &fakeAnswerRepository{attempt: answerTestAttempt()}
 	optionID := uint(101)
-	resp, err := (&service{repo: repo}).UpdateAttemptAnswer(context.Background(), "student-1", 1, 11, &optionID)
+	resp, err := (&service{repo: repo}).UpdateAttemptAnswer(context.Background(), "student-1", "", 1, 11, &optionID)
 	if err != nil || resp.QuestionID != 11 || *resp.SelectedOptionID != 101 {
 		t.Fatalf("resp=%#v err=%v", resp, err)
 	}

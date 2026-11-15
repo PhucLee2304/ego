@@ -5,30 +5,37 @@ const AttemptClassroomAssignmentUniqueIndex = "idx_attempts_classroom_assignment
 const OptionCorrectQuestionUniqueIndex = "idx_options_correct_question_unique"
 const OptionQuestionKeyUniqueIndex = "idx_options_question_key_unique"
 
+// Mỗi user chỉ có tối đa một attempt đang làm (ACTIVE) tại một thời điểm.
 const CreateAttemptActiveUserUniqueIndexSQL = `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_attempts_active_user_unique
 	ON attempts (user_id)
 	WHERE status = 'ACTIVE' AND deleted_at IS NULL;
 `
 
+// Mỗi học viên chỉ làm một attempt cho mỗi bài tập của lớp.
 const CreateAttemptClassroomAssignmentUniqueIndexSQL = `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_attempts_classroom_assignment_unique
 	ON attempts (context_id, user_id)
 	WHERE context_type = 'CLASSROOM_ASSIGNMENT' AND context_id IS NOT NULL AND deleted_at IS NULL;
 `
 
+// Mỗi câu hỏi chỉ có tối đa một đáp án đúng.
 const CreateOptionCorrectQuestionUniqueIndexSQL = `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_options_correct_question_unique
 	ON options (question_id)
 	WHERE is_correct = true AND deleted_at IS NULL;
 `
 
+// Trong một câu hỏi, key của đáp án (A, B, C, D…) không được trùng.
 const CreateOptionQuestionKeyUniqueIndexSQL = `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_options_question_key_unique
 	ON options (question_id, key)
 	WHERE deleted_at IS NULL;
 `
 
+// Câu hỏi của đề ASSIGNMENT phải có đúng 4 đáp án A, B, C, D và đúng một đáp án đúng.
+// Trigger chạy khi thêm/sửa/xóa đáp án hoặc câu hỏi, kiểm lúc commit (DEFERRED) để
+// sửa nhiều đáp án trong một transaction không bị chặn giữa chừng.
 const CreateAssignmentQuestionOptionsConstraintSQL = `
 	CREATE OR REPLACE FUNCTION validate_assignment_question_options(question_id_to_check bigint)
 	RETURNS void AS $$
@@ -104,12 +111,14 @@ const CreateAssignmentQuestionOptionsConstraintSQL = `
 	EXECUTE FUNCTION validate_assignment_question_options_from_question();
 `
 
+// Mỗi user chỉ có một phiên đang mở (chưa rời) trong một phòng.
 const CreateRoomParticipantOpenSessionUniqueIndexSQL = `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_room_participants_open_session
 	ON room_participants (room_id, user_id)
 	WHERE left_at IS NULL AND deleted_at IS NULL;
 `
 
+// Chống ghi trùng sự kiện giám sát khi client gửi lại cùng event_id.
 const CreateAttemptIntegrityEventUniqueIndexSQL = `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_integrity_events_event
 	ON attempt_integrity_events (attempt_id, event_id);

@@ -219,3 +219,92 @@ func TestScreenShareRequestApprovalAndReplacement(t *testing.T) {
 		t.Fatalf("request after end = %v, want ended", err)
 	}
 }
+
+// Quyền LiveKit luôn tính từ state mới nhất trong DB; duyệt khi yêu cầu đã bị xóa bị từ
+// chối; mời ra hai lần chỉ ghi một audit.
+func TestScreenSharePermissionsFollowLatestState(t *testing.T) {
+	db := learningTestDB(t)
+	ctx, now := context.Background(), time.Now()
+	classroom := &model.Classroom{Code: "SHARE02", Name: "Share sync", TeacherID: "teacher", Active: true}
+	if err := db.Create(classroom).Error; err != nil {
+		t.Fatal(err)
+	}
+	approved, joinedAt := true, now
+	if err := db.Create(&model.Member{ClassroomID: classroom.ID, UserID: "student", Approved: &approved, JoinedAt: &joinedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewRepository(db)
+	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}, sharers: map[string][]string{}, disconnected: map[string]bool{}}
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, mediaClient, nil, nil)
+	created, err := svc.CreateSchedule(ctx, "teacher", classroom.ID, dto.CreateScheduleRequest{Title: "Share", StartsAt: now.Add(-time.Minute), EndsAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roomID := created.Room.ID
+	if _, err := svc.StartRoom(ctx, "teacher", roomID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.MuteParticipant(ctx, "teacher", classroom.ID, roomID, "student"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RequestScreenShare(ctx, "student", classroom.ID, roomID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ApproveScreenShare(ctx, "teacher", classroom.ID, roomID, "student"); err != nil {
+		t.Fatal(err)
+	}
+	if got := mediaClient.permissions["student"]; got.Microphone || !got.Camera || !got.ScreenShare {
+		t.Fatalf("approve must keep the mute: %#v", got)
+	}
+
+	// Học sinh rời phòng (xóa phê duyệt) rồi xin lại; rời phòng lần nữa trước khi được duyệt.
+	roomName := media.RoomName(roomID)
+	if err := svc.HandleParticipantLeft(ctx, roomName, "student", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RequestScreenShare(ctx, "student", classroom.ID, roomID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.HandleParticipantLeft(ctx, roomName, "student", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ApproveScreenShare(ctx, "teacher", classroom.ID, roomID, "student"); !errors.Is(err, service.ErrScreenShareNotRequested) {
+		t.Fatalf("approve after the request was cleared = %v, want not requested", err)
+	}
+
+	// Duyệt khi học sinh vừa rớt kết nối: LiveKit không cấp được nên yêu cầu vẫn chờ duyệt.
+	if _, err := svc.RequestScreenShare(ctx, "student", classroom.ID, roomID); err != nil {
+		t.Fatal(err)
+	}
+	mediaClient.disconnected["student"] = true
+	if _, err := svc.ApproveScreenShare(ctx, "teacher", classroom.ID, roomID, "student"); !errors.Is(err, service.ErrParticipantNotConnected) {
+		t.Fatalf("approve while disconnected = %v, want not connected", err)
+	}
+	if state, err := repo.FindRoomParticipantState(ctx, roomID, "student"); err != nil || state.ScreenShareRequestedAt == nil || state.ScreenShareApprovedAt != nil {
+		t.Fatalf("failed approve must leave the request pending: state=%#v err=%v", state, err)
+	}
+
+	// Giáo viên bật lại mic lúc học sinh chưa kết nối (token cũ: mic tắt): vào phòng thì
+	// quyền LiveKit được đồng bộ theo DB.
+	if _, err := svc.AllowParticipantMicrophone(ctx, "teacher", classroom.ID, roomID, "student"); err != nil {
+		t.Fatal(err)
+	}
+	mediaClient.disconnected["student"] = false
+	if err := svc.HandleParticipantJoined(ctx, roomName, "student", now); err != nil {
+		t.Fatal(err)
+	}
+	if got := mediaClient.permissions["student"]; !got.Microphone || got.ScreenShare {
+		t.Fatalf("join must sync the latest permissions: %#v", got)
+	}
+
+	for range 2 {
+		if _, err := svc.RemoveParticipant(ctx, "teacher", classroom.ID, roomID, "student", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var removals int64
+	if err := db.Model(&model.RoomModerationAudit{}).Where("room_id = ? AND action = ?", roomID, model.RoomModerationAuditActionRemove).Count(&removals).Error; err != nil || removals != 1 {
+		t.Fatalf("remove twice must audit once: count=%d err=%v", removals, err)
+	}
+}

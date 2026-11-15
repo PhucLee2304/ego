@@ -9,7 +9,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ExamFilter lọc danh sách đề public; Search và Year để trống thì bỏ qua.
 type ExamFilter struct {
 	Type   model.ExamType
 	Search string
@@ -53,8 +52,8 @@ func (r *repository) GetExamYears(ctx context.Context, examType model.ExamType) 
 
 func (r *repository) GetExamByID(ctx context.Context, id uint) (*model.Exam, error) {
 	var exam model.Exam
-	// Public exam routes intentionally exclude private classroom exams. Private
-	// content is exposed only through an authorized classroom attempt.
+	// Route đề công khai cố ý loại đề riêng của bài tập lớp. Nội dung đề riêng chỉ
+	// được trả qua attempt của bài tập lớp mà người dùng có quyền làm.
 	if err := r.db.WithContext(ctx).
 		Preload("Sections", func(db *gorm.DB) *gorm.DB {
 			return db.Order(clause.OrderByColumn{Column: clause.Column{Name: "order"}, Desc: false})

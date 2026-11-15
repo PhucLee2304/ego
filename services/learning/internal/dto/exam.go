@@ -22,10 +22,9 @@ type GetExamsResponse struct {
 
 type GetExamsQuery struct {
 	httpx.PaginationQuery
-	Type model.ExamType `schema:"type" validate:"omitempty,oneof=THPT TOEIC"`
-	// Tùy chọn: tìm theo tiêu đề và lọc theo năm.
-	Search string `schema:"search"`
-	Year   *int   `schema:"year"`
+	Type   model.ExamType `schema:"type" validate:"omitempty,oneof=THPT TOEIC"`
+	Search string         `schema:"search"`
+	Year   *int           `schema:"year"`
 }
 
 type ExamSectionSummary struct {
@@ -162,12 +161,14 @@ func ToGetExamResponse(exam *model.Exam) *GetExamResponse {
 	}
 }
 
+// Normalize chuẩn hóa query danh sách đề trước khi truy vấn: chuẩn hóa phân trang, đưa
+// loại đề về chữ hoa và bỏ khoảng trắng thừa ở loại đề và từ khóa. Không truyền loại đề thì
+// mặc định là THPT, loại đề chính của kho đề công khai.
 func (q *GetExamsQuery) Normalize() {
 	q.PaginationQuery.Normalize()
 
 	q.Type = model.ExamType(strings.ToUpper(strings.TrimSpace(string(q.Type))))
 	q.Search = strings.TrimSpace(q.Search)
-	// THPT is the intentional product default for the public exam catalog.
 	if q.Type == "" {
 		q.Type = model.ExamTypeTHPT
 	}

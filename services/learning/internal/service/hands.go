@@ -10,6 +10,7 @@ import (
 	learningSocket "ego/services/learning/internal/socket"
 )
 
+// ErrHandTeacher: giáo viên là người gọi phát biểu nên không có trạng thái giơ tay.
 var ErrHandTeacher = httpx.NewError(http.StatusBadRequest, "[ERROR] The teacher does not raise a hand in their own class", nil)
 
 // SetHandRaised lưu trạng thái giơ tay trong suốt thời gian room LIVE để
@@ -29,22 +30,33 @@ func (s *service) SetHandRaised(ctx context.Context, userID string, classroomID,
 	if state.RemovedAt != nil {
 		return nil, ErrClassroomForbidden
 	}
-	// Gửi lại cùng trạng thái giữ nguyên thời điểm giơ tay ban đầu để thứ tự
-	// phát biểu không bị đẩy xuống cuối.
-	switch {
-	case raised && state.HandRaisedAt == nil:
-		now := time.Now()
-		state.HandRaisedAt = &now
-		if err := s.repo.UpdateRoomParticipantState(ctx, state); err != nil {
+	// UPDATE có điều kiện thay cho đọc-rồi-ghi: hai request cùng lúc (bấm hai lần, giáo
+	// viên hạ tay đồng thời) chỉ một bên đổi được và chỉ bên đó push. Gửi lại cùng trạng
+	// thái giữ nguyên thời điểm giơ tay ban đầu để thứ tự phát biểu không bị đẩy xuống cuối.
+	if raised {
+		changed, err := s.repo.RaiseRoomHand(ctx, room.ID, userID, time.Now())
+		if err != nil {
 			return nil, httpx.FromError(err, errClassroomServiceFailed)
 		}
-		s.publishRoomActivity(room, learningSocket.EventHandRaised, userID)
-	case !raised && state.HandRaisedAt != nil:
-		state.HandRaisedAt = nil
-		if err := s.repo.UpdateRoomParticipantState(ctx, state); err != nil {
+		if changed {
+			s.publishRoomActivity(room, learningSocket.EventHandRaised, userID)
+		}
+	} else {
+		lowered, err := s.repo.LowerRoomHands(ctx, room.ID, &userID)
+		if err != nil {
 			return nil, httpx.FromError(err, errClassroomServiceFailed)
 		}
-		s.publishRoomActivity(room, learningSocket.EventHandLowered, userID)
+		if len(lowered) > 0 {
+			s.publishRoomActivity(room, learningSocket.EventHandLowered, userID)
+		}
+	}
+	// Dòng state chắc chắn đã có (GetOrCreate ở trên): chỉ cần đọc lại.
+	if state, err = s.repo.FindRoomParticipantState(ctx, room.ID, userID); err != nil {
+		return nil, httpx.FromError(err, errClassroomServiceFailed)
+	}
+	// Bị mời ra khỏi phòng đúng lúc giơ tay: UPDATE không đổi gì, trả Forbidden như khi đã bị mời ra.
+	if state.RemovedAt != nil {
+		return nil, ErrClassroomForbidden
 	}
 	return dto.ToRoomParticipantStateResponse(state), nil
 }

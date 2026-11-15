@@ -7,8 +7,8 @@ import (
 	"ego/services/learning/internal/repository"
 )
 
-// applyScore là chỗ duy nhất ghi điểm cuối của attempt (PLAN_ATTEMPT_INTEGRITY.md
-// mục 1.2): RawScore luôn là điểm chấm từ đáp án; bài bị đình chỉ có Score = 0.
+// applyScore là chỗ duy nhất ghi điểm cuối của attempt, để luật "bị đình chỉ thì 0 điểm"
+// không bị quên ở luồng nào: RawScore luôn là điểm chấm từ đáp án; bài bị đình chỉ có Score = 0.
 // Mọi luồng ghi điểm (nộp, auto-submit, chấm lại, đình chỉ, khôi phục) đi qua đây.
 func applyScore(attempt *model.Attempt, correctAnswers int, rawScore float64) {
 	attempt.CorrectAnswers = &correctAnswers

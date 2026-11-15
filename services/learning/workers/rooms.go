@@ -17,7 +17,7 @@ func StartRoomLifecycle(ctx context.Context, svc service.Service, interval time.
 				return
 			case <-ticker.C:
 				if _, err := svc.ProcessRoomLifecycle(ctx); err != nil {
-					logger.Log.Error().Err(err).Msg("[ROOM] Lifecycle processing failed")
+					logger.Log.Error().Err(err).Msg("[WORKER] Lifecycle processing failed")
 				}
 			}
 		}

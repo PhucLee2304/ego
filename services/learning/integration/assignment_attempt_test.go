@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"ego/platform/httpx"
 	"ego/services/learning/config"
 	"ego/services/learning/internal/dto"
 	"ego/services/learning/internal/model"
@@ -209,7 +210,7 @@ func TestRemoveMemberSubmitsActiveAssignmentAttempts(t *testing.T) {
 	if events := gradebook.all(); len(events) != 2 || events[1].Status != string(model.SubmissionStatusSubmitted) {
 		t.Fatalf("gradebook events = %#v", events)
 	}
-	if types := f.events.types(); len(types) != 2 || types[0] != "ATTEMPT_SUBMITTING" || types[1] != "ATTEMPT_SUBMITTED" {
+	if types := f.events.types(); len(types) != 1 || types[0] != "ATTEMPT_SUBMITTED" {
 		t.Fatalf("attempt events = %#v", types)
 	}
 }
@@ -258,5 +259,61 @@ func TestAssignmentCorrectionRegradesSubmission(t *testing.T) {
 	}
 	if events := gradebook.all(); len(events) != before+1 {
 		t.Fatalf("correction must push one GRADEBOOK_UPDATED, got %#v", events[before:])
+	}
+}
+
+// Nhiều học sinh bắt đầu cùng lúc (khóa FOR SHARE, chạy song song) trong khi giáo viên tạm
+// dừng assignment (FOR UPDATE): mỗi học sinh hoặc có bài kèm submission, hoặc bị từ chối vì
+// assignment đã tắt; sau cùng không còn bài nào đang làm dở.
+func TestAssignmentAttemptConcurrentStartAndPause(t *testing.T) {
+	f := newAssignmentFixture(t)
+	ctx := context.Background()
+	assignment := f.create(t, f.classroom.ID).Assignments[0]
+	approved, joinedAt := true, time.Now()
+	students := []string{"student-1"}
+	for i := 2; i <= 6; i++ {
+		id := fmt.Sprintf("student-%d", i)
+		if err := f.db.Create(&model.Member{ClassroomID: f.classroom.ID, UserID: id, Approved: &approved, JoinedAt: &joinedAt}).Error; err != nil {
+			t.Fatal(err)
+		}
+		students = append(students, id)
+	}
+
+	errs := make([]*httpx.HTTPError, len(students))
+	var pauseErr *httpx.HTTPError
+	fns := []func(){func() {
+		_, pauseErr = f.svc.SetAssignmentActive(ctx, "teacher-1", f.classroom.ID, assignment.ID, false)
+	}}
+	for i, student := range students {
+		fns = append(fns, func() {
+			_, errs[i] = f.svc.CreateAttempt(ctx, student, assignment.ExamID, assignmentAttemptRequest(assignment.ID))
+		})
+	}
+	runConcurrently(fns...)
+	if pauseErr != nil {
+		t.Fatalf("pause: %v", pauseErr)
+	}
+
+	for i, student := range students {
+		var attempts, submissions int64
+		f.db.Model(&model.Attempt{}).Where("user_id = ? AND context_id = ?", student, assignment.ID).Count(&attempts)
+		f.db.Model(&model.AssignmentSubmission{}).Where("student_id = ? AND assignment_id = ?", student, assignment.ID).Count(&submissions)
+		switch {
+		case errs[i] == nil:
+			if attempts != 1 || submissions != 1 {
+				t.Fatalf("%s: attempts=%d submissions=%d", student, attempts, submissions)
+			}
+		case errs[i].Message == service.ErrAssignmentNotActive.Message:
+			if attempts != 0 || submissions != 0 {
+				t.Fatalf("%s rejected but attempts=%d submissions=%d", student, attempts, submissions)
+			}
+		default:
+			t.Fatalf("%s: unexpected error %v", student, errs[i])
+		}
+	}
+	var active int64
+	f.db.Model(&model.Attempt{}).Where("context_id = ? AND status = ?", assignment.ID, model.AttemptStatusInProgress).Count(&active)
+	if active != 0 {
+		t.Fatalf("%d attempts still in progress after pause", active)
 	}
 }
