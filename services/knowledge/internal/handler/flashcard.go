@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"ego/platform/httpx"
 	"ego/platform/jwt"
@@ -56,14 +55,13 @@ func (h *handler) SaveWordToDecks(w http.ResponseWriter, r *http.Request) {
 func (h *handler) GetWordSaveStatus(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwt.GetUserID(r.Context())
 
-	q := r.URL.Query().Get("wordId")
-	wordID, err := strconv.ParseUint(q, 10, 64)
-	if err != nil || wordID == 0 {
-		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid or missing wordId query parameter", err))
+	var query dto.WordSaveStatusQuery
+	if err := httpx.DecodeQuery(r, &query); err != nil {
+		httpx.Error(w, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid query parameters", err))
 		return
 	}
 
-	status, httpErr := h.service.GetWordSaveStatus(r.Context(), userID, uint(wordID))
+	status, httpErr := h.service.GetWordSaveStatus(r.Context(), userID, query.WordID)
 	if httpErr != nil {
 		httpx.Error(w, httpErr)
 		return

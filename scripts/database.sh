@@ -2,6 +2,9 @@
 set -eu
 
 case "$ACTION:$SERVICE" in
+  seed:knowledge-offline)
+    docker compose --profile seed run --rm --no-deps --build knowledge-offline-seed
+    ;;
   seed:knowledge-topics|seed:learning)
     docker compose --profile seed run --rm --no-deps --build "${SERVICE}-seed"
     ;;

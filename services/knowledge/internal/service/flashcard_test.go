@@ -33,13 +33,8 @@ func (f *fakeFlashcardRepository) GetFlashcardByID(_ context.Context, userID str
 	return f.card, f.cardErr
 }
 
-func (f *fakeFlashcardRepository) UpdateFlashcardSRS(_ context.Context, fc *model.Flashcard) error {
-	f.updatedSRS = fc
-	return f.err
-}
-
-func (f *fakeFlashcardRepository) CreateReviewLog(_ context.Context, log *model.FlashcardReviewLog) error {
-	f.reviewLog = log
+func (f *fakeFlashcardRepository) ReviewFlashcard(_ context.Context, fc *model.Flashcard, log *model.FlashcardReviewLog) error {
+	f.updatedSRS, f.reviewLog = fc, log
 	return f.err
 }
 
@@ -62,15 +57,15 @@ func (f *fakeFlashcardRepository) DeleteFlashcard(_ context.Context, userID stri
 
 func TestReviewFlashcard_SM2(t *testing.T) {
 	tests := []struct {
-		name          string
-		initialCard   *model.Flashcard
-		rating        string
-		wantStatus    model.FlashcardStatus
-		wantInterval  int
-		wantReps      int
-		wantEFMin     float64
-		wantEFMax     float64
-		wantHTTPCode  int
+		name         string
+		initialCard  *model.Flashcard
+		rating       string
+		wantStatus   model.FlashcardStatus
+		wantInterval int
+		wantReps     int
+		wantEFMin    float64
+		wantEFMax    float64
+		wantHTTPCode int
 	}{
 		{
 			name: "again resets repetitions and sets interval to 1 day",

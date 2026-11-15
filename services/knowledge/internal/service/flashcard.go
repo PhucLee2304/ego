@@ -11,70 +11,23 @@ import (
 	"ego/platform/httpx"
 	"ego/services/knowledge/internal/dto"
 	"ego/services/knowledge/internal/model"
-	"ego/services/knowledge/internal/repository"
 
 	"gorm.io/gorm"
 )
 
-// ─── Card & Study methods ──────────────────────────────────────────────────────
-
 func (s *service) SaveWordToDecks(ctx context.Context, userID string, body dto.SaveWordToDecksBody) *httpx.HTTPError {
-	txErr := s.repo.Transaction(ctx, func(txRepo repository.Repository) error {
-		return s.withRepo(txRepo).saveWordToDecks(ctx, userID, body)
-	})
-	return mapErr(txErr, "save word to decks")
-}
-
-// saveWordToDecks chạy bên trong transaction.
-func (s *service) saveWordToDecks(ctx context.Context, userID string, body dto.SaveWordToDecksBody) error {
-	if _, err := s.repo.GetWordByID(ctx, body.WordID); err != nil {
-		return err
+	newDeckName := ""
+	if body.NewDeckName != nil {
+		newDeckName = strings.TrimSpace(*body.NewDeckName)
 	}
-
-	targetDeckIDs := make([]uint, len(body.DeckIDs))
-	copy(targetDeckIDs, body.DeckIDs)
-
-	if body.NewDeckName != nil && strings.TrimSpace(*body.NewDeckName) != "" {
-		name := strings.TrimSpace(*body.NewDeckName)
-		newDeck := &model.FlashcardDeck{UserID: userID, Name: name}
-		if err := s.repo.CreateDeck(ctx, newDeck); err != nil {
-			return err
-		}
-		targetDeckIDs = append(targetDeckIDs, newDeck.ID)
-	}
-
-	now := time.Now()
-	for _, deckID := range targetDeckIDs {
-		exists, err := s.repo.IsWordInDeck(ctx, userID, deckID, body.WordID)
-		if err != nil {
-			return err
-		}
-		if exists {
-			continue
-		}
-		card := &model.Flashcard{
-			UserID:       userID,
-			DeckID:       deckID,
-			WordID:       body.WordID,
-			Note:         body.Note,
-			Status:       model.FlashcardStatusNew,
-			EaseFactor:   2.5,
-			NextReviewAt: now,
-		}
-		if err := s.repo.CreateFlashcard(ctx, card); err != nil {
-			return err
-		}
-		if err := s.repo.UpdateDeckCardCount(ctx, deckID, 1); err != nil {
-			return err
-		}
-	}
-	return nil
+	err := s.repo.SaveWordToDecks(ctx, userID, body.WordID, body.DeckIDs, newDeckName, body.Note)
+	return httpx.FromError(err, "[ERROR] Failed to save word to decks")
 }
 
 func (s *service) GetWordSaveStatus(ctx context.Context, userID string, wordID uint) (*dto.WordSaveStatusResponse, *httpx.HTTPError) {
 	deckIDs, err := s.repo.GetWordSaveStatus(ctx, userID, wordID)
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get word save status", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get word save status")
 	}
 	return &dto.WordSaveStatusResponse{
 		WordID:         wordID,
@@ -86,10 +39,7 @@ func (s *service) GetWordSaveStatus(ctx context.Context, userID string, wordID u
 func (s *service) GetCardsByDeck(ctx context.Context, userID string, deckID uint, query httpx.PaginationQuery) ([]*dto.Flashcard, int64, *httpx.HTTPError) {
 	cards, total, err := s.repo.GetCardsByDeck(ctx, userID, deckID, query.Limit(), query.Offset())
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, 0, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Deck not found", err)
-		}
-		return nil, 0, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get cards", err)
+		return nil, 0, httpx.FromError(err, "[ERROR] Failed to get cards")
 	}
 	result := make([]*dto.Flashcard, len(cards))
 	for i, c := range cards {
@@ -99,16 +49,9 @@ func (s *service) GetCardsByDeck(ctx context.Context, userID string, deckID uint
 }
 
 func (s *service) UpdateFlashcardNote(ctx context.Context, userID string, id uint, note *string) (*dto.Flashcard, *httpx.HTTPError) {
-	card, err := s.repo.GetFlashcardByID(ctx, userID, id)
+	card, err := s.repo.UpdateFlashcardNote(ctx, userID, id, note)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Flashcard not found", err)
-		}
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get flashcard", err)
-	}
-	card.Note = note
-	if err := s.repo.UpdateFlashcardSRS(ctx, card); err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to update flashcard", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to update flashcard note")
 	}
 	return dto.ToFlashcard(card), nil
 }
@@ -126,7 +69,7 @@ func (s *service) DeleteFlashcard(ctx context.Context, userID string, id uint) *
 func (s *service) GetStudyCards(ctx context.Context, userID string, deckID uint) ([]*dto.Flashcard, *httpx.HTTPError) {
 	cards, err := s.repo.GetStudyCards(ctx, userID, deckID, 20, time.Now())
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get study cards", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get study cards")
 	}
 	result := make([]*dto.Flashcard, len(cards))
 	for i, c := range cards {
@@ -138,7 +81,7 @@ func (s *service) GetStudyCards(ctx context.Context, userID string, deckID uint)
 func (s *service) GetAllDueCards(ctx context.Context, userID string) ([]*dto.Flashcard, *httpx.HTTPError) {
 	cards, err := s.repo.GetAllDueCards(ctx, userID, 50, time.Now())
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get due cards", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get due cards")
 	}
 	result := make([]*dto.Flashcard, len(cards))
 	for i, c := range cards {
@@ -150,40 +93,32 @@ func (s *service) GetAllDueCards(ctx context.Context, userID string) ([]*dto.Fla
 func (s *service) ReviewFlashcard(ctx context.Context, userID string, id uint, body dto.ReviewCardBody) (*dto.ReviewCardResponse, *httpx.HTTPError) {
 	card, err := s.repo.GetFlashcardByID(ctx, userID, id)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Flashcard not found", err)
-		}
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get flashcard", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get flashcard")
 	}
 
-	applySM2(card, model.ReviewRating(body.Rating))
-
+	rating := model.ReviewRating(body.Rating)
+	applySM2(card, rating)
 	now := time.Now()
 	card.LastReviewedAt = &now
 	card.NextReviewAt = now.AddDate(0, 0, card.IntervalDays)
 
-	if err := s.repo.UpdateFlashcardSRS(ctx, card); err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to update flashcard", err)
-	}
-
-	log := &model.FlashcardReviewLog{
+	err = s.repo.ReviewFlashcard(ctx, card, &model.FlashcardReviewLog{
 		UserID:       userID,
 		FlashcardID:  card.ID,
 		DeckID:       card.DeckID,
-		Rating:       model.ReviewRating(body.Rating),
+		Rating:       rating,
 		ReviewTimeMs: body.ReviewTimeMs,
+	})
+	if err != nil {
+		return nil, httpx.FromError(err, "[ERROR] Failed to save review")
 	}
-	if err := s.repo.CreateReviewLog(ctx, log); err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to save review log", err)
-	}
-
 	return dto.ToReviewResponse(card), nil
 }
 
 func (s *service) GetFlashcardUserStats(ctx context.Context, userID string) (*dto.FlashcardUserStats, *httpx.HTTPError) {
 	stats, err := s.repo.GetFlashcardStats(ctx, userID)
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get flashcard stats", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get flashcard stats")
 	}
 	return stats, nil
 }
@@ -236,21 +171,5 @@ func applySM2(card *model.Flashcard, rating model.ReviewRating) {
 		} else {
 			card.Status = model.FlashcardStatusReview
 		}
-	}
-}
-
-// ─── Error helper ─────────────────────────────────────────────────────────────
-
-func mapErr(err error, action string) *httpx.HTTPError {
-	if err == nil {
-		return nil
-	}
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, gorm.ErrForeignKeyViolated):
-		return httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Resource not found", err)
-	case errors.Is(err, gorm.ErrDuplicatedKey):
-		return httpx.NewError(http.StatusConflict, "[CONFLICT] Resource already exists", err)
-	default:
-		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to "+action, err)
 	}
 }
