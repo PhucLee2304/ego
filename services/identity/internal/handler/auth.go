@@ -62,8 +62,5 @@ func (h *handler) Login(w http.ResponseWriter, r *http.Request) { // **Reviewed*
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, dto.LoginResponse{
-		AccessToken:  resp.AccessToken,
-		RefreshToken: resp.RefreshToken,
-	})
+	httpx.JSON(w, http.StatusOK, resp)
 }
