@@ -51,6 +51,8 @@ services:
         condition: service_started
       posts:
         condition: service_started
+      ai:
+        condition: service_started
     networks:
       - ego-network
 
@@ -374,6 +376,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  ai:
+    <<: *go-service
+    build:
+      context: .
+      dockerfile: services/ai/Dockerfile
+    container_name: ego-ai
+    env_file:
+      - ./services/ai/.env
+    depends_on:
+      identity:
+        condition: service_healthy
 
 networks:
   ego-network:

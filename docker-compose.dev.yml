@@ -44,3 +44,8 @@ services:
     <<: *air-service
     environment:
       SERVICE: posts
+
+  ai:
+    <<: *air-service
+    environment:
+      SERVICE: ai
