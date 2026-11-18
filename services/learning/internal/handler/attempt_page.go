@@ -9,8 +9,8 @@ import (
 )
 
 // GetAttemptNavigator godoc
-// @Summary      Get attempt navigator
-// @Description  Get pages and question states (answered/locked) of an attempt for the question palette; works for every flow
+// @Summary      Lấy bảng điều hướng câu hỏi
+// @Description  Lấy danh sách trang và trạng thái từng câu (đã trả lời, bị khóa) để hiển thị bảng chọn câu; dùng được cho mọi luồng làm bài.
 // @Tags         Attempts
 // @Accept       json
 // @Produce      json
@@ -46,8 +46,8 @@ func (h *handler) GetAttemptNavigator(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetAttemptPage godoc
-// @Summary      Get attempt page
-// @Description  Get content of one page of an attempt. In TOEIC_STRICT flow, passed/future listening pages and reading pages during listening return 409 PAGE_LOCKED
+// @Summary      Lấy nội dung một trang làm bài
+// @Description  Lấy nội dung một trang của lượt làm bài. Ở luồng TOEIC_STRICT, trang nghe đã qua hoặc chưa tới, và trang đọc khi còn đang ở phần nghe, sẽ trả 409 PAGE_LOCKED.
 // @Tags         Attempts
 // @Accept       json
 // @Produce      json

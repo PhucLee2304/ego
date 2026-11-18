@@ -2,6 +2,7 @@ package dto
 
 import (
 	"testing"
+	"time"
 
 	"ego/services/learning/internal/model"
 	"gorm.io/gorm"
@@ -160,7 +161,7 @@ func TestAttemptQuestionResponseVisibility(t *testing.T) {
 		},
 	}
 
-	active := ToAttemptResponseWithQuestions(attempt)
+	active := ToAttemptResponseWithQuestions(attempt, time.Now())
 	activeGroup := active.Sections[0].Groups[0]
 	activeQuestion := activeGroup.Questions[0]
 	if activeGroup.Transcript != "" || activeGroup.Explanation != "" || activeQuestion.Explanation != "" {

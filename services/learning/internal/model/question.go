@@ -4,12 +4,17 @@ import "gorm.io/gorm"
 
 type Question struct {
 	gorm.Model
-	Content           string    `gorm:"type:text;not null"`
-	Part              *PartCode `gorm:"type:text;index"`
-	Explanation       string    `gorm:"type:text"`
-	Order             int       `gorm:"not null"`
-	Number            *int      // số câu gốc của đề (TOEIC 1–200)
-	ExcludedFromScore bool      `gorm:"not null;default:false;index"`
+	Content string `gorm:"type:text;not null"`
+	// Part TOEIC của câu (1–7), chi tiết hơn Section.Code (LISTENING/READING/FULL):
+	// part 1–4 thuộc LISTENING, 5–7 thuộc READING. nil với đề không chia part (ASSIGNMENT).
+	Part        *PartCode `gorm:"type:text;index"`
+	Explanation string    `gorm:"type:text"`
+	// Thứ tự câu trong group (nếu GroupID có) hoặc trong section, dùng để sắp xếp.
+	Order int `gorm:"not null"`
+	// Số thứ tự của câu này trong đề gốc (TOEIC: 1–200), hiển thị là "Câu N".
+	// Khác Order (thứ tự trong section/group). nil thì đánh số theo thứ tự toàn bài.
+	Number            *int
+	ExcludedFromScore bool `gorm:"not null;default:false;index"`
 
 	SectionID uint    `gorm:"not null;index"`
 	Section   Section `gorm:"foreignKey:SectionID;references:ID"`

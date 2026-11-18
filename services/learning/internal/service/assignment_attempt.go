@@ -9,7 +9,7 @@ import (
 )
 
 // submitAssignmentAttempts nộp ngay mọi attempt đang làm của một assignment bằng
-// đáp án đã lưu (thay RPC SubmitAssignmentAttempts của exams). Gọi trong tx của
+// đáp án đã lưu, khi bài tập bị tạm dừng hoặc đề bị sửa. Gọi trong tx của
 // assignment qua withRepoDeferringEvents: mỗi bài nộp là một SAVEPOINT; bài nộp lỗi
 // được bỏ qua và để worker auto-submit làm lại vì expires_at đã được đặt về now.
 func (s *service) submitAssignmentAttempts(ctx context.Context, assignmentID uint, reason string) (int, error) {
@@ -35,15 +35,15 @@ func (s *service) submitAssignmentAttempts(ctx context.Context, assignmentID uin
 	}
 	if len(errs) > 0 {
 		logger.Log.Error().Err(errors.Join(errs...)).Uint("assignment_id", assignmentID).
-			Msg("[ATTEMPT] Some assignment attempts were queued for auto-submit retry")
+			Msg("[ERROR] Some assignment attempts were queued for auto-submit retry")
 	}
 	return submitted, nil
 }
 
 // submitStudentAssignmentAttempts nộp ngay các bài assignment đang làm của một học
-// sinh (thay RPC SubmitStudentAssignmentAttempts, dùng khi xóa học sinh khỏi lớp).
-// Gọi trong tx qua withRepoDeferringEvents; khác submitAssignmentAttempts, bài nộp
-// lỗi làm hỏng cả tx như khi RPC lỗi trước đây.
+// sinh, dùng khi xóa học sinh khỏi lớp. Gọi trong tx qua withRepoDeferringEvents;
+// khác submitAssignmentAttempts, bài nộp lỗi làm hỏng cả tx, để không xóa học sinh khỏi
+// lớp khi bài của họ chưa được chốt.
 func (s *service) submitStudentAssignmentAttempts(ctx context.Context, studentID string, assignmentIDs []uint) (int, error) {
 	if len(assignmentIDs) == 0 {
 		return 0, nil

@@ -9,11 +9,12 @@ import (
 )
 
 // CreateAttempt godoc
-// @Summary      Create exam attempt
-// @Description  Create a new practice or test attempt for an exam
+// @Summary      Tạo lượt làm bài
+// @Description  Tạo lượt làm bài mới cho một đề ở chế độ luyện tập (PRACTICE), thi (TEST) hoặc bài tập (ASSIGNMENT), có thể giới hạn theo section, part và thời gian. Với bài tập lớp, gửi contextType = CLASSROOM_ASSIGNMENT, contextId là ID assignment, và integrityConsent nếu bài có giám sát.
 // @Tags         Exams
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id    path      int                       true  "Exam ID"
 // @Param        body  body      dto.CreateExamAttemptRequest  true  "Attempt payload"
 // @Success      201  {object}  dto.AttemptResponse
@@ -58,11 +59,12 @@ func (h *handler) CreateAttempt(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetAttempts godoc
-// @Summary      Get attempts by status
-// @Description  Get current user's attempts by required status
+// @Summary      Lấy danh sách lượt làm bài theo trạng thái
+// @Description  Lấy các lượt làm bài của người dùng hiện tại theo trạng thái bắt buộc, có phân trang và lọc theo chế độ, loại đề, tên đề. Không kèm câu hỏi. Client dùng status=SUBMITTED cho màn lịch sử và thống kê, status=ACTIVE để tìm lượt đang làm dở; nội dung xem lại của từng lượt lấy qua /attempts/{id}/history.
 // @Tags         Attempts
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        page      query     int     false  "Page number" default(1)
 // @Param        pageSize  query     int     false  "Page size" default(10)
 // @Param        status    query     string  true   "Attempt status" Enums(ACTIVE, SUBMITTED, CANCELLED)
@@ -98,11 +100,12 @@ func (h *handler) GetAttempts(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetAttemptQuestions godoc
-// @Summary      Get attempt questions
-// @Description  Get questions by attempt context with saved answers
+// @Summary      Lấy câu hỏi của lượt làm bài
+// @Description  Lấy câu hỏi theo phạm vi đã chọn khi tạo lượt làm bài (section, part), kèm các đáp án đã lưu.
 // @Tags         Attempts
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id   path      int  true  "Attempt ID"
 // @Success      200  {object}  dto.AttemptResponse
 // @Failure      400  {object}  httpx.HTTPError
@@ -134,11 +137,12 @@ func (h *handler) GetAttemptQuestions(w http.ResponseWriter, r *http.Request) {
 }
 
 // CancelAttempt godoc
-// @Summary      Cancel attempt
-// @Description  Cancel an active attempt without grading it and create a history snapshot
+// @Summary      Hủy lượt làm bài
+// @Description  Hủy lượt làm bài đang làm, không chấm điểm, và lưu bản chụp lịch sử để xem lại.
 // @Tags         Attempts
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id  path  int  true  "Attempt ID"
 // @Success      200  {object}  dto.AttemptResponse
 // @Failure      400  {object}  httpx.HTTPError
@@ -170,11 +174,12 @@ func (h *handler) CancelAttempt(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetAttemptHistory godoc
-// @Summary      Get attempt history
-// @Description  Get the immutable review snapshot of a submitted or cancelled attempt
+// @Summary      Lấy lịch sử lượt làm bài
+// @Description  Lấy bản chụp để xem lại của lượt làm bài đã nộp hoặc đã hủy; bản chụp không đổi khi đề bị sửa sau đó.
 // @Tags         Attempts
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id  path  int  true  "Attempt ID"
 // @Success      200  {object}  dto.AttemptResponse
 // @Failure      400  {object}  httpx.HTTPError
@@ -205,11 +210,12 @@ func (h *handler) GetAttemptHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // SubmitAttempt godoc
-// @Summary      Submit attempt
-// @Description  Save the final answers, grade the attempt and create its history snapshot
+// @Summary      Nộp bài
+// @Description  Lưu đáp án cuối cùng, chấm điểm và lưu bản chụp lịch sử của lượt làm bài.
 // @Tags         Attempts
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id    path  int                       true  "Attempt ID"
 // @Param        body  body  dto.SubmitAttemptRequest  true  "Final answers"
 // @Success      200  {object}  dto.AttemptResponse

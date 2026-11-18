@@ -14,8 +14,8 @@ import (
 
 // AdvanceListening phục vụ WS ATTEMPT_LISTENING_ADVANCE: chạy lazy advance, rồi nhận yêu cầu
 // tiến trang nếu page == ListeningPage và now ≥ startedAt + audioMs − 2s. Khi nhận,
-// startedAt của trang mới = now để độ trễ tải audio không cộng dồn (mục 1.3).
-func (s *service) AdvanceListening(ctx context.Context, userID string, attemptID uint, page int) (*dto.ListeningStateResponse, error) {
+// startedAt của trang mới = now để độ trễ tải audio không cộng dồn qua các trang.
+func (s *service) AdvanceListening(ctx context.Context, userID, connectionID string, attemptID uint, page int) (*dto.ListeningStateResponse, error) {
 	var response *dto.ListeningStateResponse
 	finished := false
 	err := s.repo.Transaction(ctx, func(repo repository.Repository) error {
@@ -34,6 +34,10 @@ func (s *service) AdvanceListening(ctx context.Context, userID string, attemptID
 		// Từ chối thì tx rollback, kể cả lazy advance: lần đọc sau tính lại y hệt.
 		advanceListening(attempt, now, s.listeningGrace())
 		finished = listeningOnlyFinished(attempt)
+		// Sau hết giờ và lazy advance, như UpdateAttemptAnswer.
+		if err := s.requireSessionOwner(attempt, connectionID); err != nil {
+			return err
+		}
 		if accepted, rejectCode := acceptListeningAdvance(attempt, page, now); !accepted {
 			message := "[SOCKET] Listening page does not match current page"
 			if rejectCode == socket.ErrorCodeListeningAdvanceTooEarly {
@@ -94,6 +98,8 @@ func (s *service) submitIfListeningFinished(ctx context.Context, userID string, 
 	return nil
 }
 
+// toListeningState dựng trạng thái phần nghe gửi cho client: stage hiện tại, trang nghe đang
+// chạy và lúc bắt đầu, cùng giờ server để client đồng bộ đồng hồ đếm ngược.
 func toListeningState(attempt *model.Attempt, now time.Time) *dto.ListeningStateResponse {
 	response := &dto.ListeningStateResponse{ServerTime: now}
 	if attempt.Stage != nil {

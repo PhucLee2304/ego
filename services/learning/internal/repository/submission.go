@@ -17,6 +17,13 @@ func (r *repository) GetAssignmentSubmissionByAssignmentAndStudent(ctx context.C
 	return &submission, nil
 }
 
+// GetAssignmentSubmissions lấy mọi submission của một assignment (một query cho cả lớp).
+func (r *repository) GetAssignmentSubmissions(ctx context.Context, assignmentID uint) ([]*model.AssignmentSubmission, error) {
+	var submissions []*model.AssignmentSubmission
+	err := r.db.WithContext(ctx).Where("assignment_id = ?", assignmentID).Find(&submissions).Error
+	return submissions, err
+}
+
 // DeleteAssignmentSubmission xóa hẳn (không xóa mềm): unique (assignment_id,
 // student_id) gồm cả dòng đã xóa mềm, nên xóa mềm thì học sinh không làm lại được sau reset.
 func (r *repository) DeleteAssignmentSubmission(ctx context.Context, assignmentID uint, studentID string) error {

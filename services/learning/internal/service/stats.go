@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	identityClient "ego/api/gen/go/identity"
 	"ego/platform/httpx"
 	"ego/services/learning/internal/dto"
 )
@@ -17,11 +16,7 @@ func (s *service) GetAdminStats(ctx context.Context, query httpx.StatsQuery) (*d
 	if len(teacherIDs) == 0 {
 		return resp, nil
 	}
-	usersResp, err := s.identityClient.GetUsersInfo(ctx, &identityClient.GetUsersInfoRequest{Ids: teacherIDs})
-	if err != nil {
-		return nil, httpx.FromError(err, "[ERROR] Failed to load learning stats")
-	}
-	users := dto.ToUserInfoMap(usersResp.Users)
+	users := s.usersInfo(ctx, teacherIDs...)
 	for i, row := range resp.List {
 		row.Teacher = users[teacherIDs[i]]
 	}

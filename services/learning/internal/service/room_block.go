@@ -53,7 +53,7 @@ func (s *service) RemoveUserFromLiveRooms(ctx context.Context, userID string) (r
 		removed++
 	}
 	if len(errs) > 0 {
-		logger.Log.Error().Err(errors.Join(errs...)).Str("user_id", userID).Msg("[LEARNING] Failed to remove blocked user from some live rooms")
+		logger.Log.Error().Err(errors.Join(errs...)).Str("user_id", userID).Msg("[ERROR] Failed to remove blocked user from some live rooms")
 	}
 	return removed, ended, errors.Join(errs...)
 }

@@ -101,6 +101,8 @@ type Repository interface {
 	GetRoomByIDForUpdate(ctx context.Context, id uint) (*model.Room, error)
 	GetRoomByName(ctx context.Context, name string) (*model.Room, error)
 	SetRoomHostAbsentSince(ctx context.Context, roomID uint, absentSince *time.Time) error
+	MarkRoomHostAbsent(ctx context.Context, roomID uint, at time.Time) (*time.Time, error)
+	ClearRoomHostAbsent(ctx context.Context, roomID uint, before time.Time) error
 	UpdateRoom(ctx context.Context, room *model.Room) error
 	DeleteRoom(ctx context.Context, room *model.Room) error
 	HasLiveRoomByClassroom(ctx context.Context, classroomID uint) (bool, error)
@@ -111,7 +113,11 @@ type Repository interface {
 	// Participant
 	GetOrCreateRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error)
 	FindRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error)
-	UpdateRoomParticipantState(ctx context.Context, state *model.RoomParticipantState) error
+	LockRoomParticipantState(ctx context.Context, roomID uint, userID string) (*model.RoomParticipantState, error)
+	UpdateRoomParticipantState(ctx context.Context, state *model.RoomParticipantState, columns ...string) error
+	RequestRoomScreenShare(ctx context.Context, roomID uint, userID string, at time.Time) (bool, error)
+	RevertRoomScreenShareApproval(ctx context.Context, roomID uint, userID string, approvedAt time.Time) error
+	RaiseRoomHand(ctx context.Context, roomID uint, userID string, at time.Time) (bool, error)
 	LowerRoomHands(ctx context.Context, roomID uint, userID *string) ([]string, error)
 	GetRoomParticipantStates(ctx context.Context, roomID uint) ([]*model.RoomParticipantState, error)
 	DeleteRoomParticipantStates(ctx context.Context, roomID uint) error
@@ -135,7 +141,7 @@ type Repository interface {
 	UpdateAssignmentsContentAndActive(ctx context.Context, examID uint, title string, description *string, active bool) error
 	RestoreAssignmentActiveStates(ctx context.Context, states map[uint]bool) error
 	GetAssignmentForAttemptValidation(ctx context.Context, id uint) (*model.Assignment, error)
-	GetAssignmentForAttemptValidationForUpdate(ctx context.Context, id uint) (*model.Assignment, error)
+	GetAssignmentForAttemptValidationForShare(ctx context.Context, id uint) (*model.Assignment, error)
 	GetAssignmentIDsByClassroom(ctx context.Context, classroomID uint) ([]uint, error)
 
 	// Assignment attempt
@@ -150,6 +156,7 @@ type Repository interface {
 
 	// Submission
 	GetAssignmentSubmissionByAssignmentAndStudent(ctx context.Context, assignmentID uint, studentID string) (*model.AssignmentSubmission, error)
+	GetAssignmentSubmissions(ctx context.Context, assignmentID uint) ([]*model.AssignmentSubmission, error)
 	DeleteAssignmentSubmission(ctx context.Context, assignmentID uint, studentID string) error
 	UpsertAssignmentSubmission(ctx context.Context, submission *model.AssignmentSubmission) error
 	UpsertAssignmentSubmissionResult(ctx context.Context, submission *model.AssignmentSubmission) error

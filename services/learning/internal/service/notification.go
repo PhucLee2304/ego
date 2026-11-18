@@ -33,6 +33,9 @@ func createNotificationOutbox(ctx context.Context, repo repository.Repository, s
 	})
 }
 
+// ProcessNotificationOutbox chạy định kỳ từ worker: lấy tối đa limit thông báo đến hạn trong
+// outbox, gửi sang notifications. Gửi lỗi thì hẹn thử lại với thời gian chờ tăng dần, không chặn
+// các thông báo khác. Không cấu hình notifications thì bỏ qua.
 func (s *service) ProcessNotificationOutbox(ctx context.Context, limit int) (int, error) {
 	if s.notificationClient == nil {
 		return 0, nil
@@ -56,7 +59,7 @@ func (s *service) ProcessNotificationOutbox(ctx context.Context, limit int) (int
 			if markErr := s.repo.MarkNotificationOutboxFailed(ctx, event.ID, attempts, time.Now().Add(notificationRetryDelay(attempts)), publishErr.Error()); markErr != nil {
 				return processed, markErr
 			}
-			logger.Log.Error().Err(publishErr).Uint("event_id", event.ID).Msg("[NOTIFICATION_OUTBOX] Publish failed")
+			logger.Log.Error().Err(publishErr).Uint("event_id", event.ID).Msg("[WORKER] Publish failed")
 			continue
 		}
 		if err := s.repo.MarkNotificationOutboxProcessed(ctx, event.ID, time.Now()); err != nil {

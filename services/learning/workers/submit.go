@@ -16,10 +16,10 @@ func StartAutoSubmitExpiredAttempts(ctx context.Context, svc service.Service, in
 		for {
 			submitted, err := svc.AutoSubmitExpiredAttempts(ctx, batchSize)
 			if err != nil {
-				logger.Log.Error().Err(err).Msg("[ATTEMPT] Auto-submit scan failed")
+				logger.Log.Error().Err(err).Msg("[WORKER] Auto-submit scan failed")
 			}
 			if submitted > 0 {
-				logger.Log.Info().Int("submitted", submitted).Msg("[ATTEMPT] Expired attempts auto-submitted")
+				logger.Log.Info().Int("submitted", submitted).Msg("[WORKER] Expired attempts auto-submitted")
 			}
 
 			select {

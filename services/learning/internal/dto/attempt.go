@@ -41,17 +41,26 @@ func (q GetAttemptsQuery) ExamTypes() []model.ExamType {
 	return types
 }
 
+// CreateExamAttemptRequest là body tạo lượt làm bài cho một đề.
+//   - ContextType: bắt buộc. STANDALONE là tự làm đề; CLASSROOM_ASSIGNMENT là làm bài tập lớp.
+//   - ContextID: ID assignment, bắt buộc với CLASSROOM_ASSIGNMENT và không được gửi với STANDALONE.
+//   - Mode: PRACTICE hoặc TEST với STANDALONE; bỏ trống với CLASSROOM_ASSIGNMENT (tự thành ASSIGNMENT).
+//   - Section, Parts: giới hạn phạm vi đề, chỉ dùng một trong hai. Bỏ trống cả hai là làm cả đề.
+//   - Duration: thời gian tự chọn (phút), chỉ có tác dụng với PRACTICE; bỏ trống là không giới hạn.
+//     TEST dùng thời gian chuẩn theo loại đề, ASSIGNMENT dùng thời gian của bài tập.
+//   - IntegrityConsent: bắt buộc khi assignment có giám sát; version phải khớp phiên bản điều khoản hiện tại.
 type CreateExamAttemptRequest struct {
-	Mode        model.AttemptMode        `json:"mode,omitempty" validate:"omitempty,oneof=PRACTICE TEST ASSIGNMENT"`
-	Section     *model.SectionCode       `json:"section,omitempty" validate:"omitempty,oneof=FULL LISTENING READING"`
-	Parts       []model.PartCode         `json:"parts,omitempty" validate:"omitempty,dive,oneof=1 2 3 4 5 6 7"`
-	Duration    *model.AttemptDuration   `json:"duration,omitempty" validate:"omitempty,oneof=10 15 20 30 45 60 75 90 120"`
-	ContextType model.AttemptContextType `json:"contextType" validate:"required,oneof=STANDALONE CLASSROOM_ASSIGNMENT"`
-	ContextID   *uint                    `json:"contextId,omitempty" validate:"omitempty,gt=0"`
-	// Bắt buộc khi assignment có giám sát (PLAN_ATTEMPT_INTEGRITY.md mục 1.7).
+	Mode             model.AttemptMode        `json:"mode,omitempty" validate:"omitempty,oneof=PRACTICE TEST ASSIGNMENT"`
+	Section          *model.SectionCode       `json:"section,omitempty" validate:"omitempty,oneof=FULL LISTENING READING"`
+	Parts            []model.PartCode         `json:"parts,omitempty" validate:"omitempty,dive,oneof=1 2 3 4 5 6 7"`
+	Duration         *model.AttemptDuration   `json:"duration,omitempty" validate:"omitempty,oneof=10 15 20 30 45 60 75 90 120"`
+	ContextType      model.AttemptContextType `json:"contextType" validate:"required,oneof=STANDALONE CLASSROOM_ASSIGNMENT"`
+	ContextID        *uint                    `json:"contextId,omitempty" validate:"omitempty,gt=0"`
 	IntegrityConsent *IntegrityConsentRequest `json:"integrityConsent,omitempty"`
 }
 
+// Normalize chuẩn hóa body trước khi validate: đưa Mode, ContextType, Section về chữ hoa,
+// bỏ khoảng trắng thừa ở Parts. Bài tập lớp không gửi Mode thì tự đặt là ASSIGNMENT.
 func (r *CreateExamAttemptRequest) Normalize() {
 	r.Mode = model.AttemptMode(strings.ToUpper(strings.TrimSpace(string(r.Mode))))
 	r.ContextType = model.AttemptContextType(strings.ToUpper(strings.TrimSpace(string(r.ContextType))))
@@ -74,6 +83,10 @@ func (r *CreateExamAttemptRequest) Normalize() {
 	}
 }
 
+// Validate kiểm các ràng buộc giữa các field mà tag validate không diễn tả được:
+//   - STANDALONE: Mode phải là PRACTICE/TEST, không được có ContextID.
+//   - CLASSROOM_ASSIGNMENT: phải có ContextID, Mode phải bỏ trống (đã thành ASSIGNMENT ở Normalize).
+//   - Parts không được trùng, và không dùng chung Section với Parts.
 func (r CreateExamAttemptRequest) Validate() error {
 	switch r.ContextType {
 	case model.AttemptContextTypeStandalone:
@@ -109,6 +122,11 @@ func (r CreateExamAttemptRequest) Validate() error {
 	return nil
 }
 
+// ValidateCreateExamAttemptRequestForExam kiểm các ràng buộc phụ thuộc loại đề, chạy sau
+// khi đã tải đề vì Validate của request chưa biết loại đề:
+//   - Đề ASSIGNMENT chỉ làm ở chế độ ASSIGNMENT, luôn làm cả đề với thời gian của bài tập.
+//   - Chế độ TEST làm cả đề với thời gian chuẩn, để giống thi thật.
+//   - Luyện tập: chỉ TOEIC chọn được part; THPT chỉ có FULL; TOEIC chọn LISTENING hoặc READING.
 func ValidateCreateExamAttemptRequestForExam(examType model.ExamType, req CreateExamAttemptRequest) error {
 	if examType == model.ExamTypeAssignment {
 		if req.Mode != model.AttemptModeAssignment {
@@ -200,6 +218,9 @@ type AttemptExamSummary struct {
 	Year        *int    `json:"year"`
 }
 
+// ToAttemptResponse dựng thông tin lượt làm bài không kèm câu hỏi (trạng thái, thời gian,
+// phạm vi, luồng làm bài, kết quả, giám sát). Dùng khi client lấy nội dung theo trang
+// (TOEIC_STRICT) hoặc chỉ cần danh sách lượt làm bài. Tham số now hiện chưa được dùng.
 func ToAttemptResponse(attempt *model.Attempt, now time.Time) *AttemptResponse {
 	parts := make([]string, 0, len(attempt.PartCodes))
 	for _, part := range attempt.PartCodes {
@@ -268,12 +289,15 @@ func attemptFlow(flow model.AttemptFlow) model.AttemptFlow {
 	return flow
 }
 
-func ToAttemptResponseWithQuestions(attempt *model.Attempt) *AttemptResponse {
-	return toAttemptResponseWithQuestions(attempt, false)
+// ToAttemptResponseWithQuestions dựng lượt làm bài kèm câu hỏi trong phạm vi và đáp án đã
+// lưu, dùng cho luồng FREE. Không kèm kết quả chấm; lời giải bị ẩn khi bài còn đang làm.
+func ToAttemptResponseWithQuestions(attempt *model.Attempt, now time.Time) *AttemptResponse {
+	return toAttemptResponseWithQuestions(attempt, false, now)
 }
 
 func ToAttemptHistoryResponse(attempt *model.Attempt) *AttemptResponse {
-	return toAttemptResponseWithQuestions(attempt, attempt.Status == model.AttemptStatusSubmitted)
+	// Bài đã nộp: thời gian còn lại không còn ý nghĩa nên dùng giờ thật.
+	return toAttemptResponseWithQuestions(attempt, attempt.Status == model.AttemptStatusSubmitted, time.Now())
 }
 
 func MarshalAttemptHistory(attempt *model.Attempt) ([]byte, error) {
@@ -288,14 +312,27 @@ func UnmarshalAttemptHistory(data []byte) (*AttemptResponse, error) {
 	return &response, nil
 }
 
-func toAttemptResponseWithQuestions(attempt *model.Attempt, includeResults bool) *AttemptResponse {
+// toAttemptResponseWithQuestions dựng lượt làm bài kèm cây câu hỏi trong phạm vi của lượt và đáp
+// án học viên đã chọn. Là phần chung của hai trường hợp:
+//   - Đang làm (ToAttemptResponseWithQuestions, includeResults = false): chỉ kèm đáp án đã chọn,
+//     ẩn transcript và lời giải để không lộ đáp án.
+//   - Bản chụp lịch sử (ToAttemptHistoryResponse): kèm thêm đúng/sai và đáp án đúng của từng câu
+//     khi bài đã nộp (includeResults = true); bài hủy thì không kèm.
+//
+// Cờ đúng/sai trên từng option không bao giờ ra JSON, nên chỉ lộ đáp án qua CorrectOptionID khi
+// includeResults bật.
+func toAttemptResponseWithQuestions(attempt *model.Attempt, includeResults bool, now time.Time) *AttemptResponse {
+	// Chỉ lấy các câu thuộc phạm vi đã chốt của lượt (section/part), theo thứ tự hiển thị.
 	questionsResp := &GetExamQuestionsResponse{Sections: ToAttemptSections(&attempt.Exam, attempt.SectionCode, attempt.PartCodes)}
+	// Bài còn đang làm thì ẩn transcript và lời giải; xem lại sau khi nộp/hủy thì được thấy.
 	hideSolutions := attempt.Status == model.AttemptStatusInProgress
+	// Tra đáp án đã lưu theo câu để gắn vào từng câu bên dưới.
 	answers := make(map[uint]model.AttemptAnswer, len(attempt.Answers))
 	for _, answer := range attempt.Answers {
 		answers[answer.QuestionID] = answer
 	}
 
+	// Duyệt cả câu trong group lẫn câu đứng riêng: ẩn lời giải nếu cần và gắn đáp án của câu.
 	for _, section := range questionsResp.Sections {
 		for _, group := range section.Groups {
 			if hideSolutions {
@@ -317,7 +354,9 @@ func toAttemptResponseWithQuestions(attempt *model.Attempt, includeResults bool)
 		}
 	}
 
-	resp := ToAttemptResponse(attempt, time.Now())
+	// Phần thông tin lượt làm bài (trạng thái, thời gian, điểm, giám sát) dùng chung với
+	// ToAttemptResponse, chỉ gắn thêm cây câu hỏi.
+	resp := ToAttemptResponse(attempt, now)
 	resp.Sections = questionsResp.Sections
 
 	return resp
@@ -333,6 +372,8 @@ func ToAttemptSections(exam *model.Exam, sectionCode *model.SectionCode, parts [
 	return filterSectionsByParts(ToGetExamQuestionsResponse(exam, query).Sections, parts)
 }
 
+// applyAttemptAnswer gắn đáp án học viên đã chọn vào câu. includeResults bật thì gắn thêm câu đó
+// đúng hay sai và ID của đáp án đúng, để màn xem lại tô màu được.
 func applyAttemptAnswer(question *ExamQuestion, answer model.AttemptAnswer, includeResults bool) {
 	question.SelectedOptionID = answer.SelectedOptionID
 	if !includeResults {
@@ -351,6 +392,8 @@ func applyAttemptAnswer(question *ExamQuestion, answer model.AttemptAnswer, incl
 
 type SubmitAttemptRequest struct {
 	Answers []SubmitAttemptAnswer `json:"answers" validate:"dive"`
+	// SessionToken: token nhận từ ATTEMPT_SESSION_CLAIM, bắt buộc với bài có giám sát đã claim.
+	SessionToken string `json:"sessionToken,omitempty"`
 }
 
 type SubmitAttemptAnswer struct {

@@ -231,3 +231,76 @@ func TestParticipantModerationAndAudit(t *testing.T) {
 		t.Fatalf("moderating an ended room = %v, want ended", err)
 	}
 }
+
+// Mute All không dừng giữa chừng khi LiveKit lỗi ở một học sinh; học sinh bị mời ra không
+// vào lại được bằng token còn hạn.
+func TestMuteAllPartialFailureAndRemovedRejoin(t *testing.T) {
+	db := learningTestDB(t)
+	ctx, now := context.Background(), time.Now()
+	classroom := &model.Classroom{Code: "MOD002", Name: "Mute all", TeacherID: "teacher", Active: true}
+	if err := db.Create(classroom).Error; err != nil {
+		t.Fatal(err)
+	}
+	approved, joinedAt := true, now
+	students := []string{"student-a", "student-b", "student-c"}
+	for _, student := range students {
+		if err := db.Create(&model.Member{ClassroomID: classroom.ID, UserID: student, Approved: &approved, JoinedAt: &joinedAt}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := repository.NewRepository(db)
+	mediaClient := &fakeRoomMedia{created: map[string]bool{}, participants: map[string][]string{}, disconnected: map[string]bool{}, failPermissions: map[string]bool{"student-a": true}}
+	svc := service.New(repo, &config.AppConfig{}, nil, testIdentityClient{}, nil, mediaClient, nil, nil)
+	created, err := svc.CreateSchedule(ctx, "teacher", classroom.ID, dto.CreateScheduleRequest{Title: "Mute", StartsAt: now.Add(-time.Minute), EndsAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roomID := created.Room.ID
+	if _, err := svc.StartRoom(ctx, "teacher", roomID); err != nil {
+		t.Fatal(err)
+	}
+	for _, student := range students {
+		if _, err := repo.GetOrCreateRoomParticipantState(ctx, roomID, student); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := svc.MuteAllParticipants(ctx, "teacher", classroom.ID, roomID)
+	if err != nil || len(result.UserIDs) != len(students) {
+		t.Fatalf("mute all must continue past a media error: result=%#v err=%v", result, err)
+	}
+	for _, student := range students[1:] {
+		if got := mediaClient.permissions[student]; got.Microphone {
+			t.Fatalf("%s must be muted in LiveKit: %#v", student, got)
+		}
+	}
+
+	roomName := media.RoomName(roomID)
+	if _, err := svc.RemoveParticipant(ctx, "teacher", classroom.ID, roomID, "student-b", nil); err != nil {
+		t.Fatal(err)
+	}
+	kicks := len(mediaClient.removed)
+	if err := svc.HandleParticipantJoined(ctx, roomName, "student-b", now); err != nil {
+		t.Fatal(err)
+	}
+	if len(mediaClient.removed) != kicks+1 {
+		t.Fatalf("removed student rejoining must be kicked: removed=%v", mediaClient.removed)
+	}
+	var open int64
+	if err := db.Model(&model.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, "student-b").Count(&open).Error; err != nil || open != 0 {
+		t.Fatalf("removed student must not get an attendance session: count=%d err=%v", open, err)
+	}
+
+	// Webhook bị mất, học sinh bị mời ra vẫn kết nối: worker đối chiếu đá ra, không mở phiên.
+	mediaClient.participants[roomName] = []string{"teacher", "student-b"}
+	kicks = len(mediaClient.removed)
+	if _, err := svc.ProcessRoomLifecycle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(mediaClient.removed) != kicks+1 {
+		t.Fatalf("reconcile must kick the removed student: removed=%v", mediaClient.removed)
+	}
+	if err := db.Model(&model.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, "student-b").Count(&open).Error; err != nil || open != 0 {
+		t.Fatalf("reconcile must not open a session for the removed student: count=%d err=%v", open, err)
+	}
+}
