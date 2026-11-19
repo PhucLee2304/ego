@@ -155,3 +155,26 @@ func TestUpdateProgress(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateProgressStoresCorrectAnswersAndRejectsInvalidScore(t *testing.T) {
+	unit := &model.GrammarUnit{Practices: []model.GrammarPractice{{}, {}, {}}}
+	unit.ID = 3
+	repo := &fakeGrammarRepository{unit: unit}
+	correct := 2
+	got, httpErr := New(repo).UpdateProgress(context.Background(), "u1", 3, dto.UpdateProgressBody{Completed: true, CorrectAnswers: &correct})
+	if httpErr != nil || repo.upserted == nil || repo.upserted.CorrectAnswers == nil || *repo.upserted.CorrectAnswers != 2 || got.CorrectAnswers == nil || *got.CorrectAnswers != 2 {
+		t.Fatalf("correct answers not stored: progress=%#v err=%v", got, httpErr)
+	}
+	unit.Progresses = []model.UserUnitProgress{*repo.upserted}
+	summary := dto.ToUnitSummary(unit)
+	if summary.CorrectAnswers != 2 || summary.TotalQuestions != 3 {
+		t.Fatalf("wrong progress summary: %#v", summary)
+	}
+
+	tooMany := 4
+	repo.upserted = nil
+	_, httpErr = New(repo).UpdateProgress(context.Background(), "u1", 3, dto.UpdateProgressBody{Completed: true, CorrectAnswers: &tooMany})
+	if httpErr == nil || httpErr.StatusCode != http.StatusBadRequest || repo.upserted != nil {
+		t.Fatalf("invalid score was accepted: %v", httpErr)
+	}
+}

@@ -25,10 +25,14 @@ Quy tắc trả lời:
 type Service interface {
 	Chat(ctx context.Context, req dto.ChatRequest) (*dto.ChatResponse, *httpx.HTTPError)
 	ExplainWord(ctx context.Context, req dto.WordExplainRequest) (*dto.WordExplainResponse, *httpx.HTTPError)
+	ExplainGrammar(ctx context.Context, req dto.GrammarExplainRequest) (*dto.GrammarExplainResponse, *httpx.HTTPError)
 }
 
 type service struct {
-	llmClient *llm.Client
+	llmClient interface {
+		Chat(ctx context.Context, userMessage string) (string, error)
+		ChatWithSystem(ctx context.Context, customSystemPrompt, userMessage string) (string, error)
+	}
 }
 
 func New(llmClient *llm.Client) Service {

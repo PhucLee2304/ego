@@ -232,6 +232,25 @@ func (r *repository) GetAllDueCards(ctx context.Context, userID string, limit in
 	return cards, nil
 }
 
+// DueFlashcardsForNotification returns reviewed cards whose next due time has
+// not yet produced a reminder. New cards are excluded to avoid save-time alerts.
+func (r *repository) DueFlashcardsForNotification(ctx context.Context, now time.Time, limit int) ([]*model.Flashcard, error) {
+	var cards []*model.Flashcard
+	err := r.db.WithContext(ctx).Model(&model.Flashcard{}).
+		Preload("Word", func(db *gorm.DB) *gorm.DB { return db.Select("id", "word") }).
+		Where("last_reviewed_at IS NOT NULL AND next_review_at <= ? AND (last_notified_review_at IS NULL OR last_notified_review_at < next_review_at)", now).
+		Order("next_review_at ASC").Limit(limit).Find(&cards).Error
+	return cards, err
+}
+
+// MarkFlashcardNotified updates only the review cycle that was sent. A review
+// racing with delivery must leave the new due time eligible for a later alert.
+func (r *repository) MarkFlashcardNotified(ctx context.Context, id uint, dueAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.Flashcard{}).
+		Where("id = ? AND next_review_at = ? AND (last_notified_review_at IS NULL OR last_notified_review_at < next_review_at)", id, dueAt).
+		UpdateColumn("last_notified_review_at", dueAt).Error
+}
+
 // UpdateFlashcardSRS cập nhật các field SRS của thẻ (SM-2).
 func (r *repository) UpdateFlashcardSRS(ctx context.Context, fc *model.Flashcard) error {
 	return r.db.WithContext(ctx).
@@ -288,8 +307,9 @@ func (r *repository) GetFlashcardStats(ctx context.Context, userID string) (*dto
 	}
 
 	now := time.Now()
-	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	endOfToday := startOfToday.Add(24 * time.Hour)
+	localNow := now.In(flashcardStudyLocation)
+	startOfToday := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, flashcardStudyLocation)
+	endOfToday := startOfToday.AddDate(0, 0, 1)
 
 	var dueToday int64
 	if err := r.db.WithContext(ctx).
@@ -299,7 +319,7 @@ func (r *repository) GetFlashcardStats(ctx context.Context, userID string) (*dto
 		return nil, err
 	}
 
-	streak, err := r.calcStreak(ctx, userID, now)
+	streak, reviewedToday, err := r.calcStreak(ctx, userID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -309,48 +329,61 @@ func (r *repository) GetFlashcardStats(ctx context.Context, userID string) (*dto
 		MasteredCards: counts.Mastered,
 		DueToday:      int(dueToday),
 		Streak:        streak,
+		ReviewedToday: reviewedToday,
 	}, nil
 }
 
-// calcStreak đếm số ngày liên tiếp có ít nhất 1 review, tính ngược từ hôm nay (hoặc hôm qua).
-// Dùng SQL để lấy danh sách ngày distinct từ review_logs, sau đó duyệt Go.
-func (r *repository) calcStreak(ctx context.Context, userID string, now time.Time) (int, error) {
+var flashcardStudyLocation = time.FixedZone("UTC+7", 7*60*60)
+
+// calcStreak đếm số ngày liên tiếp có ít nhất 1 review, tính ngược từ hôm nay (hoặc hôm qua)
+// theo ngày địa phương UTC+7. Dùng SQL để lấy ngày distinct rồi duyệt Go.
+func (r *repository) calcStreak(ctx context.Context, userID string, now time.Time) (int, bool, error) {
 	// Lấy các ngày (DATE) distinct từ review_logs, sắp xếp giảm dần.
 	var dates []time.Time
+	const reviewDay = "DATE(created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')"
 	if err := r.db.WithContext(ctx).
 		Model(&model.FlashcardReviewLog{}).
-		Select("DATE(created_at) AS d").
+		Select(reviewDay+" AS d").
 		Where("user_id = ?", userID).
-		Group("DATE(created_at)").
+		Group(reviewDay).
 		Order("d DESC").
 		Pluck("d", &dates).Error; err != nil {
-		return 0, err
+		return 0, false, err
 	}
+	streak, reviewedToday := streakFromReviewDays(dates, now)
+	return streak, reviewedToday, nil
+}
+
+// dates already contain local calendar dates from PostgreSQL. Use their date
+// components directly so the database driver's time zone cannot shift a day.
+func streakFromReviewDays(dates []time.Time, now time.Time) (int, bool) {
 	if len(dates) == 0 {
-		return 0, nil
+		return 0, false
 	}
-
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	yesterday := today.AddDate(0, 0, -1)
-
-	// Streak phải bắt đầu từ hôm nay hoặc hôm qua.
-	first := time.Date(dates[0].Year(), dates[0].Month(), dates[0].Day(), 0, 0, 0, 0, now.Location())
-	if !first.Equal(today) && !first.Equal(yesterday) {
-		return 0, nil
+	localNow := now.In(flashcardStudyLocation)
+	today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, flashcardStudyLocation)
+	day := func(value time.Time) time.Time {
+		return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, flashcardStudyLocation)
 	}
-
+	first := day(dates[0])
+	reviewedToday := first.Equal(today)
+	if !reviewedToday && !first.Equal(today.AddDate(0, 0, -1)) {
+		return 0, false
+	}
 	streak := 1
-	prev := first
-	for _, d := range dates[1:] {
-		cur := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, now.Location())
-		if prev.AddDate(0, 0, -1).Equal(cur) {
-			streak++
-			prev = cur
-		} else {
+	previous := first
+	for _, value := range dates[1:] {
+		current := day(value)
+		if current.Equal(previous) {
+			continue
+		}
+		if !current.Equal(previous.AddDate(0, 0, -1)) {
 			break
 		}
+		streak++
+		previous = current
 	}
-	return streak, nil
+	return streak, reviewedToday
 }
 
 // ─── Legacy ───────────────────────────────────────────────────────────────────

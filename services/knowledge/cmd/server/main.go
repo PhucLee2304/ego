@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	identityClient "ego/api/gen/go/identity"
+	notificationsClient "ego/api/gen/go/notifications"
 	"ego/platform/jwt"
 	"ego/platform/logger"
 	platformRpc "ego/platform/rpc"
@@ -11,6 +12,7 @@ import (
 	"ego/services/knowledge/internal/handler"
 	"ego/services/knowledge/internal/repository"
 	"ego/services/knowledge/internal/service"
+	"ego/services/knowledge/workers"
 	"errors"
 	"net/http"
 	"os"
@@ -63,6 +65,18 @@ func main() {
 
 	repo := repository.NewRepository(db)
 	svc := service.New(repo)
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	if appConfig.NotificationsServiceAddr != "" {
+		notificationsConn, err := grpc.NewClient(appConfig.NotificationsServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithChainUnaryInterceptor(platformRpc.TimeoutInterceptor(5*time.Second)))
+		if err != nil {
+			logger.Log.Fatal().Err(err).Msg("[CRITICAL] Failed to connect to notifications service")
+		}
+		defer notificationsConn.Close()
+		workers.StartFlashcardDue(workerCtx, repo, notificationsClient.NewNotificationServiceClient(notificationsConn), time.Minute, 50)
+	} else {
+		logger.Log.Warn().Msg("[FLASHCARDS] NOTIFICATIONS_SERVICE_ADDR is empty; due reminders disabled")
+	}
 
 	authMiddleware := jwt.NewAuthMiddleware(identityServiceClient)
 	roleMiddleware := jwt.NewRoleMiddleware(func(ctx context.Context, userID string) (string, error) {
@@ -109,6 +123,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	stopWorker()
 	logger.Log.Info().Msg("[SHUTDOWN] Shutting down knowledge server gracefully")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

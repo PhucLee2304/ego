@@ -20,8 +20,9 @@ type AppConfig struct {
 	DBName     string
 	DSN        string
 
-	IdentityServiceAddr string
-	StorageServiceAddr  string
+	IdentityServiceAddr      string
+	StorageServiceAddr       string
+	NotificationsServiceAddr string
 
 	SeedDir           string
 	SeedUploadWorkers int
@@ -40,8 +41,9 @@ func LoadAppConfig() *AppConfig {
 		DBPassword: mustEnv("DB_PASSWORD"),
 		DBName:     mustEnv("DB_NAME"),
 
-		IdentityServiceAddr: mustEnv("IDENTITY_SERVICE_ADDR"),
-		StorageServiceAddr:  mustEnv("STORAGE_SERVICE_ADDR"),
+		IdentityServiceAddr:      mustEnv("IDENTITY_SERVICE_ADDR"),
+		StorageServiceAddr:       mustEnv("STORAGE_SERVICE_ADDR"),
+		NotificationsServiceAddr: os.Getenv("NOTIFICATIONS_SERVICE_ADDR"),
 
 		SeedDir:           mustEnv("SEED_DIR"),
 		SeedUploadWorkers: parseInt("SEED_UPLOAD_WORKERS"),

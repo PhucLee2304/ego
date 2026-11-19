@@ -49,12 +49,13 @@ type Flashcard struct {
 	Note   *string `gorm:"type:text"`
 
 	// SRS fields (SM-2)
-	Status         FlashcardStatus `gorm:"type:text;not null;default:'new'"`
-	IntervalDays   int             `gorm:"not null;default:0"`
-	EaseFactor     float64         `gorm:"not null;default:2.5"`
-	Repetitions    int             `gorm:"not null;default:0"`
-	NextReviewAt   time.Time       `gorm:"not null;default:CURRENT_TIMESTAMP;index"`
-	LastReviewedAt *time.Time
+	Status               FlashcardStatus `gorm:"type:text;not null;default:'new'"`
+	IntervalDays         int             `gorm:"not null;default:0"`
+	EaseFactor           float64         `gorm:"not null;default:2.5"`
+	Repetitions          int             `gorm:"not null;default:0"`
+	NextReviewAt         time.Time       `gorm:"not null;default:CURRENT_TIMESTAMP;index"`
+	LastReviewedAt       *time.Time
+	LastNotifiedReviewAt *time.Time
 
 	Deck FlashcardDeck `gorm:"foreignKey:DeckID;references:ID"`
 	Word Word          `gorm:"foreignKey:WordID;references:ID;constraint:OnDelete:CASCADE"`

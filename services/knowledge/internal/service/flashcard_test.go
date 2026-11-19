@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -15,10 +16,11 @@ import (
 
 type fakeFlashcardRepository struct {
 	repository.Repository
-	card       *model.Flashcard
-	cardErr    error
-	updatedSRS *model.Flashcard
-	reviewLog  *model.FlashcardReviewLog
+	card         *model.Flashcard
+	cardErr      error
+	updatedSRS   *model.Flashcard
+	reviewLog    *model.FlashcardReviewLog
+	reviewLogErr error
 
 	deck    *model.FlashcardDeck
 	deckErr error
@@ -40,7 +42,14 @@ func (f *fakeFlashcardRepository) UpdateFlashcardSRS(_ context.Context, fc *mode
 
 func (f *fakeFlashcardRepository) CreateReviewLog(_ context.Context, log *model.FlashcardReviewLog) error {
 	f.reviewLog = log
+	if f.reviewLogErr != nil {
+		return f.reviewLogErr
+	}
 	return f.err
+}
+
+func (f *fakeFlashcardRepository) Transaction(_ context.Context, fn func(repository.Repository) error) error {
+	return fn(f)
 }
 
 func (f *fakeFlashcardRepository) CreateDeck(_ context.Context, deck *model.FlashcardDeck) error {
@@ -62,15 +71,15 @@ func (f *fakeFlashcardRepository) DeleteFlashcard(_ context.Context, userID stri
 
 func TestReviewFlashcard_SM2(t *testing.T) {
 	tests := []struct {
-		name          string
-		initialCard   *model.Flashcard
-		rating        string
-		wantStatus    model.FlashcardStatus
-		wantInterval  int
-		wantReps      int
-		wantEFMin     float64
-		wantEFMax     float64
-		wantHTTPCode  int
+		name         string
+		initialCard  *model.Flashcard
+		rating       string
+		wantStatus   model.FlashcardStatus
+		wantInterval int
+		wantReps     int
+		wantEFMin    float64
+		wantEFMax    float64
+		wantHTTPCode int
 	}{
 		{
 			name: "again resets repetitions and sets interval to 1 day",
@@ -205,6 +214,16 @@ func TestReviewFlashcard_SM2(t *testing.T) {
 				t.Errorf("ReviewLog not created properly: %#v", repo.reviewLog)
 			}
 		})
+	}
+}
+
+func TestReviewFlashcardRejectsUnloggedReview(t *testing.T) {
+	card := &model.Flashcard{UserID: "u1", DeckID: 1, WordID: 2, EaseFactor: 2.5}
+	card.ID = 100
+	repo := &fakeFlashcardRepository{card: card, reviewLogErr: errors.New("review log unavailable")}
+	_, httpErr := New(repo).ReviewFlashcard(context.Background(), "u1", 100, dto.ReviewCardBody{Rating: "good"})
+	if httpErr == nil || httpErr.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("unlogged review must not be reported as completed: %v", httpErr)
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 type NotificationsQuery struct {
 	httpx.PaginationQuery
 	Read     *bool  `schema:"read"`
-	Category string `schema:"category" validate:"omitempty,oneof=POSTS CLASSROOMS ASSIGNMENTS ROOMS EXAMS"`
+	Category string `schema:"category" validate:"omitempty,oneof=POSTS CLASSROOMS ASSIGNMENTS ROOMS EXAMS FLASHCARDS"`
 }
 
 type NotificationResponse struct {

@@ -44,8 +44,9 @@ type GrammarPractice struct {
 // một unit. Mỗi cặp (user, unit) chỉ có một dòng.
 type UserUnitProgress struct {
 	gorm.Model
-	UserID    string `gorm:"type:text;not null;uniqueIndex:idx_user_unit_progresses_user_unit"`
-	Completed bool   `gorm:"not null;default:false"`
+	UserID         string `gorm:"type:text;not null;uniqueIndex:idx_user_unit_progresses_user_unit"`
+	Completed      bool   `gorm:"not null;default:false"`
+	CorrectAnswers *int
 
 	UnitID uint        `gorm:"not null;index;uniqueIndex:idx_user_unit_progresses_user_unit"`
 	Unit   GrammarUnit `gorm:"foreignKey:UnitID;references:ID"`

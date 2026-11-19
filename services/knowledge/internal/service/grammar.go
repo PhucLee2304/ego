@@ -37,7 +37,19 @@ func (s *service) GetUnitByID(ctx context.Context, userID string, id uint) (*dto
 }
 
 func (s *service) UpdateProgress(ctx context.Context, userID string, id uint, body dto.UpdateProgressBody) (*dto.Progress, *httpx.HTTPError) {
-	progress := &model.UserUnitProgress{UserID: userID, UnitID: id, Completed: body.Completed}
+	if body.CorrectAnswers != nil {
+		unit, err := s.repo.GetUnitByID(ctx, userID, id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Unit not found", err)
+			}
+			return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get unit", err)
+		}
+		if *body.CorrectAnswers < 0 || *body.CorrectAnswers > len(unit.Practices) {
+			return nil, httpx.NewError(http.StatusBadRequest, "[ERROR] Invalid correct answer count", nil)
+		}
+	}
+	progress := &model.UserUnitProgress{UserID: userID, UnitID: id, Completed: body.Completed, CorrectAnswers: body.CorrectAnswers}
 	if err := s.repo.UpsertProgress(ctx, progress); err != nil {
 		if errors.Is(err, gorm.ErrForeignKeyViolated) {
 			return nil, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Unit not found", err)

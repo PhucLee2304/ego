@@ -91,10 +91,11 @@ type FlashcardStudyItem = Flashcard
 
 // FlashcardUserStats là thống kê tổng quan thẻ của người dùng.
 type FlashcardUserStats struct {
-	TotalCards   int `json:"totalCards"`
-	MasteredCards int `json:"masteredCards"`
-	DueToday     int `json:"dueToday"`
-	Streak       int `json:"streak"`
+	TotalCards    int  `json:"totalCards"`
+	MasteredCards int  `json:"masteredCards"`
+	DueToday      int  `json:"dueToday"`
+	Streak        int  `json:"streak"`
+	ReviewedToday bool `json:"reviewedToday"`
 }
 
 // ─── Mappers ──────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ func (r *repository) GetUnits(ctx context.Context, userID string) ([]*model.Gram
 	var units []*model.GrammarUnit
 	if err := r.db.WithContext(ctx).
 		Preload("Progresses", "user_id = ?", userID).
+		Preload("Practices", func(db *gorm.DB) *gorm.DB { return db.Select("id", "unit_id") }).
 		Order("unit ASC").
 		Find(&units).Error; err != nil {
 		return nil, err
@@ -41,15 +42,15 @@ func (r *repository) GetUnitByID(ctx context.Context, userID string, id uint) (*
 // UpsertProgress tạo hoặc cập nhật tiến độ theo cặp (user_id, unit_id). Unit
 // không tồn tại thì trả gorm.ErrForeignKeyViolated (DB bật TranslateError).
 func (r *repository) UpsertProgress(ctx context.Context, progress *model.UserUnitProgress) error {
+	columns := []string{"completed", "updated_at", "deleted_at"}
+	if progress.CorrectAnswers != nil {
+		columns = append(columns, "correct_answers")
+	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "user_id"},
 			{Name: "unit_id"},
 		},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"completed",
-			"updated_at",
-			"deleted_at",
-		}),
+		DoUpdates: clause.AssignmentColumns(columns),
 	}).Omit("Unit").Create(progress).Error
 }

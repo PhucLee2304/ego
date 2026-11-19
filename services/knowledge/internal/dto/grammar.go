@@ -18,21 +18,25 @@ type Practice struct {
 // UnitSummary là một unit trong danh sách. Total luôn là 1 vì mỗi
 // unit có một bộ luyện tập.
 type UnitSummary struct {
-	ID        uint   `json:"id"`
-	Unit      int    `json:"unit"`
-	Title     string `json:"title"`
-	Completed bool   `json:"completed"`
-	Total     int    `json:"total"`
+	ID             uint   `json:"id"`
+	Unit           int    `json:"unit"`
+	Title          string `json:"title"`
+	Completed      bool   `json:"completed"`
+	Total          int    `json:"total"`
+	CorrectAnswers int    `json:"correctAnswers"`
+	TotalQuestions int    `json:"totalQuestions"`
 }
 
 type Unit struct {
-	ID        uint        `json:"id"`
-	Unit      int         `json:"unit"`
-	Title     string      `json:"title"`
-	Theory    string      `json:"theory"`
-	Examples  []string    `json:"examples"`
-	Practices []*Practice `json:"practices"`
-	Completed bool        `json:"completed"`
+	ID             uint        `json:"id"`
+	Unit           int         `json:"unit"`
+	Title          string      `json:"title"`
+	Theory         string      `json:"theory"`
+	Examples       []string    `json:"examples"`
+	Practices      []*Practice `json:"practices"`
+	Completed      bool        `json:"completed"`
+	CorrectAnswers int         `json:"correctAnswers"`
+	TotalQuestions int         `json:"totalQuestions"`
 }
 
 type GetUnitsResponse struct {
@@ -41,25 +45,29 @@ type GetUnitsResponse struct {
 }
 
 type UpdateProgressBody struct {
-	Completed bool `json:"completed"`
+	Completed      bool `json:"completed"`
+	CorrectAnswers *int `json:"correctAnswers"`
 }
 
 type Progress struct {
-	ID        uint      `json:"id"`
-	UserID    string    `json:"userId"`
-	UnitID    uint      `json:"unitId"`
-	Completed bool      `json:"completed"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID             uint      `json:"id"`
+	UserID         string    `json:"userId"`
+	UnitID         uint      `json:"unitId"`
+	Completed      bool      `json:"completed"`
+	CorrectAnswers *int      `json:"correctAnswers,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // ToUnitSummary cần unit đã preload Progresses của người dùng hiện tại.
 func ToUnitSummary(unit *model.GrammarUnit) *UnitSummary {
 	return &UnitSummary{
-		ID:        unit.ID,
-		Unit:      unit.Unit,
-		Title:     unit.Title,
-		Completed: isCompleted(unit),
-		Total:     1,
+		ID:             unit.ID,
+		Unit:           unit.Unit,
+		Title:          unit.Title,
+		Completed:      isCompleted(unit),
+		Total:          1,
+		CorrectAnswers: correctAnswers(unit),
+		TotalQuestions: len(unit.Practices),
 	}
 }
 
@@ -77,13 +85,15 @@ func ToUnit(unit *model.GrammarUnit) *Unit {
 	}
 
 	return &Unit{
-		ID:        unit.ID,
-		Unit:      unit.Unit,
-		Title:     unit.Title,
-		Theory:    unit.Theory,
-		Examples:  examples,
-		Practices: practices,
-		Completed: isCompleted(unit),
+		ID:             unit.ID,
+		Unit:           unit.Unit,
+		Title:          unit.Title,
+		Theory:         unit.Theory,
+		Examples:       examples,
+		Practices:      practices,
+		Completed:      isCompleted(unit),
+		CorrectAnswers: correctAnswers(unit),
+		TotalQuestions: len(unit.Practices),
 	}
 }
 
@@ -100,15 +110,23 @@ func ToPractice(practice *model.GrammarPractice) *Practice {
 
 func ToProgress(progress *model.UserUnitProgress) *Progress {
 	return &Progress{
-		ID:        progress.ID,
-		UserID:    progress.UserID,
-		UnitID:    progress.UnitID,
-		Completed: progress.Completed,
-		UpdatedAt: progress.UpdatedAt,
+		ID:             progress.ID,
+		UserID:         progress.UserID,
+		UnitID:         progress.UnitID,
+		Completed:      progress.Completed,
+		CorrectAnswers: progress.CorrectAnswers,
+		UpdatedAt:      progress.UpdatedAt,
 	}
 }
 
 // isCompleted: Progresses chỉ chứa dòng của người dùng hiện tại (tối đa 1).
 func isCompleted(unit *model.GrammarUnit) bool {
 	return len(unit.Progresses) > 0 && unit.Progresses[0].Completed
+}
+
+func correctAnswers(unit *model.GrammarUnit) int {
+	if len(unit.Progresses) == 0 || unit.Progresses[0].CorrectAnswers == nil {
+		return 0
+	}
+	return *unit.Progresses[0].CorrectAnswers
 }

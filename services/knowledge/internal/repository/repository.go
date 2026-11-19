@@ -43,6 +43,8 @@ type Repository interface {
 	GetWordSaveStatus(ctx context.Context, userID string, wordID uint) ([]uint, error)
 	GetStudyCards(ctx context.Context, userID string, deckID uint, limit int, now time.Time) ([]*model.Flashcard, error)
 	GetAllDueCards(ctx context.Context, userID string, limit int, now time.Time) ([]*model.Flashcard, error)
+	DueFlashcardsForNotification(ctx context.Context, now time.Time, limit int) ([]*model.Flashcard, error)
+	MarkFlashcardNotified(ctx context.Context, id uint, dueAt time.Time) error
 	UpdateFlashcardSRS(ctx context.Context, fc *model.Flashcard) error
 	DeleteFlashcard(ctx context.Context, userID string, id uint) error
 	UpdateDeckCardCount(ctx context.Context, deckID uint, delta int) error

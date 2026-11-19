@@ -24,6 +24,7 @@ const (
 	CategoryAssignments = "ASSIGNMENTS"
 	CategoryRooms       = "ROOMS"
 	CategoryExams       = "EXAMS"
+	CategoryFlashcards  = "FLASHCARDS"
 )
 
 var CategoryTypes = map[string][]string{
@@ -35,6 +36,7 @@ var CategoryTypes = map[string][]string{
 	CategoryAssignments: {"ASSIGNMENT"},
 	CategoryRooms:       {"ROOM"},
 	CategoryExams:       {"ATTEMPT"},
+	CategoryFlashcards:  {"FLASHCARD_DUE"},
 }
 
 func CategoryOf(dataType string) string {

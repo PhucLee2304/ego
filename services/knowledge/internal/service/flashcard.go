@@ -162,10 +162,6 @@ func (s *service) ReviewFlashcard(ctx context.Context, userID string, id uint, b
 	card.LastReviewedAt = &now
 	card.NextReviewAt = now.AddDate(0, 0, card.IntervalDays)
 
-	if err := s.repo.UpdateFlashcardSRS(ctx, card); err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to update flashcard", err)
-	}
-
 	log := &model.FlashcardReviewLog{
 		UserID:       userID,
 		FlashcardID:  card.ID,
@@ -173,8 +169,13 @@ func (s *service) ReviewFlashcard(ctx context.Context, userID string, id uint, b
 		Rating:       model.ReviewRating(body.Rating),
 		ReviewTimeMs: body.ReviewTimeMs,
 	}
-	if err := s.repo.CreateReviewLog(ctx, log); err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to save review log", err)
+	if err := s.repo.Transaction(ctx, func(txRepo repository.Repository) error {
+		if err := txRepo.UpdateFlashcardSRS(ctx, card); err != nil {
+			return err
+		}
+		return txRepo.CreateReviewLog(ctx, log)
+	}); err != nil {
+		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to save flashcard review", err)
 	}
 
 	return dto.ToReviewResponse(card), nil
