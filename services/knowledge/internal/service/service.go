@@ -22,10 +22,23 @@ type Service interface {
 	GetWords(ctx context.Context, query dto.GetWordsQuery) ([]*dto.Word, int64, *httpx.HTTPError)
 	GetWordByID(ctx context.Context, id uint) (*dto.Word, *httpx.HTTPError)
 
-	// Flashcard
-	GetFlashcards(ctx context.Context, userID string, query httpx.PaginationQuery) ([]*dto.Flashcard, int64, *httpx.HTTPError)
-	CreateFlashcard(ctx context.Context, userID string, body dto.CreateFlashcardBody) (*dto.Flashcard, *httpx.HTTPError)
+	// Flashcard Deck
+	CreateDeck(ctx context.Context, userID string, body dto.CreateDeckBody) (*dto.DeckResponse, *httpx.HTTPError)
+	GetDecks(ctx context.Context, userID string) ([]*dto.DeckResponse, *httpx.HTTPError)
+	GetDeckByID(ctx context.Context, userID string, id uint) (*dto.DeckResponse, *httpx.HTTPError)
+	UpdateDeck(ctx context.Context, userID string, id uint, body dto.UpdateDeckBody) (*dto.DeckResponse, *httpx.HTTPError)
+	DeleteDeck(ctx context.Context, userID string, id uint) *httpx.HTTPError
+
+	// Flashcard Card & Study
+	SaveWordToDecks(ctx context.Context, userID string, body dto.SaveWordToDecksBody) *httpx.HTTPError
+	GetWordSaveStatus(ctx context.Context, userID string, wordID uint) (*dto.WordSaveStatusResponse, *httpx.HTTPError)
+	GetCardsByDeck(ctx context.Context, userID string, deckID uint, query httpx.PaginationQuery) ([]*dto.Flashcard, int64, *httpx.HTTPError)
+	UpdateFlashcardNote(ctx context.Context, userID string, id uint, note *string) (*dto.Flashcard, *httpx.HTTPError)
 	DeleteFlashcard(ctx context.Context, userID string, id uint) *httpx.HTTPError
+	GetStudyCards(ctx context.Context, userID string, deckID uint) ([]*dto.Flashcard, *httpx.HTTPError)
+	GetAllDueCards(ctx context.Context, userID string) ([]*dto.Flashcard, *httpx.HTTPError)
+	ReviewFlashcard(ctx context.Context, userID string, id uint, body dto.ReviewCardBody) (*dto.ReviewCardResponse, *httpx.HTTPError)
+	GetFlashcardUserStats(ctx context.Context, userID string) (*dto.FlashcardUserStats, *httpx.HTTPError)
 
 	// Theme
 	GetThemes(ctx context.Context) ([]*dto.Theme, *httpx.HTTPError)

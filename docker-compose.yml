@@ -37,6 +37,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./data/audios:/var/www/assets/audios:ro
     depends_on:
       identity:
         condition: service_started
@@ -155,6 +156,25 @@ services:
       knowledge-db:
         condition: service_healthy
       storage:
+        condition: service_healthy
+    networks:
+      - ego-network
+
+  # Seed từ điển offline, ngữ pháp và chủ đề từ services/knowledge/seed/offline: make seed knowledge-offline
+  knowledge-offline-seed:
+    build:
+      context: .
+      dockerfile: services/knowledge/Dockerfile
+      target: seed-offline
+    container_name: ego-knowledge-offline-seed
+    profiles:
+      - seed
+    env_file:
+      - ./services/knowledge/.env
+    volumes:
+      - ./services/knowledge/seed/offline:/app/services/knowledge/seed/offline:ro
+    depends_on:
+      knowledge-db:
         condition: service_healthy
     networks:
       - ego-network

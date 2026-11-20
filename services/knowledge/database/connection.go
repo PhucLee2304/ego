@@ -52,13 +52,19 @@ func Migrate(db *gorm.DB) error {
 		&model.UserUnitProgress{},
 
 		// Flashcard
+		&model.FlashcardDeck{},
 		&model.Flashcard{},
+		&model.FlashcardReviewLog{},
 	)
 	if err != nil {
 		return err
 	}
 
 	if err := db.Exec(model.CreateWordUniqueIndexSQL).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(model.CreateFlashcardDeckWordUniqueIndexSQL).Error; err != nil {
 		return err
 	}
 

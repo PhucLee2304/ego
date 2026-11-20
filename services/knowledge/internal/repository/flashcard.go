@@ -2,48 +2,91 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	platformdb "ego/platform/db"
+	"ego/platform/httpx"
+	"ego/services/knowledge/internal/dto"
 	"ego/services/knowledge/internal/model"
 
 	"gorm.io/gorm"
 )
 
-// GetFlashcards lấy flashcard của người dùng kèm từ, mới nhất trước.
-func (r *repository) GetFlashcards(ctx context.Context, userID string, limit, offset int32) ([]*model.Flashcard, int64, error) {
-	var flashcards []*model.Flashcard
-	var total int64
+// ─── Deck ─────────────────────────────────────────────────────────────────────
 
-	db := r.db.WithContext(ctx).Model(&model.Flashcard{}).Where("user_id = ?", userID)
-	if err := db.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	if err := db.Preload("Word").
-		Order("created_at DESC").
-		Order("id DESC").
-		Limit(int(limit)).
-		Offset(int(offset)).
-		Find(&flashcards).Error; err != nil {
-		return nil, 0, err
-	}
-	return flashcards, total, nil
+// CreateDeck tạo mới một FlashcardDeck trong DB.
+func (r *repository) CreateDeck(ctx context.Context, deck *model.FlashcardDeck) error {
+	return r.db.WithContext(ctx).Create(deck).Error
 }
 
-// CreateFlashcard tạo flashcard rồi nạp lại kèm từ. Từ không tồn tại thì trả
-// gorm.ErrForeignKeyViolated (DB bật TranslateError).
-func (r *repository) CreateFlashcard(ctx context.Context, flashcard *model.Flashcard) error {
-	if err := r.db.WithContext(ctx).Omit("Word").Create(flashcard).Error; err != nil {
-		return err
+// GetDecksByUser trả danh sách tất cả deck của một người dùng.
+func (r *repository) GetDecksByUser(ctx context.Context, userID string) ([]*model.FlashcardDeck, error) {
+	var decks []*model.FlashcardDeck
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("created_at ASC").
+		Find(&decks).Error; err != nil {
+		return nil, err
 	}
-	return r.db.WithContext(ctx).Preload("Word").First(flashcard, flashcard.ID).Error
+	return decks, nil
 }
 
-// DeleteFlashcard xóa mềm flashcard của đúng người dùng trong một transaction.
-// Không xóa được dòng nào (không có hoặc không phải của mình) thì rollback và
-// trả gorm.ErrRecordNotFound.
-func (r *repository) DeleteFlashcard(ctx context.Context, userID string, id uint) error {
+// GetDeckByID lấy một deck theo ID, kiểm tra ownership.
+func (r *repository) GetDeckByID(ctx context.Context, userID string, id uint) (*model.FlashcardDeck, error) {
+	var deck model.FlashcardDeck
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", id, userID).
+		First(&deck).Error; err != nil {
+		return nil, err
+	}
+	return &deck, nil
+}
+
+// UpdateDeck cập nhật tên/mô tả/màu của deck, kiểm tra ownership.
+// Chỉ cập nhật field không nil. Nếu không tìm thấy trả gorm.ErrRecordNotFound.
+func (r *repository) UpdateDeck(ctx context.Context, userID string, id uint, name string, description, color *string) error {
+	updates := map[string]any{"name": name}
+	if description != nil {
+		updates["description"] = description
+	}
+	if color != nil {
+		updates["color"] = color
+	}
+
+	result := r.db.WithContext(ctx).
+		Model(&model.FlashcardDeck{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// DeleteDeck xóa mềm deck và toàn bộ thẻ bên trong theo transaction.
+// Kiểm tra ownership trước khi xóa.
+func (r *repository) DeleteDeck(ctx context.Context, userID string, id uint) error {
 	return platformdb.WithTx(ctx, r.db, func(tx *gorm.DB) error {
-		result := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&model.Flashcard{})
+		// Kiểm tra ownership
+		var count int64
+		if err := tx.Model(&model.FlashcardDeck{}).
+			Where("id = ? AND user_id = ?", id, userID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		// Xóa thẻ bên trong (cascade sẽ xử lý ở DB level, nhưng soft-delete cần làm thủ công)
+		if err := tx.Where("deck_id = ? AND user_id = ?", id, userID).
+			Delete(&model.Flashcard{}).Error; err != nil {
+			return err
+		}
+		// Xóa deck
+		result := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&model.FlashcardDeck{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -52,4 +95,352 @@ func (r *repository) DeleteFlashcard(ctx context.Context, userID string, id uint
 		}
 		return nil
 	})
+}
+
+// CountDueCardsByDecks trả số thẻ đến hạn (NextReviewAt <= now) theo từng deck.
+// Kết quả là map[deckID]count; deck không có thẻ đến hạn không xuất hiện trong map.
+func (r *repository) CountDueCardsByDecks(ctx context.Context, userID string, deckIDs []uint, now time.Time) (map[uint]int, error) {
+	if len(deckIDs) == 0 {
+		return map[uint]int{}, nil
+	}
+
+	type row struct {
+		DeckID uint
+		Count  int
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Model(&model.Flashcard{}).
+		Select("deck_id, COUNT(*) AS count").
+		Where("user_id = ? AND deck_id IN ? AND next_review_at <= ?", userID, deckIDs, now).
+		Group("deck_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[uint]int, len(rows))
+	for _, row := range rows {
+		result[row.DeckID] = row.Count
+	}
+	return result, nil
+}
+
+// preloadFlashcardWord nạp đầy đủ thông tin Word bao gồm Phonetics, Meanings và Definitions cho thẻ.
+func preloadFlashcardWord(db *gorm.DB) *gorm.DB {
+	return db.
+		Preload("Word").
+		Preload("Word.Phonetics", func(tx *gorm.DB) *gorm.DB {
+			return tx.Order("id")
+		}).
+		Preload("Word.Meanings", func(tx *gorm.DB) *gorm.DB {
+			return tx.Order("id")
+		}).
+		Preload("Word.Meanings.Definitions", func(tx *gorm.DB) *gorm.DB {
+			return tx.Order("id")
+		})
+}
+
+// ─── Flashcard ────────────────────────────────────────────────────────────────
+
+// GetCardsByDeck trả danh sách thẻ trong một deck, có phân trang, kèm Preload Word đầy đủ.
+func (r *repository) GetCardsByDeck(ctx context.Context, userID string, deckID uint, limit, offset int32) ([]*model.Flashcard, int64, error) {
+	var cards []*model.Flashcard
+	var total int64
+
+	db := r.db.WithContext(ctx).Model(&model.Flashcard{}).
+		Where("user_id = ? AND deck_id = ?", userID, deckID)
+
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := preloadFlashcardWord(db).
+		Order("created_at DESC").
+		Limit(int(limit)).
+		Offset(int(offset)).
+		Find(&cards).Error; err != nil {
+		return nil, 0, err
+	}
+	return cards, total, nil
+}
+
+// CreateFlashcard tạo thẻ mới và preload Word sau khi tạo.
+func (r *repository) CreateFlashcard(ctx context.Context, fc *model.Flashcard) error {
+	if err := r.db.WithContext(ctx).Create(fc).Error; err != nil {
+		return err
+	}
+	return preloadFlashcardWord(r.db.WithContext(ctx)).First(fc, fc.ID).Error
+}
+
+// GetFlashcardByID lấy thẻ theo ID, kiểm tra ownership, preload Word.
+func (r *repository) GetFlashcardByID(ctx context.Context, userID string, id uint) (*model.Flashcard, error) {
+	var fc model.Flashcard
+	if err := preloadFlashcardWord(r.db.WithContext(ctx)).
+		Where("id = ? AND user_id = ?", id, userID).
+		First(&fc).Error; err != nil {
+		return nil, err
+	}
+	return &fc, nil
+}
+
+// GetWordSaveStatus trả danh sách DeckID chứa từ wordID của người dùng.
+func (r *repository) GetWordSaveStatus(ctx context.Context, userID string, wordID uint) ([]uint, error) {
+	var deckIDs []uint
+	if err := r.db.WithContext(ctx).
+		Model(&model.Flashcard{}).
+		Select("deck_id").
+		Where("user_id = ? AND word_id = ?", userID, wordID).
+		Pluck("deck_id", &deckIDs).Error; err != nil {
+		return nil, err
+	}
+	return deckIDs, nil
+}
+
+// GetStudyCards lấy tối đa limit thẻ đến hạn trong một deck, Preload Word đầy đủ.
+func (r *repository) GetStudyCards(ctx context.Context, userID string, deckID uint, limit int, now time.Time) ([]*model.Flashcard, error) {
+	var cards []*model.Flashcard
+	if err := preloadFlashcardWord(r.db.WithContext(ctx)).
+		Where("user_id = ? AND deck_id = ? AND next_review_at <= ?", userID, deckID, now).
+		Order("next_review_at ASC").
+		Limit(limit).
+		Find(&cards).Error; err != nil {
+		return nil, err
+	}
+	return cards, nil
+}
+
+// GetAllDueCards lấy tối đa limit thẻ đến hạn trên toàn bộ deck của người dùng.
+func (r *repository) GetAllDueCards(ctx context.Context, userID string, limit int, now time.Time) ([]*model.Flashcard, error) {
+	var cards []*model.Flashcard
+	if err := preloadFlashcardWord(r.db.WithContext(ctx)).
+		Where("user_id = ? AND next_review_at <= ?", userID, now).
+		Order("next_review_at ASC").
+		Limit(limit).
+		Find(&cards).Error; err != nil {
+		return nil, err
+	}
+	return cards, nil
+}
+
+// UpdateFlashcardNote ghi ghi chú của thẻ (kiểm tra ownership) và trả thẻ sau khi cập nhật.
+func (r *repository) UpdateFlashcardNote(ctx context.Context, userID string, id uint, note *string) (*model.Flashcard, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Flashcard{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Update("note", note)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return r.GetFlashcardByID(ctx, userID, id)
+}
+
+// SaveWordToDecks đặt các deck chứa từ của người dùng đúng bằng deckIDs (cộng deck mới
+// newDeckName nếu khác rỗng) trong một transaction: thêm thẻ vào deck còn thiếu, gỡ thẻ khỏi
+// deck không còn được chọn. deckIDs rỗng là bỏ lưu từ. Deck không thuộc người dùng trả
+// gorm.ErrRecordNotFound.
+func (r *repository) SaveWordToDecks(ctx context.Context, userID string, wordID uint, deckIDs []uint, newDeckName string, note *string) error {
+	return platformdb.WithTx(ctx, r.db.WithContext(ctx), func(tx *gorm.DB) error {
+		if err := tx.Select("id").First(&model.Word{}, wordID).Error; err != nil {
+			return err
+		}
+
+		targets := make([]uint, 0, len(deckIDs)+1)
+		seen := make(map[uint]bool, len(deckIDs))
+		for _, deckID := range deckIDs {
+			if seen[deckID] {
+				continue
+			}
+			seen[deckID] = true
+			if err := tx.Select("id").Where("id = ? AND user_id = ?", deckID, userID).
+				First(&model.FlashcardDeck{}).Error; err != nil {
+				return err
+			}
+			targets = append(targets, deckID)
+		}
+		if newDeckName != "" {
+			deck := &model.FlashcardDeck{UserID: userID, Name: newDeckName}
+			if err := tx.Create(deck).Error; err != nil {
+				return err
+			}
+			targets = append(targets, deck.ID)
+		}
+
+		var existing []model.Flashcard
+		if err := tx.Select("id", "deck_id").
+			Where("user_id = ? AND word_id = ?", userID, wordID).
+			Find(&existing).Error; err != nil {
+			return err
+		}
+		wanted := make(map[uint]bool, len(targets))
+		for _, deckID := range targets {
+			wanted[deckID] = true
+		}
+		saved := make(map[uint]bool, len(existing))
+		for _, card := range existing {
+			if wanted[card.DeckID] {
+				saved[card.DeckID] = true
+				continue
+			}
+			if err := tx.Delete(&model.Flashcard{}, card.ID).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.FlashcardDeck{}).Where("id = ?", card.DeckID).
+				UpdateColumn("card_count", gorm.Expr("GREATEST(card_count - 1, 0)")).Error; err != nil {
+				return err
+			}
+		}
+
+		now := time.Now()
+		for _, deckID := range targets {
+			if saved[deckID] {
+				continue
+			}
+			card := &model.Flashcard{
+				UserID:       userID,
+				DeckID:       deckID,
+				WordID:       wordID,
+				Note:         note,
+				Status:       model.FlashcardStatusNew,
+				EaseFactor:   2.5,
+				NextReviewAt: now,
+			}
+			if err := tx.Create(card).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.FlashcardDeck{}).Where("id = ?", deckID).
+				UpdateColumn("card_count", gorm.Expr("card_count + 1")).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ReviewFlashcard ghi trạng thái SM-2 mới của thẻ và log ôn tập trong một transaction.
+func (r *repository) ReviewFlashcard(ctx context.Context, fc *model.Flashcard, log *model.FlashcardReviewLog) error {
+	return platformdb.WithTx(ctx, r.db.WithContext(ctx), func(tx *gorm.DB) error {
+		if err := tx.Model(fc).
+			Select("status", "interval_days", "ease_factor", "repetitions", "next_review_at", "last_reviewed_at").
+			Updates(fc).Error; err != nil {
+			return err
+		}
+		return tx.Create(log).Error
+	})
+}
+
+// DeleteFlashcard xóa mềm một thẻ, kiểm tra ownership.
+func (r *repository) DeleteFlashcard(ctx context.Context, userID string, id uint) error {
+	return platformdb.WithTx(ctx, r.db.WithContext(ctx), func(tx *gorm.DB) error {
+		var fc model.Flashcard
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&fc).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&fc).Error; err != nil {
+			return err
+		}
+		// Giữ card_count của deck khớp với số thẻ còn lại.
+		return tx.Model(&model.FlashcardDeck{}).
+			Where("id = ?", fc.DeckID).
+			UpdateColumn("card_count", gorm.Expr("GREATEST(card_count - 1, 0)")).Error
+	})
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+
+// GetFlashcardStats trả thống kê tổng quan thẻ của người dùng.
+// Streak được tính là số ngày liên tiếp (kết thúc từ hôm nay hoặc hôm qua) có ít nhất 1 review.
+func (r *repository) GetFlashcardStats(ctx context.Context, userID string) (*dto.FlashcardUserStats, error) {
+	type cardCounts struct {
+		Total    int
+		Mastered int
+	}
+	var counts cardCounts
+	if err := r.db.WithContext(ctx).
+		Model(&model.Flashcard{}).
+		Select("COUNT(*) AS total, COUNT(CASE WHEN status = 'mastered' THEN 1 END) AS mastered").
+		Where("user_id = ?", userID).
+		Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+
+	// Cắt ngày theo giờ Việt Nam như các API thống kê khác.
+	now := time.Now().In(httpx.StatsLocation)
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, httpx.StatsLocation)
+	endOfToday := startOfToday.AddDate(0, 0, 1)
+
+	var dueToday int64
+	if err := r.db.WithContext(ctx).
+		Model(&model.Flashcard{}).
+		Where("user_id = ? AND next_review_at < ?", userID, endOfToday).
+		Count(&dueToday).Error; err != nil {
+		return nil, err
+	}
+
+	streak, err := r.calcStreak(ctx, userID, now)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.FlashcardUserStats{
+		TotalCards:    counts.Total,
+		MasteredCards: counts.Mastered,
+		DueToday:      int(dueToday),
+		Streak:        streak,
+	}, nil
+}
+
+// calcStreak đếm số ngày liên tiếp (giờ Việt Nam) có ít nhất 1 review, tính ngược từ hôm nay
+// hoặc hôm qua.
+func (r *repository) calcStreak(ctx context.Context, userID string, now time.Time) (int, error) {
+	var days []string
+	if err := r.db.WithContext(ctx).
+		Model(&model.FlashcardReviewLog{}).
+		Select("to_char(created_at AT TIME ZONE ?, 'YYYY-MM-DD') AS d", httpx.StatsTimeZone).
+		Where("user_id = ?", userID).
+		Group("d").
+		Order("d DESC").
+		Pluck("d", &days).Error; err != nil {
+		return 0, err
+	}
+	if len(days) == 0 {
+		return 0, nil
+	}
+
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+	if days[0] != today && days[0] != yesterday {
+		return 0, nil
+	}
+
+	streak := 1
+	prev, err := time.ParseInLocation("2006-01-02", days[0], httpx.StatsLocation)
+	if err != nil {
+		return 0, err
+	}
+	for _, d := range days[1:] {
+		if prev.AddDate(0, 0, -1).Format("2006-01-02") != d {
+			break
+		}
+		streak++
+		prev = prev.AddDate(0, 0, -1)
+	}
+	return streak, nil
+}
+
+// ─── Legacy ───────────────────────────────────────────────────────────────────
+// GetFlashcards giữ lại để không break interface cũ cho đến khi service layer được cập nhật.
+
+func (r *repository) GetFlashcards(ctx context.Context, userID string, limit, offset int32) ([]*model.Flashcard, int64, error) {
+	var cards []*model.Flashcard
+	var total int64
+	db := r.db.WithContext(ctx).Model(&model.Flashcard{}).Where("user_id = ?", userID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := preloadFlashcardWord(db).Order("created_at DESC").Limit(int(limit)).Offset(int(offset)).Find(&cards).Error; err != nil {
+		return nil, 0, err
+	}
+	return cards, total, nil
 }

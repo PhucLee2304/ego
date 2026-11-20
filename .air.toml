@@ -1,10 +1,10 @@
 root = "."
-tmp_dir = "tmp"
+tmp_dir = "tmp/build"
 
 [build]
-  bin = "./tmp/main"
-  entrypoint = ["./tmp/main"]
-  cmd = "go build -buildvcs=false -o ./tmp/main ./services/${SERVICE:-identity}/cmd/server"
+  bin = "./tmp/build/main"
+  entrypoint = ["./tmp/build/main"]
+  cmd = "go build -buildvcs=false -o ./tmp/build/main ./services/${SERVICE:-identity}/cmd/server"
   delay = 1000
   exclude_dir = ["backups", "data", "logs", "tmp", "vendor", "services/knowledge/seed", "services/learning/seed"]
   exclude_file = []
@@ -13,7 +13,7 @@ tmp_dir = "tmp"
   follow_symlink = false
   poll = true
   poll_interval = 500
-  full_bin = "./tmp/main"
+  full_bin = "./tmp/build/main"
   include_dir = ["api/gen", "platform", "services"]
   include_ext = ["go", "tpl", "tmpl", "html", "json", "yaml", "yml"]
   kill_delay = "0s"
