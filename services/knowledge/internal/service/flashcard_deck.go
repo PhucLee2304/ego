@@ -14,12 +14,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// ─── Deck methods ─────────────────────────────────────────────────────────────
-
 func (s *service) CreateDeck(ctx context.Context, userID string, body dto.CreateDeckBody) (*dto.DeckResponse, *httpx.HTTPError) {
 	deck := &model.FlashcardDeck{
 		UserID:      userID,
-		Name:        body.Name,
+		Name:        strings.TrimSpace(body.Name),
 		Description: body.Description,
 		Color:       body.Color,
 	}
@@ -27,7 +25,7 @@ func (s *service) CreateDeck(ctx context.Context, userID string, body dto.Create
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			return nil, httpx.NewError(http.StatusConflict, "[CONFLICT] Deck already exists", err)
 		}
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to create deck", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to create deck")
 	}
 	return dto.ToDeck(deck, 0), nil
 }
@@ -35,7 +33,7 @@ func (s *service) CreateDeck(ctx context.Context, userID string, body dto.Create
 func (s *service) GetDecks(ctx context.Context, userID string) ([]*dto.DeckResponse, *httpx.HTTPError) {
 	decks, err := s.repo.GetDecksByUser(ctx, userID)
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get decks", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get decks")
 	}
 	if len(decks) == 0 {
 		return []*dto.DeckResponse{}, nil
@@ -48,7 +46,7 @@ func (s *service) GetDecks(ctx context.Context, userID string) ([]*dto.DeckRespo
 
 	dueCounts, err := s.repo.CountDueCardsByDecks(ctx, userID, deckIDs, time.Now())
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to count due cards", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to count due cards")
 	}
 
 	result := make([]*dto.DeckResponse, len(decks))
@@ -61,15 +59,12 @@ func (s *service) GetDecks(ctx context.Context, userID string) ([]*dto.DeckRespo
 func (s *service) GetDeckByID(ctx context.Context, userID string, id uint) (*dto.DeckResponse, *httpx.HTTPError) {
 	deck, err := s.repo.GetDeckByID(ctx, userID, id)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Deck not found", err)
-		}
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get deck", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get deck")
 	}
 
 	dueCounts, err := s.repo.CountDueCardsByDecks(ctx, userID, []uint{deck.ID}, time.Now())
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to count due cards", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to count due cards")
 	}
 	return dto.ToDeck(deck, dueCounts[deck.ID]), nil
 }
@@ -77,10 +72,7 @@ func (s *service) GetDeckByID(ctx context.Context, userID string, id uint) (*dto
 func (s *service) UpdateDeck(ctx context.Context, userID string, id uint, body dto.UpdateDeckBody) (*dto.DeckResponse, *httpx.HTTPError) {
 	deck, err := s.repo.GetDeckByID(ctx, userID, id)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Deck not found", err)
-		}
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to get deck", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to get deck")
 	}
 
 	name := deck.Name
@@ -99,7 +91,7 @@ func (s *service) UpdateDeck(ctx context.Context, userID string, id uint, body d
 	}
 
 	if err := s.repo.UpdateDeck(ctx, userID, id, name, description, color); err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to update deck", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to update deck")
 	}
 	deck.Name = name
 	deck.Description = description
@@ -107,17 +99,14 @@ func (s *service) UpdateDeck(ctx context.Context, userID string, id uint, body d
 
 	dueCounts, err := s.repo.CountDueCardsByDecks(ctx, userID, []uint{deck.ID}, time.Now())
 	if err != nil {
-		return nil, httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to count due cards", err)
+		return nil, httpx.FromError(err, "[ERROR] Failed to count due cards")
 	}
 	return dto.ToDeck(deck, dueCounts[deck.ID]), nil
 }
 
 func (s *service) DeleteDeck(ctx context.Context, userID string, id uint) *httpx.HTTPError {
 	if err := s.repo.DeleteDeck(ctx, userID, id); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return httpx.NewError(http.StatusNotFound, "[NOT_FOUND] Deck not found", err)
-		}
-		return httpx.NewError(http.StatusInternalServerError, "[ERROR] Failed to delete deck", err)
+		return httpx.FromError(err, "[ERROR] Failed to delete deck")
 	}
 	return nil
 }

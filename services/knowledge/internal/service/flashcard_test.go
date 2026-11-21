@@ -35,13 +35,8 @@ func (f *fakeFlashcardRepository) GetFlashcardByID(_ context.Context, userID str
 	return f.card, f.cardErr
 }
 
-func (f *fakeFlashcardRepository) UpdateFlashcardSRS(_ context.Context, fc *model.Flashcard) error {
-	f.updatedSRS = fc
-	return f.err
-}
-
-func (f *fakeFlashcardRepository) CreateReviewLog(_ context.Context, log *model.FlashcardReviewLog) error {
-	f.reviewLog = log
+func (f *fakeFlashcardRepository) ReviewFlashcard(_ context.Context, fc *model.Flashcard, log *model.FlashcardReviewLog) error {
+	f.updatedSRS, f.reviewLog = fc, log
 	if f.reviewLogErr != nil {
 		return f.reviewLogErr
 	}

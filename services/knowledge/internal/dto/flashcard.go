@@ -15,7 +15,7 @@ type CreateDeckBody struct {
 	Color       *string `json:"color"`
 }
 
-// UpdateDeckBody là body cập nhật bộ thẻ (PATCH, mọi field đều tuỳ chọn).
+// UpdateDeckBody là body cập nhật bộ thẻ, mọi field đều tuỳ chọn.
 type UpdateDeckBody struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
@@ -34,6 +34,11 @@ type SaveWordToDecksBody struct {
 type ReviewCardBody struct {
 	Rating       string `json:"rating"       validate:"required,oneof=again hard good easy"`
 	ReviewTimeMs int    `json:"reviewTimeMs"`
+}
+
+// WordSaveStatusQuery là query ?wordId= của API trạng thái lưu từ.
+type WordSaveStatusQuery struct {
+	WordID uint `schema:"wordId" validate:"required"`
 }
 
 // UpdateFlashcardNoteBody là body cập nhật ghi chú của thẻ.
@@ -85,9 +90,6 @@ type Flashcard struct {
 	Word           *Word      `json:"word"`
 	CreatedAt      time.Time  `json:"createdAt"`
 }
-
-// FlashcardStudyItem là thẻ được lấy ra để ôn tập (alias Flashcard).
-type FlashcardStudyItem = Flashcard
 
 // FlashcardUserStats là thống kê tổng quan thẻ của người dùng.
 type FlashcardUserStats struct {

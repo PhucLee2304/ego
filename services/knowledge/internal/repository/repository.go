@@ -37,7 +37,6 @@ type Repository interface {
 	// Flashcard — Card
 	GetFlashcards(ctx context.Context, userID string, limit, offset int32) ([]*model.Flashcard, int64, error)
 	GetCardsByDeck(ctx context.Context, userID string, deckID uint, limit, offset int32) ([]*model.Flashcard, int64, error)
-	IsWordInDeck(ctx context.Context, userID string, deckID, wordID uint) (bool, error)
 	CreateFlashcard(ctx context.Context, flashcard *model.Flashcard) error
 	GetFlashcardByID(ctx context.Context, userID string, id uint) (*model.Flashcard, error)
 	GetWordSaveStatus(ctx context.Context, userID string, wordID uint) ([]uint, error)
@@ -45,12 +44,10 @@ type Repository interface {
 	GetAllDueCards(ctx context.Context, userID string, limit int, now time.Time) ([]*model.Flashcard, error)
 	DueFlashcardsForNotification(ctx context.Context, now time.Time, limit int) ([]*model.Flashcard, error)
 	MarkFlashcardNotified(ctx context.Context, id uint, dueAt time.Time) error
-	UpdateFlashcardSRS(ctx context.Context, fc *model.Flashcard) error
+	UpdateFlashcardNote(ctx context.Context, userID string, id uint, note *string) (*model.Flashcard, error)
+	SaveWordToDecks(ctx context.Context, userID string, wordID uint, deckIDs []uint, newDeckName string, note *string) error
+	ReviewFlashcard(ctx context.Context, fc *model.Flashcard, log *model.FlashcardReviewLog) error
 	DeleteFlashcard(ctx context.Context, userID string, id uint) error
-	UpdateDeckCardCount(ctx context.Context, deckID uint, delta int) error
-
-	// Flashcard — Review Log
-	CreateReviewLog(ctx context.Context, log *model.FlashcardReviewLog) error
 
 	// Flashcard — Stats
 	GetFlashcardStats(ctx context.Context, userID string) (*dto.FlashcardUserStats, error)
