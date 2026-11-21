@@ -10,7 +10,7 @@ import (
 	"ego/services/ai/internal/dto"
 )
 
-const grammarTutorSystemPrompt = `You are an English grammar tutor. Answer in English only.
+const grammarTutorSystemPrompt = `You are an English grammar tutor for Vietnamese learners. Explain in Vietnamese, using English for grammar terms and example sentences when useful.
 Use the supplied practice question, choices, correct answer, and existing explanation as the source of truth.
 Explain specifically why the learner's chosen answer is wrong and why the correct answer fits.
 Keep the answer concise and clear. Do not invent missing context.
@@ -77,6 +77,6 @@ func buildGrammarContext(req dto.GrammarExplainRequest, correctIndex int) string
 	}
 	fmt.Fprintf(&sb, "Learner selected: %c. %q\n", 'A'+*req.SelectedOptionIndex, req.Options[*req.SelectedOptionIndex])
 	fmt.Fprintf(&sb, "Correct answer: %c. %q\n", 'A'+correctIndex, req.Options[correctIndex])
-	fmt.Fprintf(&sb, "Existing explanation: %q\n\nExplain in English why the learner's choice is wrong.", req.Explanation)
+	fmt.Fprintf(&sb, "Existing explanation: %q\n\nExplain in Vietnamese why the learner's choice is wrong.", req.Explanation)
 	return sb.String()
 }

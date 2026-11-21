@@ -49,8 +49,8 @@ func TestExplainGrammarUsesSelectedAnswerAndExistingContext(t *testing.T) {
 			t.Errorf("missing context %q", part)
 		}
 	}
-	if !strings.Contains(llm.system, "Answer in English only") {
-		t.Fatal("English response instruction missing")
+	if !strings.Contains(llm.system, "Explain in Vietnamese") || !strings.Contains(llm.prompt, "Explain in Vietnamese") {
+		t.Fatal("Vietnamese response instruction missing")
 	}
 }
 

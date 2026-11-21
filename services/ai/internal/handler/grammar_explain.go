@@ -9,7 +9,7 @@ import (
 )
 
 // ExplainGrammar godoc
-// @Summary      Explain a grammar practice answer in English
+// @Summary      Explain a grammar practice answer in Vietnamese
 // @Description  Uses the selected answer, question, options, correct answer and existing explanation as context.
 // @Tags         AI
 // @Accept       json
